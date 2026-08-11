@@ -1,0 +1,518 @@
+' COTAS ABIGAIL - Prueba de cotas por caras del tanque
+' Regla externa: COTAS_CARAS_TANQUE_EXPERIMENTAL
+'
+' Crea cuatro hojas (FRONT, RIGHT, LEFT y BACK) del ensamble abierto.
+' En cada vista usa el punto visible mas cercano a la esquina inferior
+' izquierda como origen de cotas ordenadas (0,0), y acota los limites
+' inicial/final X/Y de cada componente visible.
+
+Sub Main()
+    Const kDrawingDocument As Integer = 12292
+    Const kAssemblyDocument As Integer = 12291
+    Const PREFIJO_HOJA As String = "TANQUE_DATUM_"
+
+    Dim titulo As String = "COTAS ABIGAIL - Prueba caras"
+    Dim invApp As Inventor.Application = ThisApplication
+
+    If invApp.ActiveDocument Is Nothing OrElse
+       invApp.ActiveDocument.DocumentType <> kDrawingDocument Then
+        System.Windows.Forms.MessageBox.Show(
+            "Abre el machote .dwg/.idw y dejalo activo.",
+            titulo,
+            System.Windows.Forms.MessageBoxButtons.OK,
+            System.Windows.Forms.MessageBoxIcon.Warning)
+        Exit Sub
+    End If
+
+    Dim plano As DrawingDocument = CType(invApp.ActiveDocument, DrawingDocument)
+    Dim ensamble As AssemblyDocument = ObtenerEnsamblePrincipal(invApp)
+
+    If ensamble Is Nothing Then
+        System.Windows.Forms.MessageBox.Show(
+            "No hay ningun ensamble (.iam) abierto en Inventor.",
+            titulo,
+            System.Windows.Forms.MessageBoxButtons.OK,
+            System.Windows.Forms.MessageBoxIcon.Warning)
+        Exit Sub
+    End If
+
+    Dim hojaBase As Sheet = plano.ActiveSheet
+    Dim screenAnterior As Boolean = True
+    Dim silentAnterior As Boolean = False
+
+    Try
+        screenAnterior = invApp.ScreenUpdating
+    Catch
+    End Try
+
+    Try
+        silentAnterior = invApp.SilentOperation
+    Catch
+    End Try
+
+    Dim totalVistas As Integer = 0
+    Dim totalCotas As Integer = 0
+    Dim totalComponentes As Integer = 0
+    Dim totalFallos As Integer = 0
+    Dim detalleFallos As String = ""
+
+    Try
+        invApp.SilentOperation = True
+        invApp.ScreenUpdating = False
+
+        hojaBase.Activate()
+        EliminarHojasAnteriores(plano, PREFIJO_HOJA)
+
+        Dim nombres() As String = {"FRONT", "RIGHT", "LEFT", "BACK"}
+        Dim orientaciones() As ViewOrientationTypeEnum = {
+            ViewOrientationTypeEnum.kFrontViewOrientation,
+            ViewOrientationTypeEnum.kRightViewOrientation,
+            ViewOrientationTypeEnum.kLeftViewOrientation,
+            ViewOrientationTypeEnum.kBackViewOrientation
+        }
+
+        For indice As Integer = 0 To nombres.Length - 1
+            Dim nombreCara As String = nombres(indice)
+
+            Try
+                Dim hoja As Sheet = hojaBase.CopyTo(plano)
+                hoja.Name = PREFIJO_HOJA & nombreCara
+                LimpiarVistas(hoja)
+                hoja.Activate()
+
+                Dim centro As Point2d = invApp.TransientGeometry.CreatePoint2d(
+                    hoja.Width * 0.58,
+                    hoja.Height * 0.58)
+
+                Dim vista As DrawingView = hoja.DrawingViews.AddBaseView(
+                    ensamble,
+                    centro,
+                    1.0,
+                    orientaciones(indice),
+                    DrawingViewStyleEnum.kHiddenLineRemovedDrawingViewStyle)
+
+                vista.Name = "TANQUE_" & nombreCara
+                plano.Update()
+                AjustarVista(vista, hoja, invApp.TransientGeometry)
+                plano.Update()
+
+                Dim resultado As ResultadoCotas = AcotarVistaPorComponentes(
+                    hoja,
+                    vista,
+                    ensamble,
+                    invApp.TransientGeometry)
+
+                totalVistas += 1
+                totalCotas += resultado.Cotas
+                totalComponentes += resultado.Componentes
+                totalFallos += resultado.Fallos
+
+                If resultado.Mensaje <> "" Then
+                    detalleFallos &= nombreCara & ": " & resultado.Mensaje & vbCrLf
+                End If
+
+                plano.Update()
+                invApp.UserInterfaceManager.DoEvents()
+
+            Catch ex As Exception
+                totalFallos += 1
+                detalleFallos &= nombreCara & ": " & ex.Message & vbCrLf
+            End Try
+        Next
+
+        hojaBase.Activate()
+        plano.Update()
+
+    Finally
+        Try
+            invApp.ScreenUpdating = screenAnterior
+        Catch
+        End Try
+
+        Try
+            invApp.SilentOperation = silentAnterior
+        Catch
+        End Try
+    End Try
+
+    ' El lanzador Python valida las cuatro hojas, exporta los JPG y muestra
+    ' el resultado final. Este motor no abre dialogos durante el proceso.
+End Sub
+
+
+Function ObtenerEnsamblePrincipal(invApp As Inventor.Application) As AssemblyDocument
+    Dim mejor As AssemblyDocument = Nothing
+    Dim mayorCantidad As Integer = -1
+
+    For Each documento As Document In invApp.Documents
+        Try
+            If documento.DocumentType = DocumentTypeEnum.kAssemblyDocumentObject Then
+                Dim candidato As AssemblyDocument = CType(documento, AssemblyDocument)
+                Dim cantidad As Integer =
+                    candidato.ComponentDefinition.Occurrences.AllLeafOccurrences.Count
+
+                ' Si hay subensambles abiertos, normalmente el ensamble principal
+                ' es el que contiene la mayor cantidad de ocurrencias hoja.
+                If cantidad > mayorCantidad Then
+                    mayorCantidad = cantidad
+                    mejor = candidato
+                End If
+            End If
+        Catch
+        End Try
+    Next
+
+    Return mejor
+End Function
+
+
+Sub EliminarHojasAnteriores(plano As DrawingDocument, prefijo As String)
+    For indice As Integer = plano.Sheets.Count To 1 Step -1
+        Try
+            Dim hoja As Sheet = plano.Sheets.Item(indice)
+            If hoja.Name.StartsWith(prefijo, StringComparison.OrdinalIgnoreCase) Then
+                hoja.Delete()
+            End If
+        Catch
+        End Try
+    Next
+End Sub
+
+
+Sub LimpiarVistas(hoja As Sheet)
+    For indice As Integer = hoja.DrawingViews.Count To 1 Step -1
+        Try
+            hoja.DrawingViews.Item(indice).Delete()
+        Catch
+        End Try
+    Next
+End Sub
+
+
+Sub AjustarVista(vista As DrawingView, hoja As Sheet, tg As TransientGeometry)
+    If vista.Width <= 0 OrElse vista.Height <= 0 Then Exit Sub
+
+    ' Se reserva espacio a la izquierda y abajo para las cotas ordenadas.
+    Dim anchoDisponible As Double = hoja.Width * 0.63
+    Dim altoDisponible As Double = hoja.Height * 0.63
+    Dim factor As Double = Math.Min(
+        anchoDisponible / vista.Width,
+        altoDisponible / vista.Height)
+
+    factor = Math.Max(0.01, Math.Min(factor * 0.92, 2.0))
+    vista.Scale = vista.Scale * factor
+    vista.Position = tg.CreatePoint2d(hoja.Width * 0.60, hoja.Height * 0.60)
+End Sub
+
+
+Function AcotarVistaPorComponentes(
+    hoja As Sheet,
+    vista As DrawingView,
+    ensamble As AssemblyDocument,
+    tg As TransientGeometry) As ResultadoCotas
+
+    Dim resultado As New ResultadoCotas()
+    Dim grupos As New System.Collections.Generic.List(Of LimitesComponente)
+    Dim todos As New System.Collections.Generic.List(Of PuntoCurva)
+
+    Dim ocurrencias = ensamble.ComponentDefinition.Occurrences.AllLeafOccurrences
+
+    For indice As Integer = 1 To ocurrencias.Count
+        Dim ocurrencia As ComponentOccurrence = Nothing
+
+        Try
+            ocurrencia = ocurrencias.Item(indice)
+            If ocurrencia.Suppressed Then Continue For
+
+            Dim curvas As DrawingCurvesEnumerator = vista.DrawingCurves(ocurrencia)
+            If curvas Is Nothing Then Continue For
+
+            Dim puntos As New System.Collections.Generic.List(Of PuntoCurva)
+
+            For Each curva As DrawingCurve In curvas
+                AgregarPuntosVisibles(curva, puntos)
+            Next
+
+            If puntos.Count = 0 Then Continue For
+
+            Dim limites As New LimitesComponente()
+            limites.Nombre = ocurrencia.Name
+            limites.MinX = PuntoMinimo(puntos, True)
+            limites.MaxX = PuntoMaximo(puntos, True)
+            limites.MinY = PuntoMinimo(puntos, False)
+            limites.MaxY = PuntoMaximo(puntos, False)
+
+            grupos.Add(limites)
+            todos.AddRange(puntos)
+            resultado.Componentes += 1
+
+        Catch
+            resultado.Fallos += 1
+        End Try
+    Next
+
+    If todos.Count = 0 Then
+        resultado.Mensaje = "No se encontraron curvas de componentes visibles."
+        Return resultado
+    End If
+
+    ' El datum se fija al punto real de geometria mas cercano al extremo
+    ' inferior izquierdo de todo lo visible en la vista.
+    Dim minGlobalX As Double = Double.MaxValue
+    Dim minGlobalY As Double = Double.MaxValue
+
+    For Each punto As PuntoCurva In todos
+        minGlobalX = Math.Min(minGlobalX, punto.Punto.X)
+        minGlobalY = Math.Min(minGlobalY, punto.Punto.Y)
+    Next
+
+    Dim origen As PuntoCurva = Nothing
+    Dim mejorDistancia As Double = Double.MaxValue
+
+    For Each punto As PuntoCurva In todos
+        Dim dx As Double = punto.Punto.X - minGlobalX
+        Dim dy As Double = punto.Punto.Y - minGlobalY
+        Dim distancia As Double = dx * dx + dy * dy
+
+        If distancia < mejorDistancia Then
+            mejorDistancia = distancia
+            origen = punto
+        End If
+    Next
+
+    If origen Is Nothing Then
+        resultado.Mensaje = "No se pudo definir el origen (0,0)."
+        Return resultado
+    End If
+
+    Dim intentOrigen As GeometryIntent = Nothing
+
+    Try
+        intentOrigen = hoja.CreateGeometryIntent(origen.Curva, origen.Punto)
+
+        If Not vista.HasOriginIndicator Then
+            vista.CreateOriginIndicator(intentOrigen)
+        Else
+            vista.OriginIndicator.Intent = intentOrigen
+        End If
+    Catch ex As Exception
+        resultado.Mensaje = "Inventor rechazo el origen: " & ex.Message
+        resultado.Fallos += 1
+        Return resultado
+    End Try
+
+    Dim objetivosX As New System.Collections.Generic.List(Of PuntoCurva)
+    Dim objetivosY As New System.Collections.Generic.List(Of PuntoCurva)
+    Dim tolerancia As Double = Math.Max(0.02, Math.Min(vista.Width, vista.Height) * 0.001)
+
+    For Each limites As LimitesComponente In grupos
+        AgregarUnico(objetivosX, limites.MinX, True, tolerancia, origen)
+        AgregarUnico(objetivosX, limites.MaxX, True, tolerancia, origen)
+        AgregarUnico(objetivosY, limites.MinY, False, tolerancia, origen)
+        AgregarUnico(objetivosY, limites.MaxY, False, tolerancia, origen)
+    Next
+
+    objetivosX.Sort(Function(a, b) a.Punto.X.CompareTo(b.Punto.X))
+    objetivosY.Sort(Function(a, b) a.Punto.Y.CompareTo(b.Punto.Y))
+
+    Dim cotas As OrdinateDimensions = hoja.DrawingDimensions.OrdinateDimensions
+
+    For indice As Integer = 0 To objetivosX.Count - 1
+        Dim objetivo As PuntoCurva = objetivosX(indice)
+
+        Try
+            Dim intent As GeometryIntent =
+                hoja.CreateGeometryIntent(objetivo.Curva, objetivo.Punto)
+
+            Dim nivel As Integer = indice Mod 4
+            Dim posicion As Point2d = tg.CreatePoint2d(
+                objetivo.Punto.X,
+                vista.Bottom - 1.5 - nivel * 0.65)
+
+            cotas.Add(
+                intent,
+                posicion,
+                DimensionTypeEnum.kHorizontalDimensionType)
+
+            resultado.Cotas += 1
+        Catch
+            resultado.Fallos += 1
+        End Try
+    Next
+
+    For indice As Integer = 0 To objetivosY.Count - 1
+        Dim objetivo As PuntoCurva = objetivosY(indice)
+
+        Try
+            Dim intent As GeometryIntent =
+                hoja.CreateGeometryIntent(objetivo.Curva, objetivo.Punto)
+
+            Dim nivel As Integer = indice Mod 4
+            Dim posicion As Point2d = tg.CreatePoint2d(
+                vista.Left - 1.5 - nivel * 0.65,
+                objetivo.Punto.Y)
+
+            cotas.Add(
+                intent,
+                posicion,
+                DimensionTypeEnum.kVerticalDimensionType)
+
+            resultado.Cotas += 1
+        Catch
+            resultado.Fallos += 1
+        End Try
+    Next
+
+    Return resultado
+End Function
+
+
+Sub AgregarPuntosVisibles(
+    curva As DrawingCurve,
+    destino As System.Collections.Generic.List(Of PuntoCurva))
+
+    Try
+        ' Solo se consideran segmentos realmente visibles en HLR.
+        If curva.Segments.Count = 0 Then Exit Sub
+
+        For Each segmento As DrawingCurveSegment In curva.Segments
+            Try
+                If segmento.StartPoint IsNot Nothing Then
+                    destino.Add(New PuntoCurva(curva, segmento.StartPoint))
+                End If
+            Catch
+            End Try
+
+            Try
+                If segmento.EndPoint IsNot Nothing Then
+                    destino.Add(New PuntoCurva(curva, segmento.EndPoint))
+                End If
+            Catch
+            End Try
+        Next
+
+        ' Ayuda con circulos/arcos cuyos segmentos no exponen ambos extremos.
+        Try
+            If curva.MidPoint IsNot Nothing Then
+                destino.Add(New PuntoCurva(curva, curva.MidPoint))
+            End If
+        Catch
+        End Try
+
+        Try
+            If curva.CenterPoint IsNot Nothing Then
+                destino.Add(New PuntoCurva(curva, curva.CenterPoint))
+            End If
+        Catch
+        End Try
+
+        ' Un circulo completo no tiene StartPoint/EndPoint. Sus cuatro puntos
+        ' cardinales permiten medir correctamente el inicio y final del componente.
+        Try
+            If TypeOf curva.Geometry Is Circle2d Then
+                Dim circulo As Circle2d = CType(curva.Geometry, Circle2d)
+                Dim tg As TransientGeometry = curva.Application.TransientGeometry
+                Dim cx As Double = circulo.Center.X
+                Dim cy As Double = circulo.Center.Y
+                Dim radio As Double = circulo.Radius
+
+                destino.Add(New PuntoCurva(
+                    curva, tg.CreatePoint2d(cx - radio, cy)))
+                destino.Add(New PuntoCurva(
+                    curva, tg.CreatePoint2d(cx + radio, cy)))
+                destino.Add(New PuntoCurva(
+                    curva, tg.CreatePoint2d(cx, cy - radio)))
+                destino.Add(New PuntoCurva(
+                    curva, tg.CreatePoint2d(cx, cy + radio)))
+            End If
+        Catch
+        End Try
+    Catch
+    End Try
+End Sub
+
+
+Function PuntoMinimo(
+    puntos As System.Collections.Generic.List(Of PuntoCurva),
+    usarX As Boolean) As PuntoCurva
+
+    Dim mejor As PuntoCurva = puntos(0)
+
+    For Each candidato As PuntoCurva In puntos
+        Dim valor As Double = If(usarX, candidato.Punto.X, candidato.Punto.Y)
+        Dim actual As Double = If(usarX, mejor.Punto.X, mejor.Punto.Y)
+        If valor < actual Then mejor = candidato
+    Next
+
+    Return mejor
+End Function
+
+
+Function PuntoMaximo(
+    puntos As System.Collections.Generic.List(Of PuntoCurva),
+    usarX As Boolean) As PuntoCurva
+
+    Dim mejor As PuntoCurva = puntos(0)
+
+    For Each candidato As PuntoCurva In puntos
+        Dim valor As Double = If(usarX, candidato.Punto.X, candidato.Punto.Y)
+        Dim actual As Double = If(usarX, mejor.Punto.X, mejor.Punto.Y)
+        If valor > actual Then mejor = candidato
+    Next
+
+    Return mejor
+End Function
+
+
+Sub AgregarUnico(
+    lista As System.Collections.Generic.List(Of PuntoCurva),
+    candidato As PuntoCurva,
+    usarX As Boolean,
+    tolerancia As Double,
+    origen As PuntoCurva)
+
+    If candidato Is Nothing Then Exit Sub
+
+    Dim valor As Double = If(usarX, candidato.Punto.X, candidato.Punto.Y)
+    Dim valorOrigen As Double = If(usarX, origen.Punto.X, origen.Punto.Y)
+
+    ' No se crea una cota 0 duplicada sobre el indicador.
+    If Math.Abs(valor - valorOrigen) <= tolerancia Then Exit Sub
+
+    For Each existente As PuntoCurva In lista
+        Dim valorExistente As Double =
+            If(usarX, existente.Punto.X, existente.Punto.Y)
+
+        If Math.Abs(valor - valorExistente) <= tolerancia Then Exit Sub
+    Next
+
+    lista.Add(candidato)
+End Sub
+
+
+Class PuntoCurva
+    Public Curva As DrawingCurve
+    Public Punto As Point2d
+
+    Public Sub New(curvaEntrada As DrawingCurve, puntoEntrada As Point2d)
+        Curva = curvaEntrada
+        Punto = puntoEntrada
+    End Sub
+End Class
+
+
+Class LimitesComponente
+    Public Nombre As String = ""
+    Public MinX As PuntoCurva
+    Public MaxX As PuntoCurva
+    Public MinY As PuntoCurva
+    Public MaxY As PuntoCurva
+End Class
+
+
+Class ResultadoCotas
+    Public Cotas As Integer = 0
+    Public Componentes As Integer = 0
+    Public Fallos As Integer = 0
+    Public Mensaje As String = ""
+End Class

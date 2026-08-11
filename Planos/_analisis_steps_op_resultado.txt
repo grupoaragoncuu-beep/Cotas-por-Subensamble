@@ -1,0 +1,246 @@
+OP root OK: ORDENES DE PRODUCCION | parent=Departamentos _antes TIK
+Ordenes encontradas: 45
+
+Resultado: scan=50 con_step_analizado=30 sin_step=15
+
+=== Marcas/familias en nombre de OP ===
+  SWE: 14
+  OTC: 12
+  VANTRAN: 7
+  GIGA: 3
+  SUNBELT: 3
+  PTT: 2
+  ORDENES: 1
+  MACHOTE: 1
+  GAE: 1
+  COMPONENTES: 1
+
+=== Rutas (2 niveles) ===
+  10. Solidos/TANQUE: 5
+  10. Solidos/62154-1246-A01.STEP: 2
+  10. Solidos/STD: 2
+  1965 - VANTRAN 06-30-2381 x63/10. Solidos: 1
+  10. Solidos/#1: 1
+  10. Solidos/AS0004720200_ASM_REV_A.stp: 1
+  10. Solidos/62201-1246-A01.STEP: 1
+  10. Solidos/62200-1246-A01 Step 3D.STEP: 1
+  10. Solidos/62175-1246-A01.STEP: 1
+  10. Solidos/ENSAMBLE COMPLETO.stp: 1
+  10. Solidos/ENSAMBLE COMPLETO GIGA L4.stp: 1
+  10. Solidos/GIGA L3 TANK - GRUPO ARGA REV.6.stp: 1
+  10. Solidos/62147-1246-A01.STEP: 1
+  10. Solidos/62140-1246-A01.STEP: 1
+  10. Solidos/62178-1246-A01 Step 3D.STEP: 1
+
+=== Buckets PRODUCT ===
+  OTRO: 956
+  ACCESORIO: 110
+  SEGMENTO: 52
+  CASCO: 47
+
+=== Keywords ===
+  SEGMENT: 104
+  SEGMENTO: 104
+  SOLERA: 36
+  PAD: 28
+  JACK: 24
+  PIPE: 23
+  PATCH: 22
+  TAPA: 21
+  FLANGE: 20
+  PLACA: 20
+  BUSHING: 17
+  PLATE: 13
+  COVER: 10
+  LUG: 9
+  LIFT: 9
+  BASE DE: 8
+  PARKING: 6
+  SWITCH: 5
+  BOSS: 5
+  GROUND: 4
+  TIERRA: 4
+  GAUGE: 4
+  HINGE: 4
+  FLANE: 3
+  NIPPLE: 3
+  HALF: 3
+  BRACKET: 3
+  BOTTOM: 2
+  DOOR: 2
+  TOP COVER: 1
+  HANGER: 1
+  HANDHOLE: 1
+  PORT: 1
+
+=== PRODUCT repetidos entre tanques ===
+  [7x] HW-FW-01
+  [6x] SF-HC-01_4452K212
+  [6x] SP-788
+  [6x] SP-792
+  [6x] HW-CN-01
+  [6x] SP-851
+  [5x] SP-752
+  [5x] SP-855
+  [5x] SP-852
+  [5x] SF-NP-03_7753K124
+  [5x] SP-800
+  [5x] SP-702
+  [5x] SP-742
+  [4x] MODELO VANTRAN
+  [4x] ASSEMBLY SEGMENTO 1
+  [4x] PLATE FOR SEG. 1
+  [4x] PLACA SEGMENTO 1
+  [4x] STAINLESS GROUND PAD
+  [4x] PIPE FLANGE 0.250
+  [4x] PIPE FLANGE 1
+  [4x] TIERRA REDONDA
+  [4x] BUSHING PATCH TAPA
+  [4x] BUSHING PATCH TAPA_1
+  [4x] 1/2" X 1"
+  [4x] SOLERA SEGMENTO 1
+  [4x] ASSEMBLY SEGMENTO 1_1
+  [4x] ASSEMBLY SEGMENTO 2
+  [4x] PLATE FOR SEG. 2
+  [4x] PLACA SEGMENTO 2
+  [4x] VT-5657-R1-D3000 LIFTING LUG WITH CHAIN RETAINER
+  [4x] JACKING PADS ASSEMBLY
+  [4x] JACKING PADS
+  [4x] SOLERA JACKING PAD
+  [4x] ASSEMBLY SEGMENTO 1_2
+  [4x] ASSEMBLY SEGMENTO 3
+  [4x] PLACA SEGMENTO 3
+  [4x] ASSEMBLY SEGMENTO 1_3
+  [4x] ASSEMBLY SEGMENTO 4
+  [4x] PLACA SEGMENTO 4
+  [4x] PIPE FLANGE 0.500
+  [4x] SOLERA SEGMENTO 1_1
+  [4x] OIL GAUGE BOSS
+  [4x] BUSHING PATCH TAPA 2 S4
+  [4x] VT-5657-R1-D3000 LIFTING LUG WITH CHAIN RETAINER_1
+  [4x] JACKING PADS ASSEMBLY_1
+  [4x] JACKING PADS_1
+  [4x] SOLERA JACKING PAD_1
+  [4x] TOP_COVER_ASSEMBLY1
+  [4x] PIEZA2
+  [4x] TOP_COVER_1
+  [4x] INSPECTION_PLATE
+  [4x] BASE DE SOLERAS
+  [4x] MARCO SOLERA
+  [4x] MARCO DE SOLERAS
+  [4x] BASE VANTRAN SOLERA ANSI AISC RECTANGULAR 1X1.2
+  [4x] 2
+  [4x] AISC 1X1_2 1753710248467
+  [4x] AISC 1X1_2 1753710248543
+  [4x] AISC 1X1_2 1753710248611
+  [4x] AISC 1X1_2 1753710248681
+
+=== Muestras diversas ===
+
+OP: Ordenes de Produccion - Producidas 2026
+  ~ORDENES | MODELO VANTRAN 06-30-2381.stp (5.09MB)
+  ruta: 1965 - VANTRAN 06-30-2381 x63\10. Solidos\TANQUE\MODELO VANTRAN 06-30-2381.stp
+  products=0 buckets={}
+  preview: []
+
+OP: GAE 783 a 798 - GIGA FLUID STACK
+  ~GAE | GIGA FLUID STACK METAL.stp (16.8MB)
+  ruta: 10. Solidos\#1\OLD\GIGA FLUID STACK METAL.stp
+  products=0 buckets={}
+  preview: []
+
+OP: 2230 - 4720200 PTT Raeford Tanks x2
+  ~PTT | AS0004720200_ASM_REV_A.stp (5.48MB)
+  ruta: 10. Solidos\AS0004720200_ASM_REV_A.stp
+  products=89 buckets={'OTRO': 88, 'ACCESORIO': 1}
+  acces: ['RAD_FLANGE']
+  preview: ['AS0004714201', 'AS0004714202', 'AS0004714200_ASM', 'AS0004714301', 'AS0004714302', '330501005', 'STD004103600', 'AS0004714701', 'AS0004714700_ASM', 'AS0004714303', 'AS0004714304', 'STD01410120P', 'STD01410015P', 'STD01410011P', 'STD01410090P', 'STD01410250P', '330501001', 'AS0004714305']
+
+OP: 2229- VANTRAN 251008 x11
+  ~VANTRAN | MODELO VANTRAN 251007.stp (3.05MB)
+  ruta: 10. Solidos\TANQUE\MODELO VANTRAN 251007.stp
+  products=72 buckets={'OTRO': 22, 'SEGMENTO': 13, 'CASCO': 10, 'ACCESORIO': 27}
+  segs: ['Assembly Segmento 1', 'Placa Segmento 1', 'Solera Segmento 1', 'Assembly Segmento 1_1', 'Assembly Segmento 2', 'Placa Segmento 2', 'Assembly Segmento 1_2', 'Assembly Segmento 3']
+  acces: ['STAINLESS GROUND PAD', 'PIPE FLANGE 0.250', 'PIPE FLANGE 1', 'TIERRA REDONDA', 'BUSHING PATCH TAPA', 'BUSHING PATCH TAPA_1', 'BUSHING PATCH TAPA 2', "VT-6061-.375'' Pipe Flange", 'PIPE FLANE 0.375', 'Parking Stand w base']
+  preview: ['MODELO VANTRAN', 'Assembly Segmento 1', 'PLATE FOR SEG. 1', 'Placa Segmento 1', 'STAINLESS GROUND PAD', 'PIPE FLANGE 0.250', 'PIPE FLANGE 1', 'TIERRA REDONDA', 'BUSHING PATCH TAPA', 'BUSHING PATCH TAPA_1', 'BUSHING PATCH TAPA 2', "VT-6061-.375'' Pipe Flange", 'PIPE FLANE 0.375', 'Parking Stand w base', 'H.V parking Std', 'SWITCH PATCH 1', '1/2" X 1"', 'Solera Segmento 1']
+
+OP: 2225 & 2226 - VANTRAN 261176 x21
+  ~VANTRAN | MODELO VANTRAN 261176.stp (0.86MB)
+  ruta: 10. Solidos\TANQUE\MODELO VANTRAN 261176.stp
+  products=67 buckets={'OTRO': 22, 'SEGMENTO': 13, 'CASCO': 10, 'ACCESORIO': 22}
+  segs: ['Assembly Segmento 1', 'Placa Segmento 1', 'Solera Segmento 1', 'Assembly Segmento 1_1', 'Assembly Segmento 2', 'Placa Segmento 2', 'Assembly Segmento 1_2', 'Assembly Segmento 3']
+  acces: ['PIPE FLANGE 0.500', 'STAINLESS GROUND PAD', 'PIPE FLANGE 0.250', 'OIL GAUGE BOSS', 'PIPE FLANGE 1', 'TIERRA REDONDA', "VT-6061-.375'' Pipe Flange", 'PIPE FLANE 0.375', 'VT-5676-H.V Parking Stands', 'BUSHING PATCH TAPA']
+  preview: ['MODELO VANTRAN', 'Assembly Segmento 1', 'PLATE FOR SEG. 1', 'Placa Segmento 1', 'PIPE FLANGE 0.500', 'STAINLESS GROUND PAD', 'PIPE FLANGE 0.250', 'OIL GAUGE BOSS', 'PIPE FLANGE 1', 'TIERRA REDONDA', "VT-6061-.375'' Pipe Flange", 'PIPE FLANE 0.375', 'VT-5676-H.V Parking Stands', 'BUSHING PATCH TAPA', 'BUSHING PATCH TAPA 2', '1/2" X 1"', 'Solera Segmento 1', 'SWITCH PATCH 1']
+
+OP: 2211 - OTC 62201 TANK
+  ~OTC | 62201-1246-A01.STEP (10.64MB)
+  ruta: 10. Solidos\62201-1246-A01.STEP
+  products=58 buckets={'OTRO': 58}
+  preview: ['62201-1248-A06', '62201-1251-A03', '62134-1248-A42', '62201-1248-A17', '62201-1247-P01', 'SP-767', '62201-1247-P06', '0.25 STUD', '62201-1251-P06_ROD', '62201-1251-P04', '62201-1251-P03_Default<As Machined>', '62201-1254-A28', '62201-1248-A05', 'SF-HC-01_4452K212', '62201-1250-P01', '62201-1248-P70', 'SP-752', '62201-1248-P143_Default<As Machined>']
+
+OP: 2208 - OTC 62200 TANK
+  ~OTC | 62200-1246-A01 Step 3D.STEP (4.75MB)
+  ruta: 10. Solidos\62200-1246-A01 Step 3D.STEP
+  products=131 buckets={'OTRO': 130, 'ACCESORIO': 1}
+  acces: ['62200-1248-P35_Bottom Flange']
+  preview: ['62200-1253-P01', '62200-1260-A03_60.00', 'SP-752', '62200-1260-P08', '62200-1248-P35_Bottom Flange', '62200-1248-P67', '62200-1247-P03', '62200-1248-P22', '62200-1247-A05', '62200-1248-P17', '62200-1248-P49', 'SP-710', '62200-1248-P15', '62200-1251-P03_Default<As Machined>', '62200-1248-P54', 'SP-766', '62200-1251-P08_TAB', 'SP-751']
+
+OP: 2179 - VANTRAN 251007 x11
+  ~VANTRAN | MODELO VANTRAN 251007.stp (3.05MB)
+  ruta: 10. Solidos\TANQUE\MODELO VANTRAN 251007.stp
+  products=72 buckets={'OTRO': 22, 'SEGMENTO': 13, 'CASCO': 10, 'ACCESORIO': 27}
+  segs: ['Assembly Segmento 1', 'Placa Segmento 1', 'Solera Segmento 1', 'Assembly Segmento 1_1', 'Assembly Segmento 2', 'Placa Segmento 2', 'Assembly Segmento 1_2', 'Assembly Segmento 3']
+  acces: ['STAINLESS GROUND PAD', 'PIPE FLANGE 0.250', 'PIPE FLANGE 1', 'TIERRA REDONDA', 'BUSHING PATCH TAPA', 'BUSHING PATCH TAPA_1', 'BUSHING PATCH TAPA 2', "VT-6061-.375'' Pipe Flange", 'PIPE FLANE 0.375', 'Parking Stand w base']
+  preview: ['MODELO VANTRAN', 'Assembly Segmento 1', 'PLATE FOR SEG. 1', 'Placa Segmento 1', 'STAINLESS GROUND PAD', 'PIPE FLANGE 0.250', 'PIPE FLANGE 1', 'TIERRA REDONDA', 'BUSHING PATCH TAPA', 'BUSHING PATCH TAPA_1', 'BUSHING PATCH TAPA 2', "VT-6061-.375'' Pipe Flange", 'PIPE FLANE 0.375', 'Parking Stand w base', 'H.V parking Std', 'SWITCH PATCH 1', '1/2" X 1"', 'Solera Segmento 1']
+
+OP: 2099 - OTC 62155 TANK
+  ~OTC | 62154-1246-A01.STEP (24.26MB)
+  ruta: 10. Solidos\62154-1246-A01.STEP
+  products=28 buckets={'OTRO': 28}
+  preview: ['62154-1260-P02', '62154-1247-A01', '62154-1247-P06', 'L871.CT09A-067-152', 'SF-HC-01_4452K212', '62154-1247-P09', '62154-1260-P01', '62154-1248-P35', '62154-1252-A01', '62154-1248-P54', '62154-1247-P17_Default<As Machined>', '62154-1252-P06', '62154-1248-A18', '62154-1248-P78_DefaultSM-FLAT-PATTERN', '62154-1248-P68_Default<As Machined>', '62154-1248-P05', '62154-1248-P84', '62154-1251-P06_ROD']
+
+OP: 2098 - OTC 62175 TANK
+  ~OTC | 62175-1246-A01.STEP (8.87MB)
+  ruta: 10. Solidos\62175-1246-A01.STEP
+  products=64 buckets={'OTRO': 64}
+  preview: ['SP-799', '62175-1260-A02', '62175-1248-P64', '62175-1248-P10', '62175-1260-P03', 'SF-NP-03_7753K124', 'HW-FW-01', '62175-1260-A04', '62175-1254-P02', '62175-1248-P03_Default<As Machined>', '62175-1248-A12', '62175-1248-A22', '62175-1248-A05', '62175-1253-P07', 'SP-851', '62175-1251-P06_ROD', 'SP-704', '62175-1252-P01']
+
+OP: 2097 - VANTRAN 25325 (x17)
+  ~VANTRAN | Tank-C.STEP (0.18MB)
+  ruta: 10. Solidos\TANQUE\Tank-C.STEP
+  products=1 buckets={'OTRO': 1}
+  preview: ['Tank-C']
+
+OP: 2094 - VANTRAN 25349 (x18)
+  ~VANTRAN | MODELO VANTRAN 25349.stp (0.8MB)
+  ruta: 10. Solidos\TANQUE\MODELO VANTRAN 25349.stp
+  products=65 buckets={'OTRO': 22, 'SEGMENTO': 13, 'CASCO': 10, 'ACCESORIO': 20}
+  segs: ['Assembly Segmento 1', 'Placa Segmento 1', 'Solera Segmento 1', 'Assembly Segmento 1_1', 'Assembly Segmento 2', 'Placa Segmento 2', 'Assembly Segmento 1_2', 'Assembly Segmento 3']
+  acces: ['PIPE FLANGE 0.500', 'STAINLESS GROUND PAD', 'PIPE HALF NIPPLE 2', 'TIERRA REDONDA', 'BUSHING PATCH TAPA', 'Specialty Switch Boss', 'VT-5676-H.V Parking Stands', 'OIL GAUGE BOSS', 'PIPE FLANGE 0.250', 'PIPE FLANGE 1']
+  preview: ['MODELO VANTRAN', 'Assembly Segmento 1', 'PLATE FOR SEG. 1', 'Placa Segmento 1', 'PIPE FLANGE 0.500', 'STAINLESS GROUND PAD', 'PIPE HALF NIPPLE 2', 'TIERRA REDONDA', 'BUSHING PATCH TAPA', 'Specialty Switch Boss', 'VT-5676-H.V Parking Stands', 'OIL GAUGE BOSS', '1/2" X 1"', 'Solera Segmento 1', 'PIPE FLANGE 0.250', 'PIPE FLANGE 1', 'Assembly Segmento 1_1', 'Assembly Segmento 2']
+
+OP: 2086 - SWE TNK.1PH-0093 x5
+  ~SWE | TAPA ENSAMBLE.STEP (0.21MB)
+  ruta: 10. Solidos\STD\STEP\TAPA ENSAMBLE.STEP
+  products=4 buckets={'OTRO': 2, 'CASCO': 2}
+  preview: ['CANAL', 'TAPA', 'TOPE', 'TAPA ENSAMBLE']
+
+OP: 2085 - GIGA L5 TANK & CABINET (x6)
+  ~GIGA | ENSAMBLE COMPLETO.stp (8.71MB)
+  ruta: 10. Solidos\ENSAMBLE COMPLETO.stp
+  products=0 buckets={}
+  preview: []
+
+OP: 1885 - SUNBELT 5,000KVA x10
+  ~SUNBELT | SB376 5000kva.stp (8.24MB)
+  ruta: 10. Solidos\SB376 5000kva.stp
+  products=0 buckets={}
+  preview: []
+
+=== QUE DEBE TOMAR EN CUENTA COTAS ABIGAIL ===
+A) Diversidad de cliente/familia: no hardcode Vantran ni 'Assembly Segmento N'.
+B) Ruta real tipica existe (10. Solidos/TANQUE) pero el STEP interno varia mucho.
+C) Accesorios: flange/nipple/pad/lug/ground/gauge/manway/jack/parking/valve/patch/pipe...
+D) Casco: shell/plate/wall/segmento/tapa/cover/solera/base -> NO acotar.
+E) Muchos PRODUCT son codigos opacos (VT-####, numeros) -> catalogo del segmento abierto + profundidad 3D.
+F) Elegir segmento por 'mas enfrente' a la camara, no por indice 1..4.

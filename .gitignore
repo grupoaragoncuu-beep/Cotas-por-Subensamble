@@ -1,0 +1,28 @@
+# Build / packaging artifacts (regenerables)
+Planos/dist/
+Planos/build/
+**/__pycache__/
+*.py[cod]
+*.spec.bak
+*.egg-info/
+
+# AutoCAD / Inventor temp locks
+~$*
+*.tmp
+**/OldVersions/
+
+# Local IDE / OS
+.vscode/
+.cursor/
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Env / secrets
+.env
+.env.*
+*.pem
+credentials.json
+
+# Duplicate archive of Planos/ (folder already versioned)
+Planos.zip

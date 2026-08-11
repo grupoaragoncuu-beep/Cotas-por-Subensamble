@@ -1,0 +1,131 @@
+﻿' COTAS ABIGAIL - Generar planos completos
+' Regla externa: COTAS_ILOGIC_ABIGAIL
+
+Sub Main()
+    Const kDrawingDocument As Integer = 12292
+    Const planosDirInstalado As String = "c:\Proyectos\COTAS ABIGAIL\COTAS ABIGAIL\Planos"
+
+    Dim invApp As Inventor.Application = ThisApplication
+    Dim titulo As String = "COTAS ABIGAIL"
+
+    If invApp.ActiveDocument Is Nothing Then
+        System.Windows.Forms.MessageBox.Show(
+            "Abre un plano (.idw / .dwg) y dejalo como ventana activa.",
+            titulo,
+            System.Windows.Forms.MessageBoxButtons.OK,
+            System.Windows.Forms.MessageBoxIcon.Warning)
+        Exit Sub
+    End If
+
+    If invApp.ActiveDocument.DocumentType <> kDrawingDocument Then
+        System.Windows.Forms.MessageBox.Show(
+            "El documento activo debe ser un plano de dibujo (.idw / .dwg).",
+            titulo,
+            System.Windows.Forms.MessageBoxButtons.OK,
+            System.Windows.Forms.MessageBoxIcon.Warning)
+        Exit Sub
+    End If
+
+    If String.IsNullOrWhiteSpace(invApp.ActiveDocument.FullDocumentName) Then
+        System.Windows.Forms.MessageBox.Show(
+            "Guarda el plano antes de ejecutar (necesario para exportar JPG).",
+            titulo,
+            System.Windows.Forms.MessageBoxButtons.OK,
+            System.Windows.Forms.MessageBoxIcon.Warning)
+        Exit Sub
+    End If
+
+    ' --- Resolver carpeta Planos ---
+    Dim planosDirFinal As String = planosDirInstalado
+
+    If String.IsNullOrWhiteSpace(planosDirFinal) Then
+        Try
+            planosDirFinal = System.Environment.GetEnvironmentVariable("COTAS_ABIGAIL_DIR")
+        Catch
+        End Try
+    End If
+
+    If String.IsNullOrWhiteSpace(planosDirFinal) Then
+        Try
+            Dim cfgPath As String = System.IO.Path.Combine(planosDirInstalado, "ilogic\config_planos.txt")
+            If System.IO.File.Exists(cfgPath) Then
+                For Each linea As String In System.IO.File.ReadAllLines(cfgPath)
+                    If linea.StartsWith("PLANOS_DIR=", StringComparison.OrdinalIgnoreCase) Then
+                        planosDirFinal = linea.Substring("PLANOS_DIR=".Length).Trim()
+                        Exit For
+                    End If
+                Next
+            End If
+        Catch
+        End Try
+    End If
+
+    If String.IsNullOrWhiteSpace(planosDirFinal) OrElse Not System.IO.Directory.Exists(planosDirFinal) Then
+        System.Windows.Forms.MessageBox.Show(
+            "No se encontro la carpeta Planos." & vbCrLf &
+            "Ejecuta instalar_boton_inventor.bat una vez.",
+            titulo,
+            System.Windows.Forms.MessageBoxButtons.OK,
+            System.Windows.Forms.MessageBoxIcon.Error)
+        Exit Sub
+    End If
+
+    Dim scriptPath As String = System.IO.Path.Combine(planosDirFinal, "generador_vistas.py")
+    If Not System.IO.File.Exists(scriptPath) Then
+        System.Windows.Forms.MessageBox.Show(
+            "No se encontro generador_vistas.py en:" & vbCrLf & planosDirFinal,
+            titulo,
+            System.Windows.Forms.MessageBoxButtons.OK,
+            System.Windows.Forms.MessageBoxIcon.Error)
+        Exit Sub
+    End If
+
+    ' --- Resolver Python ---
+    Dim pythonExeFinal As String = "python"
+    Try
+        Dim cfgPathPy As String = System.IO.Path.Combine(planosDirInstalado, "ilogic\config_planos.txt")
+        If System.IO.File.Exists(cfgPathPy) Then
+            For Each linea As String In System.IO.File.ReadAllLines(cfgPathPy)
+                If linea.StartsWith("PYTHON_EXE=", StringComparison.OrdinalIgnoreCase) Then
+                    pythonExeFinal = linea.Substring("PYTHON_EXE=".Length).Trim()
+                    Exit For
+                End If
+            Next
+        End If
+    Catch
+    End Try
+
+    Dim psi As New System.Diagnostics.ProcessStartInfo()
+    psi.FileName = pythonExeFinal
+    psi.Arguments = """" & scriptPath & """"
+    psi.WorkingDirectory = planosDirFinal
+    psi.UseShellExecute = False
+    psi.CreateNoWindow = False
+
+    Try
+        Dim proc As System.Diagnostics.Process = System.Diagnostics.Process.Start(psi)
+        proc.WaitForExit()
+
+        If proc.ExitCode = 0 Then
+            System.Windows.Forms.MessageBox.Show(
+                "Planos generados correctamente." & vbCrLf &
+                "Vistas, cotas, renombrado y JPG exportados.",
+                titulo,
+                System.Windows.Forms.MessageBoxButtons.OK,
+                System.Windows.Forms.MessageBoxIcon.Information)
+        Else
+            System.Windows.Forms.MessageBox.Show(
+                "El proceso termino con errores." & vbCrLf &
+                "Revisa la ventana de consola para mas detalle.",
+                titulo,
+                System.Windows.Forms.MessageBoxButtons.OK,
+                System.Windows.Forms.MessageBoxIcon.Warning)
+        End If
+    Catch ex As Exception
+        System.Windows.Forms.MessageBox.Show(
+            "No se pudo ejecutar Python:" & vbCrLf & ex.Message,
+            titulo,
+            System.Windows.Forms.MessageBoxButtons.OK,
+            System.Windows.Forms.MessageBoxIcon.Error)
+    End Try
+End Sub

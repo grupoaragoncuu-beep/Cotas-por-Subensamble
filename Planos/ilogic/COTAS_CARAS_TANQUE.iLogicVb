@@ -1,0 +1,127 @@
+' COTAS ABIGAIL - Caras del tanque
+' Regla externa visible: COTAS_CARAS_TANQUE
+'
+' Valida el plano y lanza el flujo integrado en una ventana CMD. Python
+' primero crea/acota las cuatro caras y después ejecuta el flujo original
+' por pieza, dejando ambas exportaciones en carpetas independientes.
+
+Sub Main()
+    Const kDrawingDocument As Integer = 12292
+    Const planosDirInstalado As String =
+        "c:\Proyectos\COTAS ABIGAIL\COTAS ABIGAIL\Planos"
+
+    Dim invApp As Inventor.Application = ThisApplication
+    Dim titulo As String = "COTAS ABIGAIL - Caras del tanque"
+
+    If invApp.ActiveDocument Is Nothing OrElse
+       invApp.ActiveDocument.DocumentType <> kDrawingDocument Then
+        System.Windows.Forms.MessageBox.Show(
+            "Abre un plano (.idw / .dwg) y dejalo como ventana activa.",
+            titulo,
+            System.Windows.Forms.MessageBoxButtons.OK,
+            System.Windows.Forms.MessageBoxIcon.Warning)
+        Exit Sub
+    End If
+
+    If String.IsNullOrWhiteSpace(invApp.ActiveDocument.FullDocumentName) Then
+        System.Windows.Forms.MessageBox.Show(
+            "Guarda el plano antes de ejecutar (necesario para exportar JPG).",
+            titulo,
+            System.Windows.Forms.MessageBoxButtons.OK,
+            System.Windows.Forms.MessageBoxIcon.Warning)
+        Exit Sub
+    End If
+
+    Dim planosDirFinal As String = ""
+
+    Try
+        Dim variable As String =
+            System.Environment.GetEnvironmentVariable("COTAS_ABIGAIL_DIR")
+        If Not String.IsNullOrWhiteSpace(variable) AndAlso
+           System.IO.Directory.Exists(variable) Then
+            planosDirFinal = variable
+        End If
+    Catch
+    End Try
+
+    If String.IsNullOrWhiteSpace(planosDirFinal) AndAlso
+       System.IO.Directory.Exists(planosDirInstalado) Then
+        planosDirFinal = planosDirInstalado
+    End If
+
+    If String.IsNullOrWhiteSpace(planosDirFinal) Then
+        System.Windows.Forms.MessageBox.Show(
+            "No se encontro la carpeta Planos." & vbCrLf &
+            "Ejecuta instalar_boton_inventor.bat.",
+            titulo,
+            System.Windows.Forms.MessageBoxButtons.OK,
+            System.Windows.Forms.MessageBoxIcon.Error)
+        Exit Sub
+    End If
+
+    Dim scriptPath As String =
+        System.IO.Path.Combine(planosDirFinal, "generador_tanque_completo.py")
+
+    If Not System.IO.File.Exists(scriptPath) Then
+        System.Windows.Forms.MessageBox.Show(
+            "No se encontro:" & vbCrLf & scriptPath,
+            titulo,
+            System.Windows.Forms.MessageBoxButtons.OK,
+            System.Windows.Forms.MessageBoxIcon.Error)
+        Exit Sub
+    End If
+
+    Dim pythonExeFinal As String = "python"
+    Dim configPath As String =
+        System.IO.Path.Combine(planosDirFinal, "ilogic\config_planos.txt")
+
+    Try
+        If System.IO.File.Exists(configPath) Then
+            For Each linea As String In System.IO.File.ReadAllLines(configPath)
+                If linea.StartsWith(
+                    "PYTHON_EXE=",
+                    StringComparison.OrdinalIgnoreCase) Then
+                    pythonExeFinal =
+                        linea.Substring("PYTHON_EXE=".Length).Trim()
+                    Exit For
+                End If
+            Next
+        End If
+    Catch
+    End Try
+
+    Dim psi As New System.Diagnostics.ProcessStartInfo()
+    psi.FileName = pythonExeFinal
+    psi.Arguments = """" & scriptPath & """"
+    psi.WorkingDirectory = planosDirFinal
+    psi.UseShellExecute = False
+    psi.CreateNoWindow = False
+
+    Try
+        Dim proceso As System.Diagnostics.Process =
+            System.Diagnostics.Process.Start(psi)
+        proceso.WaitForExit()
+
+        If proceso.ExitCode = 0 Then
+            System.Windows.Forms.MessageBox.Show(
+                "Cotas del tanque generadas correctamente." & vbCrLf &
+                "Se exportaron cotas por caras y piezas acotadas.",
+                titulo,
+                System.Windows.Forms.MessageBoxButtons.OK,
+                System.Windows.Forms.MessageBoxIcon.Information)
+        Else
+            System.Windows.Forms.MessageBox.Show(
+                "El proceso termino con errores." & vbCrLf &
+                "Revisa los mensajes de la ventana CMD.",
+                titulo,
+                System.Windows.Forms.MessageBoxButtons.OK,
+                System.Windows.Forms.MessageBoxIcon.Warning)
+        End If
+    Catch ex As Exception
+        System.Windows.Forms.MessageBox.Show(
+            "No se pudo ejecutar Python:" & vbCrLf & ex.Message,
+            titulo,
+            System.Windows.Forms.MessageBoxButtons.OK,
+            System.Windows.Forms.MessageBoxIcon.Error)
+    End Try
+End Sub

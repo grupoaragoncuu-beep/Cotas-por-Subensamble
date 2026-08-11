@@ -1,0 +1,665 @@
+==============================================================
+ COTAS ABIGAIL - CARAS DEL TANQUE
+==============================================================
+Conectando con Inventor...
+Plano activo: MACHOTE PLANOS.dwg
+Buscando ensamble abierto...
+  Ensamble abierto: 62176-1246-A01 LIMPIO Y MARCADO.iam (412 piezas)
+  Ensamble abierto: 62176-1248-A07.iam (9 piezas)
+  Ensamble abierto: 62176-1248-A15.iam (2 piezas)
+  Ensamble abierto: 62176-1248-P06.iam (2 piezas)
+  Ensamble abierto: SP-740.iam (2 piezas)
+  Ensamble abierto: SP-752.iam (2 piezas)
+  Ensamble abierto: 62176-1248-A03.iam (57 piezas)
+  Ensamble abierto: 62176-1248-A12_Bottom.iam (7 piezas)
+  Ensamble abierto: 62176-1248-A12.iam (9 piezas)
+  Ensamble abierto: 62176-1248-P08.iam (2 piezas)
+  Ensamble abierto: SP-771.iam (2 piezas)
+  Ensamble abierto: SP-852.iam (2 piezas)
+  Ensamble abierto: 62176-1248-A05.iam (59 piezas)
+  Ensamble abierto: 62176-1248-A11_Predeterminado.iam (3 piezas)
+  Ensamble abierto: 62176-1248-A09.iam (3 piezas)
+  Ensamble abierto: 62176-1248-A06.iam (2 piezas)
+  Ensamble abierto: 62176-1248-A18.iam (2 piezas)
+  Ensamble abierto: 62176-1248-A19.iam (2 piezas)
+  Ensamble abierto: 62176-1248-A08.iam (34 piezas)
+  Ensamble abierto: 62176-1248-A14.iam (3 piezas)
+  Ensamble abierto: 62176-1248-A21.iam (4 piezas)
+  Ensamble abierto: SP-767.iam (2 piezas)
+  Ensamble abierto: 62176-1248-A04.iam (34 piezas)
+  Ensamble abierto: 62176-1248-A01.iam (189 piezas)
+  Ensamble abierto: 62176-1247-A05.iam (3 piezas)
+  Ensamble abierto: 62176-1247-A03.iam (3 piezas)
+  Ensamble abierto: 62176-1260-A04.iam (17 piezas)
+  Ensamble abierto: 62176-1260-A02.iam (17 piezas)
+  Ensamble abierto: 62176-1260-A03.iam (17 piezas)
+  Ensamble abierto: SP-851.iam (2 piezas)
+  Ensamble abierto: SP-788.iam (2 piezas)
+  Ensamble abierto: 62176-1247-A01.iam (143 piezas)
+  Ensamble abierto: 62176-1254-A01.iam (5 piezas)
+  Ensamble abierto: 62176-1253-A02.iam (7 piezas)
+  Ensamble abierto: 62176-1253-A01.iam (5 piezas)
+  Ensamble abierto: 62176-1251-A02.iam (3 piezas)
+  Ensamble abierto: 62176-1251-A01.iam (13 piezas)
+  Ensamble abierto: SP-792_1.iam (3 piezas)
+  Ensamble abierto: SP-776.iam (4 piezas)
+  Ensamble abierto: 62176-1259-A01.iam (7 piezas)
+  Ensamble abierto: 62176-1247-A04.iam (2 piezas)
+  Ensamble abierto: 62176-1253-A04_with holes.iam (7 piezas)
+  Ensamble abierto: 62176-1249-A01.iam (2 piezas)
+  Ensamble abierto: 62176-1359-A06.iam (2 piezas)
+Ensamble seleccionado: 62176-1246-A01 LIMPIO Y MARCADO.iam
+Carpeta de salida: C:\Proyectos\COTAS ABIGAIL\COTAS ABIGAIL\Planos\JPG\62176-1246-A01 LIMPIO Y MARCADO
+Paso 1/2: Vistas de paredes + referencias reales desde (0,0)...
+  Hoja base elegida: MODELO_COMPLETO:1
+Orientacion tipo PQart (tapa=+Y, cara=+Z, lateral=+X)...
+  Caras planas (estilo PQart): 960
+  Normal #1: (0.000,0.001,1.000) area=528742 span=412.3
+  Normal #2: (0.000,-1.000,0.004) area=455373 span=353.8
+  Normal #3: (1.000,-0.000,-0.000) area=323580 span=374.1
+  Normal #4: (-0.707,0.000,0.707) area=4480 span=555.9
+  Normal #5: (0.707,-0.000,0.707) area=4480 span=555.9
+  Normal #6: (-0.000,0.707,0.707) area=574 span=540.3
+  Marco PQart: cover(+Y)=(-0.000,1.000,-0.004) face(+Z)=(-0.000,0.004,1.000) right(+X)=(1.000,0.000,-0.000)
+  Camara foto (cara real): face=(-0.000,0.004,1.000) right=(1.000,0.000,-0.000) cover=(-0.000,1.000,-0.004)
+Detectando el contenedor estructural de cuatro paredes...
+  Alcance de paredes: 62176-1248-A01_1 (anidado, 62176-1248-A03_835, 62176-1248-A05_836, 62176-1248-A04_838, 62176-1248-A08_837)
+Detectando segmentos/contenedores de cara en el alcance resuelto...
+  Contenedores de cara en arbol: nombrados=0 + geo=4 = 4
+    - 62176-1248-A03_835: 59 piezas | ruta=62176-1248-A01_1|62176-1248-A03_835
+    - 62176-1248-A05_836: 52 piezas | ruta=62176-1248-A01_1|62176-1248-A05_836
+    - 62176-1248-A04_838: 41 piezas | ruta=62176-1248-A01_1|62176-1248-A04_838
+    - 62176-1248-A08_837: 37 piezas | ruta=62176-1248-A01_1|62176-1248-A08_837
+Mapeo segmento -> cara (por centroide)...
+  FRONT <- 62176-1248-A03_835 (outward=99.54, piezas=59)
+  BACK <- 62176-1248-A05_836 (outward=100.81, piezas=52)
+  RIGHT <- 62176-1248-A04_838 (outward=156.55, piezas=41)
+  LEFT <- 62176-1248-A08_837 (outward=156.55, piezas=37)
+Paso cara FRONT (camara PQart de pared)...
+    Fuente de vista: tanque + 62176-1248-A03.iam
+    Vista aislada: 57 ocurrencias visibles
+    Curvas en la vista: 715
+    Contenedor mapeado: 62176-1248-A03_835 (59 nombres)
+    Placa madre excluida: 62176-1248-P06_1
+    Origen (0,0) placa segmento: X=17.638 Y=7.533
+    Piezas de superficie=50 | envolventes 3D=50 sin ocurrencia=0 otra cara=0 | cotas X=49 Y=62 TYP=37
+    Piezas: 62176-1248-P10_982, 62176-1248-P10_982, 62176-1248-P11_983, 62176-1248-P11_984, 62176-1248-P11_983, 62176-1248-P11_984, 62176-1248-P35_985, 62176-1248-P35_986, 62176-1248-P35_987, 62176-1248-P35_988, 62176-1248-P35_989, 62176-1248-P35_990, 62176-1248-P35_985, 62176-1248-P35_986, 62176-1248-P35_987, 62176-1248-P35_988
+  OK TANQUE_DATUM_FRONT: vista lista (50 piezas, 111 referencias)
+Paso cara BACK (camara PQart de pared)...
+    Accesorios externos incluidos: 62176-1251-P05_Default<As Machined>_681, 62176-1251-P04_682, 62176-1251-P03_TAB_688, 62176-1251-P06_ROD_689, 62176-1251-P07_ROD_690, 62176-1251-P04_684, 62176-1251-P03_TAB_688, 62176-1251-P06_ROD_689, 62176-1251-P07_ROD_690, 62176-1251-P03_TAB_688, 62176-1251-P06_ROD_689, 62176-1251-P07_ROD_690, 62176-1251-P04_687
+    Fuente de vista: tanque + 62176-1248-A05.iam
+    Vista aislada: 72 ocurrencias visibles
+    Curvas en la vista: 962
+    Contenedor mapeado: 62176-1248-A05_836 (52 nombres)
+    Placa madre excluida: 62176-1248-P08_1
+    Origen (0,0) placa segmento: X=17.575 Y=7.533
+    Piezas de superficie=52 | envolventes 3D=52 sin ocurrencia=0 otra cara=0 | cotas X=57 Y=43 TYP=49
+    Piezas: 62176-1248-P14_939, 62176-1248-P14_930, 62176-1248-P15_940, 62176-1248-P15_941, 62176-1248-P15_931, 62176-1248-P15_932, 62176-1248-P35_942, 62176-1248-P35_943, 62176-1248-P35_944, 62176-1248-P35_945, 62176-1248-P35_933, 62176-1248-P35_934, 62176-1248-P35_935, 62176-1248-P35_936, 62176-1248-P35_937, 62176-1248-P35_938
+  OK TANQUE_DATUM_BACK: vista lista (52 piezas, 100 referencias)
+Paso cara RIGHT (camara PQart de pared)...
+    Accesorios externos incluidos: SP-800_3, SP-800_7, 62176-1248-P71_34, 62176-1248-P71_35
+    Fuente de vista: tanque + 62176-1248-A04.iam
+    Vista aislada: 38 ocurrencias visibles
+    Curvas en la vista: 254
+    Contenedor mapeado: 62176-1248-A04_838 (41 nombres)
+    Placa madre excluida: 62176-1248-P07_844
+    Origen (0,0) placa segmento: X=20.556 Y=7.509
+    Piezas de superficie=31 | envolventes 3D=31 sin ocurrencia=0 otra cara=0 | cotas X=59 Y=60 TYP=0
+    Piezas: 62176-1248-P16_864, 62176-1248-P16_864, 62176-1248-P16_864, 62176-1248-P17_865, 62176-1248-P17_866, 62176-1248-P17_865, 62176-1248-P17_866, 62176-1248-P17_865, 62176-1248-P17_866, 62176-1248-P28_Predeterminado_895, 62176-1248-P28_Predeterminado_895, 62176-1248-P29_Predeterminado_896, 62176-1248-P29_Predeterminado_896, 62176-1248-P30_897, 62176-1248-P30_897, SP-799_850
+  OK TANQUE_DATUM_RIGHT: vista lista (31 piezas, 119 referencias)
+Paso cara LEFT (camara PQart de pared)...
+    Accesorios externos incluidos: SP-800_36, SP-800_37
+    Fuente de vista: tanque + 62176-1248-A08.iam
+    Vista aislada: 36 ocurrencias visibles
+    Curvas en la vista: 300
+    Contenedor mapeado: 62176-1248-A08_837 (37 nombres)
+    Placa madre excluida: 62176-1248-P09_867
+    Origen (0,0) placa segmento: X=20.616 Y=7.509
+    Piezas de superficie=30 | envolventes 3D=30 sin ocurrencia=0 otra cara=0 | cotas X=60 Y=60 TYP=0
+    Piezas: 62176-1248-P28_Predeterminado_895, 62176-1248-P28_Predeterminado_895, 62176-1248-P29_Predeterminado_896, 62176-1248-P29_Predeterminado_896, 62176-1248-P30_897, 62176-1248-P30_897, 62176-1248-P50_870, 62176-1248-P50_871, 62176-1248-P50_872, 62176-1248-P50_878, 62176-1248-P12_892, 62176-1248-P12_892, 62176-1248-P12_892, 62176-1248-P13_893, 62176-1248-P13_894, 62176-1248-P13_893
+  OK TANQUE_DATUM_LEFT: vista lista (30 piezas, 120 referencias)
+Paso 2/2: Exportando una fotografía por referencia...
+Exportando una fotografía JPG por referencia dimensional...
+  Modo: encuadre estable por cara (sin reframe HLR por foto)
+  Carpeta: C:\Proyectos\COTAS ABIGAIL\COTAS ABIGAIL\Planos\JPG\62176-1246-A01 LIMPIO Y MARCADO\COTAS_POR_REFERENCIA
+  FRONT: 111 fotos individuales
+    Encuadre estable de cara: factor=1.038 pos=(23.45,16.02)
+    Encuadre JPG: cotas_detectadas=1
+    FRONT progreso 1/111 (1 ok, 36.23 s/foto)
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    FRONT progreso 25/111 (25 ok, 2.59 s/foto)
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    FRONT progreso 50/111 (50 ok, 1.92 s/foto)
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    FRONT progreso 75/111 (75 ok, 1.84 s/foto)
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    FRONT progreso 100/111 (100 ok, 1.71 s/foto)
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+  FRONT export terminado en 185.4s (1.67 s/foto)
+  BACK: 100 fotos individuales
+    Encuadre estable de cara: factor=1.038 pos=(23.45,16.02)
+    Encuadre JPG: cotas_detectadas=1
+    BACK progreso 1/100 (112 ok, 61.36 s/foto)
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    BACK progreso 25/100 (136 ok, 3.71 s/foto)
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    BACK progreso 50/100 (161 ok, 2.50 s/foto)
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    BACK progreso 75/100 (186 ok, 2.16 s/foto)
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    BACK progreso 100/100 (211 ok, 1.96 s/foto)
+  BACK export terminado en 195.9s (1.96 s/foto)
+  RIGHT: 119 fotos individuales
+    Encuadre estable de cara: factor=1.038 pos=(23.45,16.02)
+    Encuadre JPG: cotas_detectadas=1
+    RIGHT progreso 1/119 (212 ok, 19.91 s/foto)
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    RIGHT progreso 25/119 (236 ok, 2.21 s/foto)
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    RIGHT progreso 50/119 (261 ok, 1.77 s/foto)
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    RIGHT progreso 75/119 (286 ok, 1.63 s/foto)
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    RIGHT progreso 100/119 (311 ok, 1.55 s/foto)
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+  RIGHT export terminado en 182.4s (1.53 s/foto)
+  LEFT: 120 fotos individuales
+    Encuadre estable de cara: factor=1.038 pos=(23.45,16.02)
+    Encuadre JPG: cotas_detectadas=1
+    LEFT progreso 1/120 (331 ok, 19.02 s/foto)
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    LEFT progreso 25/120 (355 ok, 2.07 s/foto)
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    LEFT progreso 50/120 (380 ok, 1.71 s/foto)
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    LEFT progreso 75/120 (405 ok, 1.57 s/foto)
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    LEFT progreso 100/120 (430 ok, 1.48 s/foto)
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+    Encuadre JPG: cotas_detectadas=1
+  LEFT export terminado en 172.8s (1.44 s/foto)
+JPG exportados: 450/450
+
+PROCESO COMPLETO:
+  1) Cuatro paredes del tanque
+  2) Una cota desde (0,0) por JPG
+  3) 450 JPG en: C:\Proyectos\COTAS ABIGAIL\COTAS ABIGAIL\Planos\JPG\62176-1246-A01 LIMPIO Y MARCADO\COTAS_POR_REFERENCIA
+  4) Machote limpiado para reutilizar
+Limpiando dibujos del machote (sin tocar la hoja plantilla)...
+  Hoja machote activa: MODELO_COMPLETO:1
+  Eliminando hoja de caras: TANQUE_DATUM_LEFT:5
+  Eliminando hoja de caras: TANQUE_DATUM_RIGHT:4
+  Eliminando hoja de caras: TANQUE_DATUM_BACK:3
+  Eliminando hoja de caras: TANQUE_DATUM_FRONT:2
+  Reactivada hoja: MODELO_COMPLETO:1
+  Machote limpio: sin dibujos de caras, hoja plantilla visible.
+  Ensamble abierto: 62176-1246-A01 LIMPIO Y MARCADO.iam (412 piezas)
+  Ensamble abierto: 62176-1248-A07.iam (9 piezas)
+  Ensamble abierto: 62176-1248-A15.iam (2 piezas)
+  Ensamble abierto: 62176-1248-P06.iam (2 piezas)
+  Ensamble abierto: SP-740.iam (2 piezas)
+  Ensamble abierto: SP-752.iam (2 piezas)
+  Ensamble abierto: 62176-1248-A03.iam (57 piezas)
+  Ensamble abierto: 62176-1248-A12_Bottom.iam (7 piezas)
+  Ensamble abierto: 62176-1248-A12.iam (9 piezas)
+  Ensamble abierto: 62176-1248-P08.iam (2 piezas)
+  Ensamble abierto: SP-771.iam (2 piezas)
+  Ensamble abierto: SP-852.iam (2 piezas)
+  Ensamble abierto: 62176-1248-A05.iam (59 piezas)
+  Ensamble abierto: 62176-1248-A11_Predeterminado.iam (3 piezas)
+  Ensamble abierto: 62176-1248-A09.iam (3 piezas)
+  Ensamble abierto: 62176-1248-A06.iam (2 piezas)
+  Ensamble abierto: 62176-1248-A18.iam (2 piezas)
+  Ensamble abierto: 62176-1248-A19.iam (2 piezas)
+  Ensamble abierto: 62176-1248-A08.iam (34 piezas)
+  Ensamble abierto: 62176-1248-A14.iam (3 piezas)
+  Ensamble abierto: 62176-1248-A21.iam (4 piezas)
+  Ensamble abierto: SP-767.iam (2 piezas)
+  Ensamble abierto: 62176-1248-A04.iam (34 piezas)
+  Ensamble abierto: 62176-1248-A01.iam (189 piezas)
+  Ensamble abierto: 62176-1247-A05.iam (3 piezas)
+  Ensamble abierto: 62176-1247-A03.iam (3 piezas)
+  Ensamble abierto: 62176-1260-A04.iam (17 piezas)
+  Ensamble abierto: 62176-1260-A02.iam (17 piezas)
+  Ensamble abierto: 62176-1260-A03.iam (17 piezas)
+  Ensamble abierto: SP-851.iam (2 piezas)
+  Ensamble abierto: SP-788.iam (2 piezas)
+  Ensamble abierto: 62176-1247-A01.iam (143 piezas)
+  Ensamble abierto: 62176-1254-A01.iam (5 piezas)
+  Ensamble abierto: 62176-1253-A02.iam (7 piezas)
+  Ensamble abierto: 62176-1253-A01.iam (5 piezas)
+  Ensamble abierto: 62176-1251-A02.iam (3 piezas)
+  Ensamble abierto: 62176-1251-A01.iam (13 piezas)
+  Ensamble abierto: SP-792_1.iam (3 piezas)
+  Ensamble abierto: SP-776.iam (4 piezas)
+  Ensamble abierto: 62176-1259-A01.iam (7 piezas)
+  Ensamble abierto: 62176-1247-A04.iam (2 piezas)
+  Ensamble abierto: 62176-1253-A04_with holes.iam (7 piezas)
+  Ensamble abierto: 62176-1249-A01.iam (2 piezas)
+  Ensamble abierto: 62176-1359-A06.iam (2 piezas)

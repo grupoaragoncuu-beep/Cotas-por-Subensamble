@@ -1,0 +1,1096 @@
+⏳ Paso 1/4: Generando vistas con API de Python...
+Ensamble activo: 62176-1246-A01 LIMPIO Y MARCADO.iam
+Occ: 62176-1248-P10_982, type: 12290
+Procesando pieza: 62176-1248-P10
+Occ: 62176-1248-P11_983, type: 12290
+Procesando pieza: 62176-1248-P11
+Occ: 62176-1248-P11_984, type: 12290
+Occ: 62176-1248-P35_985, type: 12290
+Procesando pieza: 62176-1248-P35
+Occ: 62176-1248-P35_986, type: 12290
+Occ: 62176-1248-P35_987, type: 12290
+Occ: 62176-1248-P35_988, type: 12290
+Occ: 62176-1248-P35_989, type: 12290
+Occ: 62176-1248-P35_990, type: 12290
+Occ: 62176-1248-P10_982, type: 12290
+Occ: 62176-1248-P11_983, type: 12290
+Occ: 62176-1248-P11_984, type: 12290
+Occ: 62176-1248-P35_985, type: 12290
+Occ: 62176-1248-P35_986, type: 12290
+Occ: 62176-1248-P35_987, type: 12290
+Occ: 62176-1248-P35_988, type: 12290
+Occ: 62176-1248-P35_989, type: 12290
+Occ: 62176-1248-P35_990, type: 12290
+Occ: SF-NP-03_7753K124_949, type: 12290
+Procesando pieza: SF-NP-03_7753K124
+Occ: 62176-1248-P32_980, type: 12290
+Procesando pieza: 62176-1248-P32
+Occ: 62176-1248-P31_Default<As Machined>_981, type: 12290
+Procesando pieza: 62176-1248-P31_Default_As Machined_
+Occ: 62176-1248-P32_980, type: 12290
+Occ: 62176-1248-P31_Default<As Machined>_981, type: 12290
+Occ: 62176-1248-P32_980, type: 12290
+Occ: 62176-1248-P31_Default<As Machined>_981, type: 12290
+Occ: SF-NP-03_7753K124_953, type: 12290
+Occ: 62176-1248-P46_954, type: 12290
+Procesando pieza: 62176-1248-P46
+Occ: 62176-1248-P46_955, type: 12290
+Occ: 62176-1248-P46_956, type: 12290
+Occ: 62176-1248-P37_957, type: 12290
+Procesando pieza: 62176-1248-P37
+Occ: 62176-1248-P37_958, type: 12290
+Occ: 62176-1248-P37_959, type: 12290
+Occ: 62176-1248-P50_960, type: 12290
+Procesando pieza: 62176-1248-P50
+Occ: SF-NP-03_7753K124_961, type: 12290
+Occ: 62176-1248-P26_963, type: 12290
+Procesando pieza: 62176-1248-P26
+Descanso de 10 segundos por cada 10 componentes (vamos en 10)...
+Occ: 62176-1248-P27_Default<As Machined>_964, type: 12290
+Procesando pieza: 62176-1248-P27_Default_As Machined_
+Occ: 62176-1248-P27_Default<As Machined>_965, type: 12290
+Occ: SP-741_966, type: 12290
+Procesando pieza: SP-741
+Occ: SF-HC-01_4452K212_969, type: 12290
+Procesando pieza: SF-HC-01_4452K212
+Occ: SF-HC-01_4452K212_970, type: 12290
+Occ: SF-NP-03_7753K124_971, type: 12290
+Occ: SP-797_972, type: 12290
+Procesando pieza: SP-797
+Occ: SP-797_973, type: 12290
+Occ: SP-797_974, type: 12290
+Occ: GUN STUD_975, type: 12290
+Procesando pieza: GUN STUD
+Occ: GUN STUD_976, type: 12290
+Occ: 62176-1248-P68_977, type: 12290
+Procesando pieza: 62176-1248-P68
+Occ: 62176-1248-P68_978, type: 12290
+Occ: 62176-1248-P68_979, type: 12290
+Occ: 62176-1248-P06_1:1, type: 12290
+Procesando pieza: 62176-1248-P06_1
+Occ: 62176-1248-P06_2:1, type: 12290
+Procesando pieza: 62176-1248-P06_2
+Occ: SP-740_1:1, type: 12290
+Procesando pieza: SP-740_1
+Occ: SP-740_2:1, type: 12290
+Procesando pieza: SP-740_2
+Descanso de 10 segundos por cada 10 componentes (vamos en 20)...
+Occ: SP-752_1:1, type: 12290
+Procesando pieza: SP-752_1
+Occ: SP-752_2:1, type: 12290
+Procesando pieza: SP-752_2
+Occ: SP-752_1:1, type: 12290
+Occ: SP-752_2:1, type: 12290
+Occ: 62176-1248-P14_939, type: 12290
+Procesando pieza: 62176-1248-P14
+Occ: 62176-1248-P15_940, type: 12290
+Procesando pieza: 62176-1248-P15
+Occ: 62176-1248-P15_941, type: 12290
+Occ: 62176-1248-P35_942, type: 12290
+Occ: 62176-1248-P35_943, type: 12290
+Occ: 62176-1248-P35_944, type: 12290
+Occ: 62176-1248-P35_945, type: 12290
+Occ: 62176-1248-P14_930, type: 12290
+Occ: 62176-1248-P15_931, type: 12290
+Occ: 62176-1248-P15_932, type: 12290
+Occ: 62176-1248-P35_933, type: 12290
+Occ: 62176-1248-P35_934, type: 12290
+Occ: 62176-1248-P35_935, type: 12290
+Occ: 62176-1248-P35_936, type: 12290
+Occ: 62176-1248-P35_937, type: 12290
+Occ: 62176-1248-P35_938, type: 12290
+Occ: 62176-1248-P32_980, type: 12290
+Occ: 62176-1248-P31_Default<As Machined>_981, type: 12290
+Occ: 62176-1248-P32_980, type: 12290
+Occ: 62176-1248-P31_Default<As Machined>_981, type: 12290
+Occ: 62176-1248-P32_980, type: 12290
+Occ: 62176-1248-P31_Default<As Machined>_981, type: 12290
+Occ: 62176-1248-P43_904, type: 12290
+Procesando pieza: 62176-1248-P43
+Occ: 62176-1248-P43_905, type: 12290
+Occ: SF-NP-03_7753K124_906, type: 12290
+Occ: L845.RADVLV_907, type: 12290
+Procesando pieza: L845.RADVLV
+Occ: L845.RADVLV_908, type: 12290
+Occ: 62176-1248-P43_909, type: 12290
+Occ: L845.RADVLV_918, type: 12290
+Occ: L845.RADVLV_919, type: 12290
+Occ: L845.RADVLV_920, type: 12290
+Occ: L845.RADVLV_921, type: 12290
+Occ: L845.RADVLV_922, type: 12290
+Occ: L845.RADVLV_923, type: 12290
+Occ: 62176-1248-P19_925, type: 12290
+Procesando pieza: 62176-1248-P19
+Occ: 62176-1248-P19_926, type: 12290
+Occ: 62176-1248-P19_927, type: 12290
+Occ: 62176-1248-P19_928, type: 12290
+Occ: GUNSTUD 2_929, type: 12290
+Procesando pieza: GUNSTUD 2
+Occ: 62176-1248-P08_1:1, type: 12290
+Procesando pieza: 62176-1248-P08_1
+Occ: 62176-1248-P08_2:1, type: 12290
+Procesando pieza: 62176-1248-P08_2
+Descanso de 10 segundos por cada 10 componentes (vamos en 30)...
+Occ: SP-771_1:1, type: 12290
+Procesando pieza: SP-771_1
+Occ: SP-771_2:1, type: 12290
+Procesando pieza: SP-771_2
+Occ: SP-771_1:1, type: 12290
+Occ: SP-771_2:1, type: 12290
+Occ: SP-771_1:1, type: 12290
+Occ: SP-771_2:1, type: 12290
+Occ: SP-771_1:1, type: 12290
+Occ: SP-771_2:1, type: 12290
+Occ: SP-771_1:1, type: 12290
+Occ: SP-771_2:1, type: 12290
+Occ: SP-771_1:1, type: 12290
+Occ: SP-771_2:1, type: 12290
+Occ: SP-771_1:1, type: 12290
+Occ: SP-771_2:1, type: 12290
+Occ: SP-771_1:1, type: 12290
+Occ: SP-771_2:1, type: 12290
+Occ: SP-852_1:1, type: 12290
+Procesando pieza: SP-852_1
+Occ: SP-852_2:1, type: 12290
+Procesando pieza: SP-852_2
+Occ: 62176-1248-P09_867, type: 12290
+Procesando pieza: 62176-1248-P09
+Occ: 62176-1248-P28_Predeterminado_895, type: 12290
+Procesando pieza: 62176-1248-P28_Predeterminado
+Occ: 62176-1248-P29_Predeterminado_896, type: 12290
+Procesando pieza: 62176-1248-P29_Predeterminado
+Occ: 62176-1248-P30_897, type: 12290
+Procesando pieza: 62176-1248-P30
+Occ: 62176-1248-P28_Predeterminado_895, type: 12290
+Occ: 62176-1248-P29_Predeterminado_896, type: 12290
+Occ: 62176-1248-P30_897, type: 12290
+Occ: 62176-1248-P50_870, type: 12290
+Occ: 62176-1248-P50_871, type: 12290
+Occ: 62176-1248-P50_872, type: 12290
+Occ: 62176-1248-P50_873, type: 12290
+Occ: 62176-1248-P12_892, type: 12290
+Procesando pieza: 62176-1248-P12
+Occ: 62176-1248-P13_893, type: 12290
+Procesando pieza: 62176-1248-P13
+Descanso de 10 segundos por cada 10 componentes (vamos en 40)...
+Occ: 62176-1248-P13_894, type: 12290
+Occ: 62176-1248-P12_892, type: 12290
+Occ: 62176-1248-P13_893, type: 12290
+Occ: 62176-1248-P13_894, type: 12290
+Occ: 62176-1248-P12_892, type: 12290
+Occ: 62176-1248-P13_893, type: 12290
+Occ: 62176-1248-P13_894, type: 12290
+Occ: 62176-1248-P50_878, type: 12290
+Occ: SP-797_879, type: 12290
+Occ: 62176-1248-P65_890, type: 12290
+Procesando pieza: 62176-1248-P65
+Occ: 62176-1248-P64_891, type: 12290
+Procesando pieza: 62176-1248-P64
+Occ: 62176-1248-P65_890, type: 12290
+Occ: 62176-1248-P64_891, type: 12290
+Occ: 62176-1248-P47_888, type: 12290
+Procesando pieza: 62176-1248-P47
+Occ: 62176-1248-P48_889, type: 12290
+Procesando pieza: 62176-1248-P48
+Occ: 62176-1248-P47_886, type: 12290
+Occ: 62176-1248-P48_887, type: 12290
+Occ: SP-799_884, type: 12290
+Procesando pieza: SP-799
+Occ: SP-799_885, type: 12290
+Occ: SP-852_1:1, type: 12290
+Occ: SP-852_2:1, type: 12290
+Occ: 62176-1248-P07_844, type: 12290
+Procesando pieza: 62176-1248-P07
+Occ: 62176-1248-P16_864, type: 12290
+Procesando pieza: 62176-1248-P16
+Occ: 62176-1248-P17_865, type: 12290
+Procesando pieza: 62176-1248-P17
+Occ: 62176-1248-P17_866, type: 12290
+Occ: 62176-1248-P16_864, type: 12290
+Occ: 62176-1248-P17_865, type: 12290
+Occ: 62176-1248-P17_866, type: 12290
+Occ: 62176-1248-P16_864, type: 12290
+Occ: 62176-1248-P17_865, type: 12290
+Occ: 62176-1248-P17_866, type: 12290
+Occ: 62176-1248-P28_Predeterminado_895, type: 12290
+Occ: 62176-1248-P29_Predeterminado_896, type: 12290
+Occ: 62176-1248-P30_897, type: 12290
+Occ: 62176-1248-P28_Predeterminado_895, type: 12290
+Occ: 62176-1248-P29_Predeterminado_896, type: 12290
+Occ: 62176-1248-P30_897, type: 12290
+Occ: SP-799_850, type: 12290
+Occ: 62176-1248-P47_888, type: 12290
+Occ: 62176-1248-P48_889, type: 12290
+Occ: 62176-1248-P47_886, type: 12290
+Occ: 62176-1248-P48_887, type: 12290
+Occ: SP-855_853, type: 12290
+Procesando pieza: SP-855
+Occ: SF-HC-01_4452K212_855, type: 12290
+Occ: 62176-1248-P38_Default<As Machined>_860, type: 12290
+Procesando pieza: 62176-1248-P38_Default_As Machined_
+Descanso de 10 segundos por cada 10 componentes (vamos en 50)...
+Occ: 62176-1248-P33_Default<As Machined>_861, type: 12290
+Procesando pieza: 62176-1248-P33_Default_As Machined_
+Occ: 62176-1248-P34_Default<As Machined>_862, type: 12290
+Procesando pieza: 62176-1248-P34_Default_As Machined_
+Occ: 62176-1248-P34_Default<As Machined>_863, type: 12290
+Occ: 62176-1248-P25_857, type: 12290
+Procesando pieza: 62176-1248-P25
+Occ: 62176-1248-P65_890, type: 12290
+Occ: 62176-1248-P64_891, type: 12290
+Occ: 62176-1248-P65_890, type: 12290
+Occ: 62176-1248-P64_891, type: 12290
+Occ: SP-767_1:1, type: 12290
+Procesando pieza: SP-767_1
+Occ: SP-767_2:1, type: 12290
+Procesando pieza: SP-767_2
+Occ: 62176-1248-P56_DefaultSM-FLAT-PATTERN_839, type: 12290
+Procesando pieza: 62176-1248-P56_DefaultSM-FLAT-PATTERN
+Occ: 62176-1248-P56_DefaultSM-FLAT-PATTERN_840, type: 12290
+Occ: 62176-1248-P56_DefaultSM-FLAT-PATTERN_841, type: 12290
+Occ: 62176-1248-P56_DefaultSM-FLAT-PATTERN_842, type: 12290
+Occ: 62176-1248-P01_843, type: 12290
+Procesando pieza: 62176-1248-P01
+Occ: 62176-1247-P01_708, type: 12290
+Procesando pieza: 62176-1247-P01
+Occ: 62176-1247-P03_709, type: 12290
+Procesando pieza: 62176-1247-P03
+Occ: 62176-1247-P03_710, type: 12290
+Occ: 62176-1247-P02_711, type: 12290
+Procesando pieza: 62176-1247-P02
+Descanso de 10 segundos por cada 10 componentes (vamos en 60)...
+Occ: 62176-1247-P12_712, type: 12290
+Procesando pieza: 62176-1247-P12
+Occ: 62176-1247-P02_713, type: 12290
+Occ: 62176-1247-P09_714, type: 12290
+Procesando pieza: 62176-1247-P09
+Occ: 62176-1247-P09_715, type: 12290
+Occ: 62176-1247-P09_716, type: 12290
+Occ: 62176-1247-P09_717, type: 12290
+Occ: 62176-1247-P11_721, type: 12290
+Procesando pieza: 62176-1247-P11
+Occ: SP-702_722, type: 12290
+Procesando pieza: SP-702
+Occ: SP-702_723, type: 12290
+Occ: SP-702_724, type: 12290
+Occ: SP-702_725, type: 12290
+Occ: SP-736_728, type: 12290
+Procesando pieza: SP-736
+Occ: 62176-1247-P10_Default<As Machined>_729, type: 12290
+Procesando pieza: 62176-1247-P10_Default_As Machined_
+Occ: 62176-1247-P10_Default<As Machined>_730, type: 12290
+Occ: 62176-1247-P12_731, type: 12290
+Occ: 62176-1247-P11_732, type: 12290
+Occ: 62176-1247-P06_733, type: 12290
+Procesando pieza: 62176-1247-P06
+Occ: 62176-1247-P06_734, type: 12290
+Occ: HW-CN-01_738, type: 12290
+Procesando pieza: HW-CN-01
+Occ: HW-CN-01_739, type: 12290
+Occ: HW-CN-01_740, type: 12290
+Occ: HW-CN-01_741, type: 12290
+Occ: HW-CN-01_742, type: 12290
+Occ: HW-CN-01_743, type: 12290
+Occ: HW-CN-01_744, type: 12290
+Occ: HW-CN-01_745, type: 12290
+Occ: HW-CN-01_746, type: 12290
+Occ: HW-CN-01_747, type: 12290
+Occ: HW-CN-01_748, type: 12290
+Occ: HW-CN-01_749, type: 12290
+Occ: FPP-PELSUE_750, type: 12290
+Procesando pieza: FPP-PELSUE
+Occ: FPP-PELSUE_751, type: 12290
+Occ: 62176-1247-P04_832, type: 12290
+Procesando pieza: 62176-1247-P04
+Descanso de 10 segundos por cada 10 componentes (vamos en 70)...
+Occ: 62176-1247-P13_833, type: 12290
+Procesando pieza: 62176-1247-P13
+Occ: 62176-1247-P08_834, type: 12290
+Procesando pieza: 62176-1247-P08
+Occ: 62176-1247-P07_829, type: 12290
+Procesando pieza: 62176-1247-P07
+Occ: 62176-1247-P13_830, type: 12290
+Occ: 62176-1247-P08_831, type: 12290
+Occ: 62176-1247-P07_829, type: 12290
+Occ: 62176-1247-P13_830, type: 12290
+Occ: 62176-1247-P08_831, type: 12290
+Occ: HW-CN-01_756, type: 12290
+Occ: HW-CN-01_757, type: 12290
+Occ: HW-CN-01_758, type: 12290
+Occ: HW-CN-01_759, type: 12290
+Occ: 62176-1260-P07_810, type: 12290
+Procesando pieza: 62176-1260-P07
+Occ: 62176-1260-P05_811, type: 12290
+Procesando pieza: 62176-1260-P05
+Occ: HW-FW-01_812, type: 12290
+Procesando pieza: HW-FW-01
+Occ: HW-HN-03_95462A033_813, type: 12290
+Procesando pieza: HW-HN-03_95462A033
+Occ: HW-HN-03_95462A033_814, type: 12290
+Occ: HW-HN-03_95462A033_815, type: 12290
+Occ: HW-HN-03_95462A033_816, type: 12290
+Occ: HW-FW-01_817, type: 12290
+Occ: HW-FW-01_818, type: 12290
+Occ: HW-FW-01_819, type: 12290
+Occ: 62176-1260-P05_820, type: 12290
+Occ: 62176-1260-P05_821, type: 12290
+Occ: 62176-1260-P05_822, type: 12290
+Occ: HW-HN-03_95462A033_823, type: 12290
+Occ: HW-HN-03_95462A033_824, type: 12290
+Occ: HW-HN-03_95462A033_825, type: 12290
+Occ: HW-HN-03_95462A033_826, type: 12290
+Occ: 62176-1260-P07_791, type: 12290
+Occ: 62176-1260-P03_792, type: 12290
+Procesando pieza: 62176-1260-P03
+Occ: HW-FW-01_793, type: 12290
+Occ: HW-HN-03_95462A033_794, type: 12290
+Occ: HW-HN-03_95462A033_795, type: 12290
+Occ: HW-HN-03_95462A033_796, type: 12290
+Occ: HW-HN-03_95462A033_797, type: 12290
+Occ: HW-FW-01_798, type: 12290
+Occ: HW-FW-01_799, type: 12290
+Occ: HW-FW-01_800, type: 12290
+Occ: 62176-1260-P03_801, type: 12290
+Occ: 62176-1260-P03_802, type: 12290
+Occ: 62176-1260-P03_803, type: 12290
+Occ: HW-HN-03_95462A033_804, type: 12290
+Occ: HW-HN-03_95462A033_805, type: 12290
+Occ: HW-HN-03_95462A033_806, type: 12290
+Occ: HW-HN-03_95462A033_807, type: 12290
+Occ: 62176-1260-P07_773, type: 12290
+Occ: 62176-1260-P04_774, type: 12290
+Procesando pieza: 62176-1260-P04
+Occ: HW-FW-01_775, type: 12290
+Occ: HW-HN-03_95462A033_776, type: 12290
+Occ: HW-HN-03_95462A033_777, type: 12290
+Occ: HW-HN-03_95462A033_778, type: 12290
+Occ: HW-HN-03_95462A033_779, type: 12290
+Occ: HW-FW-01_780, type: 12290
+Occ: HW-FW-01_781, type: 12290
+Occ: HW-FW-01_782, type: 12290
+Occ: 62176-1260-P04_783, type: 12290
+Occ: 62176-1260-P04_784, type: 12290
+Occ: 62176-1260-P04_785, type: 12290
+Occ: HW-HN-03_95462A033_786, type: 12290
+Occ: HW-HN-03_95462A033_787, type: 12290
+Occ: HW-HN-03_95462A033_788, type: 12290
+Occ: HW-HN-03_95462A033_789, type: 12290
+Occ: 62176-1260-P07_773, type: 12290
+Occ: 62176-1260-P04_774, type: 12290
+Occ: HW-FW-01_775, type: 12290
+Occ: HW-HN-03_95462A033_776, type: 12290
+Occ: HW-HN-03_95462A033_777, type: 12290
+Occ: HW-HN-03_95462A033_778, type: 12290
+Occ: HW-HN-03_95462A033_779, type: 12290
+Occ: HW-FW-01_780, type: 12290
+Occ: HW-FW-01_781, type: 12290
+Occ: HW-FW-01_782, type: 12290
+Occ: 62176-1260-P04_783, type: 12290
+Occ: 62176-1260-P04_784, type: 12290
+Occ: 62176-1260-P04_785, type: 12290
+Occ: HW-HN-03_95462A033_786, type: 12290
+Occ: HW-HN-03_95462A033_787, type: 12290
+Occ: HW-HN-03_95462A033_788, type: 12290
+Occ: HW-HN-03_95462A033_789, type: 12290
+Occ: 62176-1247-P10_Default<As Machined>_764, type: 12290
+Occ: 62176-1247-P10_Default<As Machined>_765, type: 12290
+Occ: 62176-1247-P11_766, type: 12290
+Occ: 62176-1247-P11_767, type: 12290
+Occ: 62176-1247-P15_768, type: 12290
+Procesando pieza: 62176-1247-P15
+Descanso de 10 segundos por cada 10 componentes (vamos en 80)...
+Occ: 62176-1247-P15_769, type: 12290
+Occ: SP-774_770, type: 12290
+Procesando pieza: SP-774
+Occ: SP-855_771, type: 12290
+Occ: SP-851_1:1, type: 12290
+Procesando pieza: SP-851_1
+Occ: SP-851_2:1, type: 12290
+Procesando pieza: SP-851_2
+Occ: SP-851_1:1, type: 12290
+Occ: SP-851_2:1, type: 12290
+Occ: SP-851_1:1, type: 12290
+Occ: SP-851_2:1, type: 12290
+Occ: SP-788_1:1, type: 12290
+Procesando pieza: SP-788_1
+Occ: SP-788_2:1, type: 12290
+Procesando pieza: SP-788_2
+Occ: SP-788_1:1, type: 12290
+Occ: SP-788_2:1, type: 12290
+Occ: SP-851_1:1, type: 12290
+Occ: SP-851_2:1, type: 12290
+Occ: SP-851_1:1, type: 12290
+Occ: SP-851_2:1, type: 12290
+Occ: SP-851_1:1, type: 12290
+Occ: SP-851_2:1, type: 12290
+Occ: SP-851_1:1, type: 12290
+Occ: SP-851_2:1, type: 12290
+Occ: SP-800_3, type: 12290
+Procesando pieza: SP-800
+Occ: 62176-1254-P07_703, type: 12290
+Procesando pieza: 62176-1254-P07
+Occ: 62176-1254-P04_704, type: 12290
+Procesando pieza: 62176-1254-P04
+Occ: 62176-1254-P03_705, type: 12290
+Procesando pieza: 62176-1254-P03
+Occ: 62176-1254-P01_706, type: 12290
+Procesando pieza: 62176-1254-P01
+Descanso de 10 segundos por cada 10 componentes (vamos en 90)...
+Occ: 62176-1254-P02_707, type: 12290
+Procesando pieza: 62176-1254-P02
+Occ: 62176-1254-P07_703, type: 12290
+Occ: 62176-1254-P04_704, type: 12290
+Occ: 62176-1254-P03_705, type: 12290
+Occ: 62176-1254-P01_706, type: 12290
+Occ: 62176-1254-P02_707, type: 12290
+Occ: 62176-1254-P07_703, type: 12290
+Occ: 62176-1254-P04_704, type: 12290
+Occ: 62176-1254-P03_705, type: 12290
+Occ: 62176-1254-P01_706, type: 12290
+Occ: 62176-1254-P02_707, type: 12290
+Occ: SP-800_7, type: 12290
+Occ: 62176-1252-P01_8, type: 12290
+Procesando pieza: 62176-1252-P01
+Occ: 62176-1253-P07_696, type: 12290
+Procesando pieza: 62176-1253-P07
+Occ: 62176-1253-P04_697, type: 12290
+Procesando pieza: 62176-1253-P04
+Occ: 62176-1253-P03_698, type: 12290
+Procesando pieza: 62176-1253-P03
+Occ: 62176-1253-P01_699, type: 12290
+Procesando pieza: 62176-1253-P01
+Occ: 62176-1253-P02_700, type: 12290
+Procesando pieza: 62176-1253-P02
+Occ: 62176-1253-P05_701, type: 12290
+Procesando pieza: 62176-1253-P05
+Occ: 62176-1253-P02_702, type: 12290
+Occ: 62176-1253-P07_691, type: 12290
+Occ: 62176-1253-P04_692, type: 12290
+Occ: 62176-1253-P03_693, type: 12290
+Occ: 62176-1253-P01_694, type: 12290
+Occ: 62176-1253-P02_695, type: 12290
+Occ: SP-792_11, type: 12290
+Procesando pieza: SP-792
+Occ: 62176-1251-P05_Default<As Machined>_681, type: 12290
+Procesando pieza: 62176-1251-P05_Default_As Machined_
+Descanso de 10 segundos por cada 10 componentes (vamos en 100)...
+Occ: 62176-1251-P04_682, type: 12290
+Procesando pieza: 62176-1251-P04
+Occ: 62176-1251-P03_TAB_688, type: 12290
+Procesando pieza: 62176-1251-P03_TAB
+Occ: 62176-1251-P06_ROD_689, type: 12290
+Procesando pieza: 62176-1251-P06_ROD
+Occ: 62176-1251-P07_ROD_690, type: 12290
+Procesando pieza: 62176-1251-P07_ROD
+Occ: 62176-1251-P04_684, type: 12290
+Occ: 62176-1251-P03_TAB_688, type: 12290
+Occ: 62176-1251-P06_ROD_689, type: 12290
+Occ: 62176-1251-P07_ROD_690, type: 12290
+Occ: 62176-1251-P03_TAB_688, type: 12290
+Occ: 62176-1251-P06_ROD_689, type: 12290
+Occ: 62176-1251-P07_ROD_690, type: 12290
+Occ: 62176-1251-P04_687, type: 12290
+Occ: 62176-1251-P01_17, type: 12290
+Procesando pieza: 62176-1251-P01
+Occ: SP-792_1_1:1, type: 12290
+Procesando pieza: SP-792_1_1
+Occ: SP-792_1_2:1, type: 12290
+Procesando pieza: SP-792_1_2
+Occ: SP-792_1_3:1, type: 12290
+Procesando pieza: SP-792_1_3
+Occ: SP-776_1:1, type: 12290
+Procesando pieza: SP-776_1
+Occ: SP-776_2:1, type: 12290
+Procesando pieza: SP-776_2
+Descanso de 10 segundos por cada 10 componentes (vamos en 110)...
+Occ: SP-776_3:1, type: 12290
+Procesando pieza: SP-776_3
+Occ: SP-776_4:1, type: 12290
+Procesando pieza: SP-776_4
+Occ: 62176-1247-P05_677, type: 12290
+Procesando pieza: 62176-1247-P05
+Occ: SP-710_678, type: 12290
+Procesando pieza: SP-710
+Occ: 62176-1247-P05_677, type: 12290
+Occ: SP-710_678, type: 12290
+Occ: 62176-1247-P05_677, type: 12290
+Occ: SP-710_678, type: 12290
+Occ: 62176-1253-P07_670, type: 12290
+Occ: 62176-1253-P04_671, type: 12290
+Occ: 62176-1253-P02_672, type: 12290
+Occ: 62176-1253-P05_673, type: 12290
+Occ: 62176-1253-P02_674, type: 12290
+Occ: 62176-1253-P03_675, type: 12290
+Occ: 62176-1253-P01_676, type: 12290
+Occ: SP-798_23, type: 12290
+Procesando pieza: SP-798
+Occ: SP-798_24, type: 12290
+Occ: SP-798_25, type: 12290
+Occ: SP-798_26, type: 12290
+Occ: FT-PRD-01_28, type: 12290
+Procesando pieza: FT-PRD-01
+Occ: SP-742_40, type: 12290
+Procesando pieza: SP-742
+Occ: 62176-1249-P01_Default<As Machined>_41, type: 12290
+Procesando pieza: 62176-1249-P01_Default_As Machined_
+Occ: 62176-1252-P01_30, type: 12290
+Occ: 62176-1248-P62_68095K351_38, type: 12290
+Procesando pieza: 62176-1248-P62_68095K351
+Occ: SF-CP-04_4513K263_39, type: 12290
+Procesando pieza: SF-CP-04_4513K263
+Descanso de 10 segundos por cada 10 componentes (vamos en 120)...
+Occ: 62176-1248-P71_33, type: 12290
+Procesando pieza: 62176-1248-P71
+Occ: 62176-1248-P71_34, type: 12290
+Occ: 62176-1248-P71_35, type: 12290
+Occ: SP-800_36, type: 12290
+Occ: SP-800_37, type: 12290
+✅ Vistas generadas correctamente para 121 piezas.
+⏳ Paso 1/4: Generando vistas con API de Python...
+Ensamble activo: 62176-1246-A01 LIMPIO Y MARCADO.iam
+Occ: 62176-1248-P10_982, type: 12290
+Procesando pieza: 62176-1248-P10
+Occ: 62176-1248-P11_983, type: 12290
+Procesando pieza: 62176-1248-P11
+Occ: 62176-1248-P11_984, type: 12290
+Occ: 62176-1248-P35_985, type: 12290
+Procesando pieza: 62176-1248-P35
+Occ: 62176-1248-P35_986, type: 12290
+Occ: 62176-1248-P35_987, type: 12290
+Occ: 62176-1248-P35_988, type: 12290
+Occ: 62176-1248-P35_989, type: 12290
+Occ: 62176-1248-P35_990, type: 12290
+Occ: 62176-1248-P10_982, type: 12290
+Occ: 62176-1248-P11_983, type: 12290
+Occ: 62176-1248-P11_984, type: 12290
+Occ: 62176-1248-P35_985, type: 12290
+Occ: 62176-1248-P35_986, type: 12290
+Occ: 62176-1248-P35_987, type: 12290
+Occ: 62176-1248-P35_988, type: 12290
+Occ: 62176-1248-P35_989, type: 12290
+Occ: 62176-1248-P35_990, type: 12290
+Occ: SF-NP-03_7753K124_949, type: 12290
+Procesando pieza: SF-NP-03_7753K124
+Occ: 62176-1248-P32_980, type: 12290
+Procesando pieza: 62176-1248-P32
+Occ: 62176-1248-P31_Default<As Machined>_981, type: 12290
+Procesando pieza: 62176-1248-P31_Default_As Machined_
+Occ: 62176-1248-P32_980, type: 12290
+Occ: 62176-1248-P31_Default<As Machined>_981, type: 12290
+Occ: 62176-1248-P32_980, type: 12290
+Occ: 62176-1248-P31_Default<As Machined>_981, type: 12290
+Occ: SF-NP-03_7753K124_953, type: 12290
+Occ: 62176-1248-P46_954, type: 12290
+Procesando pieza: 62176-1248-P46
+Occ: 62176-1248-P46_955, type: 12290
+Occ: 62176-1248-P46_956, type: 12290
+Occ: 62176-1248-P37_957, type: 12290
+Procesando pieza: 62176-1248-P37
+Occ: 62176-1248-P37_958, type: 12290
+Occ: 62176-1248-P37_959, type: 12290
+Occ: 62176-1248-P50_960, type: 12290
+Procesando pieza: 62176-1248-P50
+Occ: SF-NP-03_7753K124_961, type: 12290
+Occ: 62176-1248-P26_963, type: 12290
+Procesando pieza: 62176-1248-P26
+Descanso de 10 segundos por cada 10 componentes (vamos en 10)...
+Occ: 62176-1248-P27_Default<As Machined>_964, type: 12290
+Procesando pieza: 62176-1248-P27_Default_As Machined_
+Occ: 62176-1248-P27_Default<As Machined>_965, type: 12290
+Occ: SP-741_966, type: 12290
+Procesando pieza: SP-741
+Occ: SF-HC-01_4452K212_969, type: 12290
+Procesando pieza: SF-HC-01_4452K212
+Occ: SF-HC-01_4452K212_970, type: 12290
+Occ: SF-NP-03_7753K124_971, type: 12290
+Occ: SP-797_972, type: 12290
+Procesando pieza: SP-797
+Occ: SP-797_973, type: 12290
+Occ: SP-797_974, type: 12290
+Occ: GUN STUD_975, type: 12290
+Procesando pieza: GUN STUD
+Occ: GUN STUD_976, type: 12290
+Occ: 62176-1248-P68_977, type: 12290
+Procesando pieza: 62176-1248-P68
+Occ: 62176-1248-P68_978, type: 12290
+Occ: 62176-1248-P68_979, type: 12290
+Occ: 62176-1248-P06_1:1, type: 12290
+Procesando pieza: 62176-1248-P06_1
+Occ: 62176-1248-P06_2:1, type: 12290
+Procesando pieza: 62176-1248-P06_2
+Occ: SP-740_1:1, type: 12290
+Procesando pieza: SP-740_1
+Occ: SP-740_2:1, type: 12290
+Procesando pieza: SP-740_2
+Descanso de 10 segundos por cada 10 componentes (vamos en 20)...
+Occ: SP-752_1:1, type: 12290
+Procesando pieza: SP-752_1
+Occ: SP-752_2:1, type: 12290
+Procesando pieza: SP-752_2
+Occ: SP-752_1:1, type: 12290
+Occ: SP-752_2:1, type: 12290
+Occ: 62176-1248-P14_939, type: 12290
+Procesando pieza: 62176-1248-P14
+Occ: 62176-1248-P15_940, type: 12290
+Procesando pieza: 62176-1248-P15
+Occ: 62176-1248-P15_941, type: 12290
+Occ: 62176-1248-P35_942, type: 12290
+Occ: 62176-1248-P35_943, type: 12290
+Occ: 62176-1248-P35_944, type: 12290
+Occ: 62176-1248-P35_945, type: 12290
+Occ: 62176-1248-P14_930, type: 12290
+Occ: 62176-1248-P15_931, type: 12290
+Occ: 62176-1248-P15_932, type: 12290
+Occ: 62176-1248-P35_933, type: 12290
+Occ: 62176-1248-P35_934, type: 12290
+Occ: 62176-1248-P35_935, type: 12290
+Occ: 62176-1248-P35_936, type: 12290
+Occ: 62176-1248-P35_937, type: 12290
+Occ: 62176-1248-P35_938, type: 12290
+Occ: 62176-1248-P32_980, type: 12290
+Occ: 62176-1248-P31_Default<As Machined>_981, type: 12290
+Occ: 62176-1248-P32_980, type: 12290
+Occ: 62176-1248-P31_Default<As Machined>_981, type: 12290
+Occ: 62176-1248-P32_980, type: 12290
+Occ: 62176-1248-P31_Default<As Machined>_981, type: 12290
+Occ: 62176-1248-P43_904, type: 12290
+Procesando pieza: 62176-1248-P43
+Occ: 62176-1248-P43_905, type: 12290
+Occ: SF-NP-03_7753K124_906, type: 12290
+Occ: L845.RADVLV_907, type: 12290
+Procesando pieza: L845.RADVLV
+Occ: L845.RADVLV_908, type: 12290
+Occ: 62176-1248-P43_909, type: 12290
+Occ: L845.RADVLV_918, type: 12290
+Occ: L845.RADVLV_919, type: 12290
+Occ: L845.RADVLV_920, type: 12290
+Occ: L845.RADVLV_921, type: 12290
+Occ: L845.RADVLV_922, type: 12290
+Occ: L845.RADVLV_923, type: 12290
+Occ: 62176-1248-P19_925, type: 12290
+Procesando pieza: 62176-1248-P19
+Occ: 62176-1248-P19_926, type: 12290
+Occ: 62176-1248-P19_927, type: 12290
+Occ: 62176-1248-P19_928, type: 12290
+Occ: GUNSTUD 2_929, type: 12290
+Procesando pieza: GUNSTUD 2
+Occ: 62176-1248-P08_1:1, type: 12290
+Procesando pieza: 62176-1248-P08_1
+Occ: 62176-1248-P08_2:1, type: 12290
+Procesando pieza: 62176-1248-P08_2
+Descanso de 10 segundos por cada 10 componentes (vamos en 30)...
+Occ: SP-771_1:1, type: 12290
+Procesando pieza: SP-771_1
+Occ: SP-771_2:1, type: 12290
+Procesando pieza: SP-771_2
+Occ: SP-771_1:1, type: 12290
+Occ: SP-771_2:1, type: 12290
+Occ: SP-771_1:1, type: 12290
+Occ: SP-771_2:1, type: 12290
+Occ: SP-771_1:1, type: 12290
+Occ: SP-771_2:1, type: 12290
+Occ: SP-771_1:1, type: 12290
+Occ: SP-771_2:1, type: 12290
+Occ: SP-771_1:1, type: 12290
+Occ: SP-771_2:1, type: 12290
+Occ: SP-771_1:1, type: 12290
+Occ: SP-771_2:1, type: 12290
+Occ: SP-771_1:1, type: 12290
+Occ: SP-771_2:1, type: 12290
+Occ: SP-852_1:1, type: 12290
+Procesando pieza: SP-852_1
+Occ: SP-852_2:1, type: 12290
+Procesando pieza: SP-852_2
+Occ: 62176-1248-P09_867, type: 12290
+Procesando pieza: 62176-1248-P09
+Occ: 62176-1248-P28_Predeterminado_895, type: 12290
+Procesando pieza: 62176-1248-P28_Predeterminado
+Occ: 62176-1248-P29_Predeterminado_896, type: 12290
+Procesando pieza: 62176-1248-P29_Predeterminado
+Occ: 62176-1248-P30_897, type: 12290
+Procesando pieza: 62176-1248-P30
+Occ: 62176-1248-P28_Predeterminado_895, type: 12290
+Occ: 62176-1248-P29_Predeterminado_896, type: 12290
+Occ: 62176-1248-P30_897, type: 12290
+Occ: 62176-1248-P50_870, type: 12290
+Occ: 62176-1248-P50_871, type: 12290
+Occ: 62176-1248-P50_872, type: 12290
+Occ: 62176-1248-P50_873, type: 12290
+Occ: 62176-1248-P12_892, type: 12290
+Procesando pieza: 62176-1248-P12
+Occ: 62176-1248-P13_893, type: 12290
+Procesando pieza: 62176-1248-P13
+Descanso de 10 segundos por cada 10 componentes (vamos en 40)...
+Occ: 62176-1248-P13_894, type: 12290
+Occ: 62176-1248-P12_892, type: 12290
+Occ: 62176-1248-P13_893, type: 12290
+Occ: 62176-1248-P13_894, type: 12290
+Occ: 62176-1248-P12_892, type: 12290
+Occ: 62176-1248-P13_893, type: 12290
+Occ: 62176-1248-P13_894, type: 12290
+Occ: 62176-1248-P50_878, type: 12290
+Occ: SP-797_879, type: 12290
+Occ: 62176-1248-P65_890, type: 12290
+Procesando pieza: 62176-1248-P65
+Occ: 62176-1248-P64_891, type: 12290
+Procesando pieza: 62176-1248-P64
+Occ: 62176-1248-P65_890, type: 12290
+Occ: 62176-1248-P64_891, type: 12290
+Occ: 62176-1248-P47_888, type: 12290
+Procesando pieza: 62176-1248-P47
+Occ: 62176-1248-P48_889, type: 12290
+Procesando pieza: 62176-1248-P48
+Occ: 62176-1248-P47_886, type: 12290
+Occ: 62176-1248-P48_887, type: 12290
+Occ: SP-799_884, type: 12290
+Procesando pieza: SP-799
+Occ: SP-799_885, type: 12290
+Occ: SP-852_1:1, type: 12290
+Occ: SP-852_2:1, type: 12290
+Occ: 62176-1248-P07_844, type: 12290
+Procesando pieza: 62176-1248-P07
+Occ: 62176-1248-P16_864, type: 12290
+Procesando pieza: 62176-1248-P16
+Occ: 62176-1248-P17_865, type: 12290
+Procesando pieza: 62176-1248-P17
+Occ: 62176-1248-P17_866, type: 12290
+Occ: 62176-1248-P16_864, type: 12290
+Occ: 62176-1248-P17_865, type: 12290
+Occ: 62176-1248-P17_866, type: 12290
+Occ: 62176-1248-P16_864, type: 12290
+Occ: 62176-1248-P17_865, type: 12290
+Occ: 62176-1248-P17_866, type: 12290
+Occ: 62176-1248-P28_Predeterminado_895, type: 12290
+Occ: 62176-1248-P29_Predeterminado_896, type: 12290
+Occ: 62176-1248-P30_897, type: 12290
+Occ: 62176-1248-P28_Predeterminado_895, type: 12290
+Occ: 62176-1248-P29_Predeterminado_896, type: 12290
+Occ: 62176-1248-P30_897, type: 12290
+Occ: SP-799_850, type: 12290
+Occ: 62176-1248-P47_888, type: 12290
+Occ: 62176-1248-P48_889, type: 12290
+Occ: 62176-1248-P47_886, type: 12290
+Occ: 62176-1248-P48_887, type: 12290
+Occ: SP-855_853, type: 12290
+Procesando pieza: SP-855
+Occ: SF-HC-01_4452K212_855, type: 12290
+Occ: 62176-1248-P38_Default<As Machined>_860, type: 12290
+Procesando pieza: 62176-1248-P38_Default_As Machined_
+Descanso de 10 segundos por cada 10 componentes (vamos en 50)...
+Occ: 62176-1248-P33_Default<As Machined>_861, type: 12290
+Procesando pieza: 62176-1248-P33_Default_As Machined_
+Occ: 62176-1248-P34_Default<As Machined>_862, type: 12290
+Procesando pieza: 62176-1248-P34_Default_As Machined_
+Occ: 62176-1248-P34_Default<As Machined>_863, type: 12290
+Occ: 62176-1248-P25_857, type: 12290
+Procesando pieza: 62176-1248-P25
+Occ: 62176-1248-P65_890, type: 12290
+Occ: 62176-1248-P64_891, type: 12290
+Occ: 62176-1248-P65_890, type: 12290
+Occ: 62176-1248-P64_891, type: 12290
+Occ: SP-767_1:1, type: 12290
+Procesando pieza: SP-767_1
+Occ: SP-767_2:1, type: 12290
+Procesando pieza: SP-767_2
+Occ: 62176-1248-P56_DefaultSM-FLAT-PATTERN_839, type: 12290
+Procesando pieza: 62176-1248-P56_DefaultSM-FLAT-PATTERN
+Occ: 62176-1248-P56_DefaultSM-FLAT-PATTERN_840, type: 12290
+Occ: 62176-1248-P56_DefaultSM-FLAT-PATTERN_841, type: 12290
+Occ: 62176-1248-P56_DefaultSM-FLAT-PATTERN_842, type: 12290
+Occ: 62176-1248-P01_843, type: 12290
+Procesando pieza: 62176-1248-P01
+Occ: 62176-1247-P01_708, type: 12290
+Procesando pieza: 62176-1247-P01
+Occ: 62176-1247-P03_709, type: 12290
+Procesando pieza: 62176-1247-P03
+Occ: 62176-1247-P03_710, type: 12290
+Occ: 62176-1247-P02_711, type: 12290
+Procesando pieza: 62176-1247-P02
+Descanso de 10 segundos por cada 10 componentes (vamos en 60)...
+Occ: 62176-1247-P12_712, type: 12290
+Procesando pieza: 62176-1247-P12
+Occ: 62176-1247-P02_713, type: 12290
+Occ: 62176-1247-P09_714, type: 12290
+Procesando pieza: 62176-1247-P09
+Occ: 62176-1247-P09_715, type: 12290
+Occ: 62176-1247-P09_716, type: 12290
+Occ: 62176-1247-P09_717, type: 12290
+Occ: 62176-1247-P11_721, type: 12290
+Procesando pieza: 62176-1247-P11
+Occ: SP-702_722, type: 12290
+Procesando pieza: SP-702
+Occ: SP-702_723, type: 12290
+Occ: SP-702_724, type: 12290
+Occ: SP-702_725, type: 12290
+Occ: SP-736_728, type: 12290
+Procesando pieza: SP-736
+Occ: 62176-1247-P10_Default<As Machined>_729, type: 12290
+Procesando pieza: 62176-1247-P10_Default_As Machined_
+Occ: 62176-1247-P10_Default<As Machined>_730, type: 12290
+Occ: 62176-1247-P12_731, type: 12290
+Occ: 62176-1247-P11_732, type: 12290
+Occ: 62176-1247-P06_733, type: 12290
+Procesando pieza: 62176-1247-P06
+Occ: 62176-1247-P06_734, type: 12290
+Occ: HW-CN-01_738, type: 12290
+Procesando pieza: HW-CN-01
+Occ: HW-CN-01_739, type: 12290
+Occ: HW-CN-01_740, type: 12290
+Occ: HW-CN-01_741, type: 12290
+Occ: HW-CN-01_742, type: 12290
+Occ: HW-CN-01_743, type: 12290
+Occ: HW-CN-01_744, type: 12290
+Occ: HW-CN-01_745, type: 12290
+Occ: HW-CN-01_746, type: 12290
+Occ: HW-CN-01_747, type: 12290
+Occ: HW-CN-01_748, type: 12290
+Occ: HW-CN-01_749, type: 12290
+Occ: FPP-PELSUE_750, type: 12290
+Procesando pieza: FPP-PELSUE
+Occ: FPP-PELSUE_751, type: 12290
+Occ: 62176-1247-P04_832, type: 12290
+Procesando pieza: 62176-1247-P04
+Descanso de 10 segundos por cada 10 componentes (vamos en 70)...
+Occ: 62176-1247-P13_833, type: 12290
+Procesando pieza: 62176-1247-P13
+Occ: 62176-1247-P08_834, type: 12290
+Procesando pieza: 62176-1247-P08
+Occ: 62176-1247-P07_829, type: 12290
+Procesando pieza: 62176-1247-P07
+Occ: 62176-1247-P13_830, type: 12290
+Occ: 62176-1247-P08_831, type: 12290
+Occ: 62176-1247-P07_829, type: 12290
+Occ: 62176-1247-P13_830, type: 12290
+Occ: 62176-1247-P08_831, type: 12290
+Occ: HW-CN-01_756, type: 12290
+Occ: HW-CN-01_757, type: 12290
+Occ: HW-CN-01_758, type: 12290
+Occ: HW-CN-01_759, type: 12290
+Occ: 62176-1260-P07_810, type: 12290
+Procesando pieza: 62176-1260-P07
+Occ: 62176-1260-P05_811, type: 12290
+Procesando pieza: 62176-1260-P05
+Occ: HW-FW-01_812, type: 12290
+Procesando pieza: HW-FW-01
+Occ: HW-HN-03_95462A033_813, type: 12290
+Procesando pieza: HW-HN-03_95462A033
+Occ: HW-HN-03_95462A033_814, type: 12290
+Occ: HW-HN-03_95462A033_815, type: 12290
+Occ: HW-HN-03_95462A033_816, type: 12290
+Occ: HW-FW-01_817, type: 12290
+Occ: HW-FW-01_818, type: 12290
+Occ: HW-FW-01_819, type: 12290
+Occ: 62176-1260-P05_820, type: 12290
+Occ: 62176-1260-P05_821, type: 12290
+Occ: 62176-1260-P05_822, type: 12290
+Occ: HW-HN-03_95462A033_823, type: 12290
+Occ: HW-HN-03_95462A033_824, type: 12290
+Occ: HW-HN-03_95462A033_825, type: 12290
+Occ: HW-HN-03_95462A033_826, type: 12290
+Occ: 62176-1260-P07_791, type: 12290
+Occ: 62176-1260-P03_792, type: 12290
+Procesando pieza: 62176-1260-P03
+Occ: HW-FW-01_793, type: 12290
+Occ: HW-HN-03_95462A033_794, type: 12290
+Occ: HW-HN-03_95462A033_795, type: 12290
+Occ: HW-HN-03_95462A033_796, type: 12290
+Occ: HW-HN-03_95462A033_797, type: 12290
+Occ: HW-FW-01_798, type: 12290
+Occ: HW-FW-01_799, type: 12290
+Occ: HW-FW-01_800, type: 12290
+Occ: 62176-1260-P03_801, type: 12290
+Occ: 62176-1260-P03_802, type: 12290
+Occ: 62176-1260-P03_803, type: 12290
+Occ: HW-HN-03_95462A033_804, type: 12290
+Occ: HW-HN-03_95462A033_805, type: 12290
+Occ: HW-HN-03_95462A033_806, type: 12290
+Occ: HW-HN-03_95462A033_807, type: 12290
+Occ: 62176-1260-P07_773, type: 12290
+Occ: 62176-1260-P04_774, type: 12290
+Procesando pieza: 62176-1260-P04
+Occ: HW-FW-01_775, type: 12290
+Occ: HW-HN-03_95462A033_776, type: 12290
+Occ: HW-HN-03_95462A033_777, type: 12290
+Occ: HW-HN-03_95462A033_778, type: 12290
+Occ: HW-HN-03_95462A033_779, type: 12290
+Occ: HW-FW-01_780, type: 12290
+Occ: HW-FW-01_781, type: 12290
+Occ: HW-FW-01_782, type: 12290
+Occ: 62176-1260-P04_783, type: 12290
+Occ: 62176-1260-P04_784, type: 12290
+Occ: 62176-1260-P04_785, type: 12290
+Occ: HW-HN-03_95462A033_786, type: 12290
+Occ: HW-HN-03_95462A033_787, type: 12290
+Occ: HW-HN-03_95462A033_788, type: 12290
+Occ: HW-HN-03_95462A033_789, type: 12290
+Occ: 62176-1260-P07_773, type: 12290
+Occ: 62176-1260-P04_774, type: 12290
+Occ: HW-FW-01_775, type: 12290
+Occ: HW-HN-03_95462A033_776, type: 12290
+Occ: HW-HN-03_95462A033_777, type: 12290
+Occ: HW-HN-03_95462A033_778, type: 12290
+Occ: HW-HN-03_95462A033_779, type: 12290
+Occ: HW-FW-01_780, type: 12290
+Occ: HW-FW-01_781, type: 12290
+Occ: HW-FW-01_782, type: 12290
+Occ: 62176-1260-P04_783, type: 12290
+Occ: 62176-1260-P04_784, type: 12290
+Occ: 62176-1260-P04_785, type: 12290
+Occ: HW-HN-03_95462A033_786, type: 12290
+Occ: HW-HN-03_95462A033_787, type: 12290
+Occ: HW-HN-03_95462A033_788, type: 12290
+Occ: HW-HN-03_95462A033_789, type: 12290
+Occ: 62176-1247-P10_Default<As Machined>_764, type: 12290
+Occ: 62176-1247-P10_Default<As Machined>_765, type: 12290
+Occ: 62176-1247-P11_766, type: 12290
+Occ: 62176-1247-P11_767, type: 12290
+Occ: 62176-1247-P15_768, type: 12290
+Procesando pieza: 62176-1247-P15
+Descanso de 10 segundos por cada 10 componentes (vamos en 80)...
+Occ: 62176-1247-P15_769, type: 12290
+Occ: SP-774_770, type: 12290
+Procesando pieza: SP-774
+Occ: SP-855_771, type: 12290
+Occ: SP-851_1:1, type: 12290
+Procesando pieza: SP-851_1
+Occ: SP-851_2:1, type: 12290
+Procesando pieza: SP-851_2
+Occ: SP-851_1:1, type: 12290
+Occ: SP-851_2:1, type: 12290
+Occ: SP-851_1:1, type: 12290
+Occ: SP-851_2:1, type: 12290
+Occ: SP-788_1:1, type: 12290
+Procesando pieza: SP-788_1
+Occ: SP-788_2:1, type: 12290
+Procesando pieza: SP-788_2
+Occ: SP-788_1:1, type: 12290
+Occ: SP-788_2:1, type: 12290
+Occ: SP-851_1:1, type: 12290
+Occ: SP-851_2:1, type: 12290
+Occ: SP-851_1:1, type: 12290
+Occ: SP-851_2:1, type: 12290
+Occ: SP-851_1:1, type: 12290
+Occ: SP-851_2:1, type: 12290
+Occ: SP-851_1:1, type: 12290
+Occ: SP-851_2:1, type: 12290
+Occ: SP-800_3, type: 12290
+Procesando pieza: SP-800
+Occ: 62176-1254-P07_703, type: 12290
+Procesando pieza: 62176-1254-P07
+Occ: 62176-1254-P04_704, type: 12290
+Procesando pieza: 62176-1254-P04
+Occ: 62176-1254-P03_705, type: 12290
+Procesando pieza: 62176-1254-P03
+Occ: 62176-1254-P01_706, type: 12290
+Procesando pieza: 62176-1254-P01
+Descanso de 10 segundos por cada 10 componentes (vamos en 90)...
+Occ: 62176-1254-P02_707, type: 12290
+Procesando pieza: 62176-1254-P02
+Occ: 62176-1254-P07_703, type: 12290
+Occ: 62176-1254-P04_704, type: 12290
+Occ: 62176-1254-P03_705, type: 12290
+Occ: 62176-1254-P01_706, type: 12290
+Occ: 62176-1254-P02_707, type: 12290
+Occ: 62176-1254-P07_703, type: 12290
+Occ: 62176-1254-P04_704, type: 12290
+Occ: 62176-1254-P03_705, type: 12290
+Occ: 62176-1254-P01_706, type: 12290
+Occ: 62176-1254-P02_707, type: 12290
+Occ: SP-800_7, type: 12290
+Occ: 62176-1252-P01_8, type: 12290
+Procesando pieza: 62176-1252-P01
+Occ: 62176-1253-P07_696, type: 12290
+Procesando pieza: 62176-1253-P07
+Occ: 62176-1253-P04_697, type: 12290
+Procesando pieza: 62176-1253-P04
+Occ: 62176-1253-P03_698, type: 12290
+Procesando pieza: 62176-1253-P03
+Occ: 62176-1253-P01_699, type: 12290
+Procesando pieza: 62176-1253-P01
+Occ: 62176-1253-P02_700, type: 12290
+Procesando pieza: 62176-1253-P02
+Occ: 62176-1253-P05_701, type: 12290
+Procesando pieza: 62176-1253-P05
+Occ: 62176-1253-P02_702, type: 12290
+Occ: 62176-1253-P07_691, type: 12290
+Occ: 62176-1253-P04_692, type: 12290
+Occ: 62176-1253-P03_693, type: 12290
+Occ: 62176-1253-P01_694, type: 12290
+Occ: 62176-1253-P02_695, type: 12290
+Occ: SP-792_11, type: 12290
+Procesando pieza: SP-792
+Occ: 62176-1251-P05_Default<As Machined>_681, type: 12290
+Procesando pieza: 62176-1251-P05_Default_As Machined_
+Descanso de 10 segundos por cada 10 componentes (vamos en 100)...
+Occ: 62176-1251-P04_682, type: 12290
+Procesando pieza: 62176-1251-P04
+Occ: 62176-1251-P03_TAB_688, type: 12290
+Procesando pieza: 62176-1251-P03_TAB
+Occ: 62176-1251-P06_ROD_689, type: 12290
+Procesando pieza: 62176-1251-P06_ROD
+Occ: 62176-1251-P07_ROD_690, type: 12290
+Procesando pieza: 62176-1251-P07_ROD
+Occ: 62176-1251-P04_684, type: 12290
+Occ: 62176-1251-P03_TAB_688, type: 12290
+Occ: 62176-1251-P06_ROD_689, type: 12290
+Occ: 62176-1251-P07_ROD_690, type: 12290
+Occ: 62176-1251-P03_TAB_688, type: 12290
+Occ: 62176-1251-P06_ROD_689, type: 12290
+Occ: 62176-1251-P07_ROD_690, type: 12290
+Occ: 62176-1251-P04_687, type: 12290
+Occ: 62176-1251-P01_17, type: 12290
+Procesando pieza: 62176-1251-P01
+Occ: SP-792_1_1:1, type: 12290
+Procesando pieza: SP-792_1_1
+Occ: SP-792_1_2:1, type: 12290
+Procesando pieza: SP-792_1_2
+Occ: SP-792_1_3:1, type: 12290
+Procesando pieza: SP-792_1_3
+Occ: SP-776_1:1, type: 12290
+Procesando pieza: SP-776_1
+Occ: SP-776_2:1, type: 12290
+Procesando pieza: SP-776_2
+Descanso de 10 segundos por cada 10 componentes (vamos en 110)...
+Occ: SP-776_3:1, type: 12290
+Procesando pieza: SP-776_3
+Occ: SP-776_4:1, type: 12290
+Procesando pieza: SP-776_4
+Occ: 62176-1247-P05_677, type: 12290
+Procesando pieza: 62176-1247-P05
+Occ: SP-710_678, type: 12290
+Procesando pieza: SP-710
+Occ: 62176-1247-P05_677, type: 12290
+Occ: SP-710_678, type: 12290
+Occ: 62176-1247-P05_677, type: 12290
+Occ: SP-710_678, type: 12290
+Occ: 62176-1253-P07_670, type: 12290
+Occ: 62176-1253-P04_671, type: 12290
+Occ: 62176-1253-P02_672, type: 12290
+Occ: 62176-1253-P05_673, type: 12290
+Occ: 62176-1253-P02_674, type: 12290
+Occ: 62176-1253-P03_675, type: 12290
+Occ: 62176-1253-P01_676, type: 12290
+Occ: SP-798_23, type: 12290
+Procesando pieza: SP-798
+Occ: SP-798_24, type: 12290
+Occ: SP-798_25, type: 12290
+Occ: SP-798_26, type: 12290
+Occ: FT-PRD-01_28, type: 12290
+Procesando pieza: FT-PRD-01
+Occ: SP-742_40, type: 12290
+Procesando pieza: SP-742
+Occ: 62176-1249-P01_Default<As Machined>_41, type: 12290
+Procesando pieza: 62176-1249-P01_Default_As Machined_
+Occ: 62176-1252-P01_30, type: 12290
+Occ: 62176-1248-P62_68095K351_38, type: 12290
+Procesando pieza: 62176-1248-P62_68095K351
+Occ: SF-CP-04_4513K263_39, type: 12290
+Procesando pieza: SF-CP-04_4513K263
+Descanso de 10 segundos por cada 10 componentes (vamos en 120)...
+Occ: 62176-1248-P71_33, type: 12290
+Procesando pieza: 62176-1248-P71
+Occ: 62176-1248-P71_34, type: 12290
+Occ: 62176-1248-P71_35, type: 12290
+Occ: SP-800_36, type: 12290
+Occ: SP-800_37, type: 12290
+✅ Vistas generadas correctamente para 121 piezas.
