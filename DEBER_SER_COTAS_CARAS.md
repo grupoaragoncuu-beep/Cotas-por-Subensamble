@@ -2,7 +2,7 @@
 
 Documento de verdad del flujo. Si el código o una conversación contradicen esto, gana este archivo.
 
-Última actualización: 2026-08-07
+Última actualización: 2026-08-12
 
 ---
 
@@ -29,10 +29,10 @@ El flujo obtiene los segmentos del **árbol del tanque completo**. Cada vista se
 
 ## 3. Salida
 
-- Carpeta: `Planos/JPG/<nombre_ensamble>/`.
-- `COTAS_POR_REFERENCIA/`: subcarpetas `FRONT/`, `BACK/`, `LEFT/`, `RIGHT/`; cada una contiene una foto JPG por referencia de la pared, con nombre secuencial, eje y extremo.
-- `PIEZAS_ACOTADAS/`: salida independiente del flujo original `COTAS_ILOGIC_ABIGAIL`; contiene las hojas JPG de vistas y cotas por pieza generadas desde los subensambles del tanque.
-- Log: `Planos/error_log_caras.txt` (debe registrar `cara <- segmento/subensamble`)
+- Carpeta raíz: `Planos/JPG/<nombre_ensamble>/`.
+- `COTAS_POR_REFERENCIA/`: subcarpetas `FRONT/`, `BACK/`, `LEFT/`, `RIGHT/`, `TOP/`; cada una contiene una foto JPG por referencia de esa cara, con nombre secuencial, eje y extremo.
+- `PIEZAS_ACOTADAS/`: salida independiente del flujo original `COTAS_ILOGIC_ABIGAIL`. Se **divide por cara** con las mismas subcarpetas `FRONT/ BACK/ LEFT/ RIGHT/ TOP/` y una carpeta `OTROS/` para piezas que no puedan mapearse a una cara. Cada JPG por pieza cae en la subcarpeta del segmento al que pertenece por geometría.
+- Log: `Planos/error_log_caras.txt` (debe registrar `cara <- segmento/subensamble` para las 5 caras y el conteo por subcarpeta de `PIEZAS_ACOTADAS`).
 - Al terminar: borrar hojas temporales `TANQUE_DATUM_*` y dejar visible la hoja plantilla del machote (**nunca** quedarse en `Model (AutoCAD)`).
 
 ---
@@ -111,7 +111,7 @@ Muchas **no** usan la palabra “Segmento”. Hay que:
 1. Detectar subensambles (o clusters) asociados a cada pared exterior, y/o  
 2. Asignar por **geometría** (centroide vs normales de las 4 paredes).
 
-### Mapeo FRONT / BACK / LEFT / RIGHT
+### Mapeo FRONT / BACK / LEFT / RIGHT / TOP
 
 No confiar en el número del nombre (`Segmento 1` ≠ FRONT siempre).
 
@@ -121,9 +121,10 @@ Mapear por centroide 3D del contenedor contra las normales de cámara estilo PQa
 - BACK ↔ `-face`
 - RIGHT ↔ `+right`
 - LEFT ↔ `-right`
+- **TOP ↔ `+cover` (tapa)**
 
 Log obligatorio por cara, por ejemplo:  
-`FRONT <- Assembly Segmento 2` o `FRONT <- 62201-1248-A05 (auto)`.
+`FRONT <- Assembly Segmento 2` o `FRONT <- 62201-1248-A05 (auto)` o `TOP <- TAPA_A01 (por nombre)`.
 
 ---
 
@@ -132,8 +133,9 @@ Log obligatorio por cara, por ejemplo:
 - Criterio PQart de postura: tapa/arriba ≈ **+Y**; cara principal ≈ **+Z** (`face`); lateral ≈ **+X** (`right`).
 - Las cámaras de foto miran las **paredes reales** (normales de caras planas), **sin** forzar ejes mundo puros (eso deja el tanque “chueco” en el JPG).
 - Enderezar la vista en hoja si los bordes largos salen rotados unos grados.
+- Para la cara **TOP** la cámara mira desde `+Y` hacia abajo, usando la misma placa madre lógica: la superficie superior del ensamble de tapa (mayor área proyectada horizontal).
 
-No acotar tapa superior ni base como si fueran una de las 4 paredes laterales.
+**Base (fondo) del tanque:** **NO** se acota. Solo se cubren las 4 paredes laterales + TOP.
 
 ---
 
@@ -167,13 +169,15 @@ Detalle del barrido: `Planos/_analisis_steps_op_resultado.txt` (auxiliar).
 | Check | OK |
 |-------|----|
 | Preparación | Machote + tanque completo |
-| 4 JPG | Una pared por archivo, tanque derecho, fondo claro |
-| Cotas | Líneas H/V desde (0,0), legibles |
-| Contenido | Accesorios del segmento y accesorios raíz físicamente asignados a esa cara |
-| Log | Mapeo `cara <- segmento` y conteos coherentes |
+| Caras generadas | 5: FRONT, BACK, LEFT, RIGHT, TOP (una por carpeta con sus JPG) |
+| Cotas | Líneas H/V desde (0,0) de cada cara, legibles |
+| Contenido de cada cara | Accesorios del segmento + accesorios raíz físicamente asignados a esa cara |
+| PIEZAS_ACOTADAS | Subcarpetas FRONT/ BACK/ LEFT/ RIGHT/ TOP/ (+ OTROS si aplica) con conteo coherente |
+| Base | No hay carpeta ni JPG de la base |
+| Log | Mapeo `cara <- segmento` para 5 caras y conteos de PIEZAS_ACOTADAS por subcarpeta |
 | Machote | Limpio, plantilla visible |
 
-Validar al menos: **Vantran** (segmentos claros) y un **OTC** (códigos, sin “Segmento”).
+Validar al menos: **Vantran** (segmentos claros) y un **OTC** (códigos, sin “Segmento”). Si un tanque no tiene tapa detectable, el flujo debe reportarlo en el log y **omitir TOP** sin abortar el resto.
 
 ---
 

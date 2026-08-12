@@ -41,37 +41,45 @@ Checklist Go (todos deben cumplirse o justificarse):
 | Método | dockur/windows-arm (`ghcr.io/dockur/windows-arm`) |
 | Contenedor | `nvidia_spark_win11_arm` — 16G RAM / 6 cores / 120G disco |
 | Acceso | `http://localhost:8006` → HTTP 200 |
-| Resultado | **OK parcial** — contenedor arriba; Windows aún en descarga/instalación automática |
-| Evidencia | Compose + logs en Spark `~/NvidiaSpark_Win11_Inventor/` + captura chat remoto |
+| Resultado | **OK** — escritorio Windows 11 ARM visible en `localhost:8006` (2026-08-11) |
+| Evidencia | Compose + logs en Spark `~/NvidiaSpark_Win11_Inventor/` + captura desktop Win11 |
 
 ---
 
 ## Fase 3 — Instalación Inventor
 | Campo | Valor |
 |-------|--------|
-| Fecha/hora | _(pendiente)_ |
-| Versión Inventor | _(pendiente)_ |
-| Resultado | PENDIENTE |
-| Evidencia | capturas + log instalador |
+| Fecha/hora | 2026-08-11 → 2026-08-12 |
+| Versión Inventor | Autodesk Inventor Professional (instalador oficial copiado desde PC del usuario vía carpeta Shared del contenedor) |
+| Resultado | **INSTALACIÓN OK / EJECUCIÓN FAIL** |
+| Detalle | Inventor instaló correctamente dentro de Win11 ARM. Al abrirlo, la aplicación se cierra inesperadamente y muestra "Autodesk Inventor Error Report — A software problem has caused Autodesk Inventor to close unexpectedly." |
+| Evidencia | Captura del diálogo de crash `Autodesk Inventor Error Report` (2026-08-12) |
 
 ---
 
 ## Fase 4 — Pruebas de usabilidad
-| Prueba | Resultado | Tiempo / observación | Evidencia |
-|--------|-----------|----------------------|-----------|
-| Abrir Inventor | PENDIENTE | | |
-| Pieza simple | PENDIENTE | | |
-| Ensamble pequeño | PENDIENTE | | |
-| Orbit/pan | PENDIENTE | | |
-| Estabilidad 30 min | PENDIENTE | | |
+| Prueba | Resultado | Observación |
+|--------|-----------|-------------|
+| Abrir Inventor | FAIL | Crash al inicio de la aplicación |
+| Pieza simple | NO EJECUTABLE | No se llegó a la UI de modelado |
+| Ensamble | NO EJECUTABLE | Idem |
+| Orbit/pan | NO EJECUTABLE | Idem |
+| Estabilidad 30 min | NO APLICA | La aplicación no se mantiene abierta |
+
+Causa técnica más probable (coincide con lo pronosticado en la Fase 0):
+- Windows 11 ARM + Inventor x64 vía emulación **Prism**.
+- Sin GPU passthrough / vGPU en la VM → gráficos por software.
+- Autodesk **no soporta oficialmente** Inventor sobre Windows on ARM ni sobre VM sin GPU certificada.
+- Combinación no soportada → crash del proceso al iniciar.
 
 ---
 
 ## Fase 5 — Conclusión para jefatura
 | Campo | Valor |
 |-------|--------|
-| Fecha/hora | _(pendiente)_ |
-| ¿Se siguió el método ordenado? | SÍ (a completar) |
-| ¿Es viable para producción CAD? | _(pendiente)_ |
-| Causa raíz si falla | _(pendiente: ARM / sin GPU VM / emulación / permisos / etc.)_ |
-| Recomendación | _(pendiente)_ |
+| Fecha/hora | 2026-08-12 |
+| ¿Se siguió el método ordenado? | **SÍ** — VM Win11 en NvidiaSpark levantada, Inventor instalado |
+| ¿Es viable para producción CAD? | **NO** — Inventor no arranca establemente en este entorno |
+| Causa raíz | Combinación ARM64 (host) + Win11 ARM (VM) + Inventor x64 emulado + sin GPU dedicada = no soportado por Autodesk → crash |
+| Recomendación | Continuar trabajo productivo con Inventor en **PC Windows x64 con GPU certificada** (equipo actual del usuario). Mantener NvidiaSpark para automatización, análisis de datos y scripts Python del proyecto. Piloto cerrado con evidencia; se ejecutó el método ordenado. |
+| Deslinde | Se agotó la ruta ordenada por jefatura hasta el punto donde el fabricante (Autodesk) no soporta el entorno. Fallo por limitaciones de plataforma, no por omisión del procedimiento. |
