@@ -1,0 +1,107 @@
+Carpeta: C:\Proyectos\COTAS ABIGAIL\COTAS ABIGAIL\Tanques
+STEPs encontrados: 5
+==============================================================================
+
+### 62154-1246-A01.step
+  familia estimada : CODIGO_62154
+  peso             : 24.26 MB
+  productos totales: 142
+  buckets          : {'OTRO': 139, 'CASCO': 1, 'ACCESORIO': 1, 'TAPA': 1}
+  candidatos TAPA  : 1
+    - AC-CG-02_COVER ON
+  segmentos nombre : 0
+  accesorios (top) : ['L845.002.002_0.5 INCH BALL VALVE']
+  casco (top)      : ['FALL PROTECTION PLATE (ORIGINAL)']
+  preview          : ['62154-1260-P02', '62154-1247-A01', '62154-1247-P06', 'L871.CT09A-067-152', 'SF-HC-01_4452K212', '62154-1247-P09', '62154-1260-P01', '62154-1248-P35', '62154-1252-A01', '62154-1248-P54']
+
+### 62176-1246-A01 LIMPIO Y MARCADO.stp
+  familia estimada : CODIGO_62176
+  peso             : 6.88 MB
+  productos totales: 173
+  buckets          : {'OTRO': 172, 'CASCO': 1}
+  candidatos TAPA  : 0
+  segmentos nombre : 0
+  casco (top)      : ['62176-1248-A12_Bottom']
+  preview          : ['62176-1246-A01', '62176-1248-A01', '62176-1248-A03', '62176-1248-A07', '62176-1248-P10', '62176-1248-P11', '62176-1248-P46', '62176-1248-P37', '62176-1248-P26', '62176-1248-P27_Default<As Machined>']
+
+### 9919-Board 1.STEP
+  familia estimada : BOARD
+  peso             : 48.19 MB
+  productos totales: 102
+  buckets          : {'OTRO': 99, 'ACCESORIO': 1, 'CASCO': 2}
+  candidatos TAPA  : 0
+  segmentos nombre : 0
+  accesorios (top) : ['AcuCT-S650-Series-Mounting Bracket R']
+  casco (top)      : ['90126A011_Zinc-Plated Steel SAE Washer_90126A011', '91090A112_Zinc-Plated Steel Oversized Washer_91090A112']
+  preview          : ['ABB-42-BCK-713', 'AcuCT-S650-Series-Mounting Bracket R', '95462A031_Medium-Strength Steel Hex Nut_95462A031', 'GENE-OP-1020-116', '90126A011_Zinc-Plated Steel SAE Washer_90126A011', 'M8 carriage bolt stack 6mm', '91247A638_Medium-Strength Grade 5 Steel Hex Head Screw_91247A638', 'ABB-42-BCK-731', '91247A632_Medium-Strength Grade 5 Steel Hex Head Screw_91247A632', 'GENE-DF-10-165']
+
+### MODELO VANTRAN 251007.stp
+  familia estimada : VANTRAN
+  peso             : 3.05 MB
+  productos totales: 72
+  buckets          : {'OTRO': 22, 'SEGMENTO': 13, 'CASCO': 8, 'ACCESORIO': 22, 'TAPA': 7}
+  candidatos TAPA  : 7
+    - BUSHING PATCH TAPA
+    - BUSHING PATCH TAPA_1
+    - BUSHING PATCH TAPA 2
+    - BUSHING PATCH TAPA_2
+    - BUSHING PATCH TAPA 2 S4
+    - Top_Cover_Assembly1
+    - Top_Cover_1
+  segmentos nombre : 13
+    - Assembly Segmento 1
+    - Placa Segmento 1
+    - Solera Segmento 1
+    - Assembly Segmento 1_1
+    - Assembly Segmento 2
+    - Placa Segmento 2
+  accesorios (top) : ['STAINLESS GROUND PAD', 'PIPE FLANGE 0.250', 'PIPE FLANGE 1', 'TIERRA REDONDA', "VT-6061-.375'' Pipe Flange", 'PIPE FLANE 0.375', 'Parking Stand w base', 'H.V parking Std', 'SWITCH PATCH 1', 'VT-5657-R1-D3000 Lifting Lug With Chain Retainer', 'JACKING PADS ASSEMBLY', 'jacking pads']
+  casco (top)      : ['PLATE FOR SEG. 1', 'PLATE FOR SEG. 2', 'Inspection_Plate', 'Base de soleras', 'MARCO SOLERA', 'Marco de Soleras', 'Base Vantran solera Ansi Aisc rectangular 1X1.2', 'Placa Base de Soleras']
+  preview          : ['MODELO VANTRAN', 'Assembly Segmento 1', 'PLATE FOR SEG. 1', 'Placa Segmento 1', 'STAINLESS GROUND PAD', 'PIPE FLANGE 0.250', 'PIPE FLANGE 1', 'TIERRA REDONDA', 'BUSHING PATCH TAPA', 'BUSHING PATCH TAPA_1']
+
+### SUNBELT TANK 3,750KVA.stp
+  familia estimada : SUNBELT
+  peso             : 8.61 MB
+  productos totales: 79
+  buckets          : {'OTRO': 56, 'TAPA': 14, 'ACCESORIO': 7, 'CASCO': 2}
+  candidatos TAPA  : 14
+    - Tapa trasera ATC
+    - Tapa superior ATC
+    - Top cover
+    - Top cover_1
+    - Tapa top cover
+    - Angulo cover
+    - Angulo cover 2
+    - TAPA INTERNA TOP COVER
+    - Tapa interna angulos
+    - MANIJA TAPA EXTERNA
+    - MANIJA TAPA EXTERNA_MIR
+    - PIN TAPA
+    - BISAGRA COVER
+    - BISAGRA COVER_1
+  segmentos nombre : 0
+  accesorios (top) : ['RADIATOR FLANGE', 'LIFTINGLUG', 'LIFTINGLUGCOMPLETA', 'JACKIN PAD COMPLETA', 'LIFTINGLUG1', 'LIFTINGLUG2', 'LIFTINGLUG3']
+  casco (top)      : ['SOLERA CHICA', 'SOLERA GRANDE']
+  preview          : ['SUNBELT TANK 3,750KVA', 'pared frontal superior FALTA EDITAR', 'pared frontal superior OK', 'Cara inferior ATC', 'Pared interna ATC', 'Poste ATC', 'Puerta ATC', 'Pared grande ATC', 'PREFORMADO ATC', 'Tapa trasera ATC']
+
+==============================================================================
+RESUMEN
+==============================================================================
+Familias detectadas: {'CODIGO_62154': 1, 'CODIGO_62176': 1, 'BOARD': 1, 'VANTRAN': 1, 'SUNBELT': 1}
+
+archivo                                       familia      tapa?  segs
+------------------------------------------------------------------------------
+62154-1246-A01.step                           CODIGO_6215  SI     0
+62176-1246-A01 LIMPIO Y MARCADO.stp           CODIGO_6217  no     0
+9919-Board 1.STEP                             BOARD        no     0
+MODELO VANTRAN 251007.stp                     VANTRAN      SI     13
+SUNBELT TANK 3,750KVA.stp                     SUNBELT      SI     0
+
+Interpretacion:
+  - 'tapa? SI' = el STEP conserva un nombre reconocible como tapa;
+    en Inventor lo detectara `_es_nombre_tapa`.
+  - 'tapa? no' = tocara fallback geometrico +cover para TOP.
+    Si el flujo omite TOP con 'no se detecto subensamble de tapa',
+    revisar aqui si el STEP realmente contiene una tapa como IAM raiz.
+  - 'segs > 0' = tanque estilo Vantran con segmentos nombrados;
+    para OTC lo esperado es segs=0 y el flujo cae a deteccion geometrica.

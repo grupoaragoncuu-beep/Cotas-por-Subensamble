@@ -67,10 +67,26 @@ Fuente de verdad de reglas: [`../DEBER_SER_COTAS_CARAS.md`](../DEBER_SER_COTAS_C
 - [ ] La suma de JPG por subcarpeta coincide con el conteo total de piezas del tanque (menos placa madre y elementos excluidos por reglas).
 - [ ] Muestreo: 2 piezas al azar por carpeta se ven correctamente acotadas (según reglas del DEBER_SER).
 
-### C. Universalidad
-- [ ] OTC probado (`62176-1246-A01 LIMPIO Y MARCADO.iam`): OK / detalle: _____
-- [ ] Vantran probado (`MODELO VANTRAN 251007` o similar): OK / detalle: _____
-- [ ] Al menos un tanque **sin tapa detectable**: log dice “TOP omitido, motivo=...” y el resto se genera bien.
+### C. Universalidad (battery de tanques locales en `Tanques/`)
+
+Pre-diagnóstico automático disponible en `Planos/_analisis_tanques_locales_resultado.txt` (se regenera con `python _analisis_tanques_locales.py`).
+
+Comportamiento **esperado** por tanque (base contra la que comparar el log real):
+
+| Tanque | Familia | Ruta esperada de detección | ¿Debe generar TOP? | Notas |
+|--------|---------|----------------------------|--------------------|-------|
+| `MODELO VANTRAN 251007.stp` | VANTRAN | Raíz nombrada (13 `Segmento*`) + tapa por nombre (`Top_Cover_Assembly1` u otro) | **SÍ** | Caso de oro. Es el que debe validar el flujo entero de forma más limpia. |
+| `SUNBELT TANK 3,750KVA.stp` | SUNBELT | Contenedor geométrico de 4 paredes + tapa por nombre; hay `Tapa trasera ATC` que NO es superior — la selección por altura (+cover) debe elegir la correcta | **SÍ** | Universalidad no-Vantran, español. Si TOP sale con "Tapa trasera", es bug: revisar `_detectar_tapa_como_segmento`. |
+| `62154-1246-A01.step` | OTC 62154 | Contenedor geométrico + tapa por nombre débil (`AC-CG-02_COVER ON`) o fallback +Y | **SÍ** | OTC con match tenue por nombre. |
+| `62176-1246-A01 LIMPIO Y MARCADO.iam` | OTC 62176 | Contenedor geométrico + **fallback geométrico +Y** (la tapa `62176-1247-A01.iam` no tiene keyword) | **SÍ** (crítico) | Caso crítico del fallback geométrico. Si TOP se omite aquí, el fallback no funciona y hay que ajustarlo. |
+| `9919-Board 1.STEP` | BOARD (tablero) | Debe fallar en "no se detectaron cuatro paredes reales" | **N/A** | Edge case. Confirmar que el flujo rechaza correctamente y no exporta basura. |
+
+Checklist:
+- [ ] Vantran corrido y aprobado como caso de oro.
+- [ ] Sunbelt: TOP corresponde a la tapa superior real (no a `Tapa trasera`).
+- [ ] OTC 62154: TOP generado.
+- [ ] **OTC 62176: TOP generado por fallback geométrico** (verificar log: debe decir `TOP <- ... (por geometría (+cover), ...)`).
+- [ ] Board 9919: rechazado con mensaje claro, sin JPG parciales.
 
 ### D. Higiene del machote
 - [ ] Al terminar, la hoja plantilla del machote es la activa.
