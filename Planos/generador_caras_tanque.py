@@ -111,6 +111,11 @@ RUTA_LOG = os.path.join(
 )
 
 
+# Se pobla en cada corrida de `_crear_caras`. `generador_tanque_completo`
+# lo consume para enrutar los JPG por pieza a subcarpetas por cara.
+LAST_PIEZAS_POR_CARA: dict = {}
+
+
 def log(mensaje):
     print(mensaje)
     try:
@@ -242,6 +247,24 @@ def _es_nombre_contenedor_cara(nombre):
     if "SEGMENTO" in u or "SEGMENT" in u:
         return True
     if re.search(r"SEG[\.\s_-]*\d", u):
+        return True
+    return False
+
+
+# La tapa (top cover) se maneja como una 5ta cara "TOP" del flujo, no como una
+# pared lateral. Estas palabras clave se usan para reconocerla por nombre;
+# familias como OTC no las tienen (usan códigos numéricos) y caen a la
+# detección geométrica en `_detectar_tapa_como_segmento`.
+PALABRAS_TAPA = ("TAPA", "TOP", "COVER", "ROOF", "CUBIERTA")
+
+
+def _es_nombre_tapa(nombre):
+    """True si el nombre sugiere que la ocurrencia es el subensamble de tapa."""
+    u = str(nombre or "").upper()
+    tokens = set(re.split(r"[\s_\-:]+", u))
+    if any(tag in tokens for tag in PALABRAS_TAPA):
+        return True
+    if "TOP_COVER" in u or "TOP COVER" in u or "TAPA SUPERIOR" in u:
         return True
     return False
 
@@ -824,6 +847,119 @@ def _mapear_segmentos_a_caras(segmentos, face, right, bbox):
     return mapping
 
 
+def _detectar_tapa_como_segmento(ensamble, face, right, cover, bbox, alcance=None):
+    """
+    Localiza el subensamble de tapa (top cover) del tanque y lo devuelve con
+    la misma estructura que los otros segmentos de cara (para que el pipeline
+    lo trate como una 5ta cara "TOP").
+
+    Estrategia:
+      1. Buscar ocurrencias raíz cuyo nombre coincida con ``_es_nombre_tapa``
+         (TAPA/TOP/COVER/ROOF/CUBIERTA como palabra completa) y no pertenezcan
+         al contenedor estructural de las 4 paredes.
+      2. Fallback geométrico para familias tipo OTC (código numérico en el
+         nombre): elegir el mejor subensamble raíz cuyo centroide esté en el
+         tercio superior del bbox y no forme parte del contenedor de paredes.
+
+    Retorna ``None`` si no se puede identificar. Diseñado para no lanzar
+    excepciones: cualquier error interno se traduce en "no hay tapa" y el
+    flujo simplemente omite TOP.
+    """
+    if cover is None or bbox is None:
+        return None
+    try:
+        directas = _lista_ocurrencias(ensamble.ComponentDefinition.Occurrences)
+    except Exception:
+        return None
+
+    rutas_paredes = set()
+    try:
+        for occ in (alcance or {}).get("ocurrencias", []) or []:
+            try:
+                rutas_paredes.add(_ruta_occurrence(occ))
+            except Exception:
+                continue
+        cont = (alcance or {}).get("contenedor")
+        if cont is not None:
+            try:
+                rutas_paredes.add(_ruta_occurrence(cont))
+            except Exception:
+                pass
+    except Exception:
+        rutas_paredes = set()
+
+    def _pertenece_a_paredes(occ):
+        try:
+            ruta = _ruta_occurrence(occ)
+        except Exception:
+            return False
+        return any(_ruta_es_descendiente(ruta, r) for r in rutas_paredes if r)
+
+    min_up, max_up = _rango_proyectado_bbox(bbox, cover)
+    alto = max(EPS, max_up - min_up)
+    umbral_top = min_up + 0.60 * alto
+
+    candidatos = []
+    for occ in directas:
+        try:
+            if getattr(occ, "Suppressed", False):
+                continue
+            if not _es_ensamble_occurrence(occ):
+                continue
+            if _pertenece_a_paredes(occ):
+                continue
+            nombre = str(occ.Name)
+            centro = _centroide_occurrence(occ)
+            if centro is None:
+                continue
+            proy = _dot(centro, cover)
+            piezas = _piezas_desde_occurrence(occ)
+            candidatos.append(
+                {
+                    "occ": occ,
+                    "nombre": nombre,
+                    "centroide": centro,
+                    "piezas": piezas,
+                    "proy_up": proy,
+                    "match_nombre": _es_nombre_tapa(nombre),
+                }
+            )
+        except Exception:
+            continue
+
+    if not candidatos:
+        return None
+
+    # Preferir match por nombre; luego por geometría (centroide más alto).
+    por_nombre = [c for c in candidatos if c["match_nombre"] and c["proy_up"] >= umbral_top - 0.20 * alto]
+    if por_nombre:
+        elegido = max(por_nombre, key=lambda c: c["proy_up"])
+        origen = "por nombre"
+    else:
+        arriba = [c for c in candidatos if c["proy_up"] >= umbral_top]
+        if not arriba:
+            return None
+        elegido = max(arriba, key=lambda c: (len(c["piezas"]), c["proy_up"]))
+        origen = "por geometría (+cover)"
+
+    try:
+        doc_seg = _como_ensamble(elegido["occ"].Definition.Document)
+        es_asm = int(doc_seg.DocumentType) == TIPO_DOCUMENTO_ENSAMBLE
+    except Exception:
+        doc_seg = None
+        es_asm = False
+
+    return {
+        "nombre": elegido["nombre"].split(":")[0].strip(),
+        "piezas": elegido["piezas"],
+        "centroide": elegido["centroide"],
+        "occurrence": elegido["occ"],
+        "ensamble_segmento": doc_seg if es_asm else None,
+        "ruta": _ruta_occurrence(elegido["occ"]),
+        "origen_deteccion": origen,
+    }
+
+
 def _ruta_es_descendiente(ruta, ancestro):
     ruta = str(ruta or "")
     ancestro = str(ancestro or "")
@@ -857,7 +993,7 @@ def _ocurrencia_es_lamina_horizontal(occ, face, right, cover, bbox):
     return alto_rel < 0.10 and face_rel > 0.55 and right_rel > 0.55
 
 
-def _ocurrencia_llega_a_pared(occ, cara, face, right, bbox):
+def _ocurrencia_llega_a_pared(occ, cara, face, right, bbox, cover=None):
     """Exige que una pieza externa realmente esté cerca de la pared elegida."""
     caja = _bbox_occurrence(occ)
     if caja is None:
@@ -868,6 +1004,8 @@ def _ocurrencia_llega_a_pared(occ, cara, face, right, bbox):
         "RIGHT": right,
         "LEFT": _scale(right, -1.0),
     }.get(cara)
+    if cara == "TOP" and cover is not None:
+        normal = cover
     if normal is None:
         return False
     min_pieza, max_pieza = _rango_proyectado_bbox(caja, normal)
@@ -942,18 +1080,35 @@ def _ocurrencias_raiz_en_cara(
                 ruta_u = ruta.upper()
                 if "FLAT-PATTERN" in ruta_u or "FLAT_PATTERN" in ruta_u:
                     continue
-                # Nunca meter top cover / tapa en fotos de pared.
-                if cover is not None and _es_rama_de_tapa(occ, cover, bbox):
-                    continue
+                # Nunca meter top cover / tapa en fotos de las 4 paredes;
+                # para TOP, en cambio, esos elementos SON el contenido natural.
+                es_top = cara == "TOP"
+                if not es_top:
+                    if cover is not None and _es_rama_de_tapa(occ, cover, bbox):
+                        continue
                 centro = _centroide_occurrence(occ)
                 if centro is None:
                     continue
-                if _cara_fisica_de_punto(centro, face, right, bbox) != cara:
+                cara_pt = _cara_fisica_de_punto(
+                    centro,
+                    face,
+                    right,
+                    bbox,
+                    cover=cover,
+                    considerar_top=es_top,
+                )
+                if cara_pt != cara:
                     continue
-                if not _ocurrencia_llega_a_pared(occ, cara, face, right, bbox):
+                if not _ocurrencia_llega_a_pared(
+                    occ, cara, face, right, bbox, cover=cover
+                ):
                     continue
-                if cover is not None and _ocurrencia_es_lamina_horizontal(
-                    occ, face, right, cover, bbox
+                # Sólo descartar láminas horizontales cuando trabajamos las
+                # 4 paredes; en TOP la propia tapa es una lámina horizontal.
+                if (
+                    not es_top
+                    and cover is not None
+                    and _ocurrencia_es_lamina_horizontal(occ, face, right, cover, bbox)
                 ):
                     continue
                 extras.append(occ)
@@ -1097,10 +1252,14 @@ def _punto3d_curva(curva):
         return None
 
 
-def _cara_fisica_de_punto(punto, face, right, bbox):
+def _cara_fisica_de_punto(punto, face, right, bbox, cover=None, considerar_top=False):
     """
     Pared física más cercana a un punto 3D del accesorio.
     No depende de que el cliente use nombres como "Segmento 1".
+
+    Si ``considerar_top=True`` y se pasa ``cover``, retorna "TOP" cuando el
+    punto vive claramente arriba del casco (el vertical domina sobre los
+    laterales). Sin esos parámetros el comportamiento es idéntico al original.
     """
     vec = (
         float(punto[0]) - float(bbox["cx"]),
@@ -1109,6 +1268,14 @@ def _cara_fisica_de_punto(punto, face, right, bbox):
     )
     hacia_face = _dot(vec, face)
     hacia_right = _dot(vec, right)
+
+    if considerar_top and cover is not None:
+        hacia_cover = _dot(vec, cover)
+        max_lat = max(abs(hacia_face), abs(hacia_right))
+        # TOP solo cuando el vertical domina claramente sobre los laterales.
+        # El factor 1.15 evita clasificar piezas de pared alta como TOP.
+        if hacia_cover > 0.0 and hacia_cover > max_lat * 1.15:
+            return "TOP"
 
     if abs(hacia_face) >= abs(hacia_right):
         return "FRONT" if hacia_face >= 0.0 else "BACK"
@@ -1834,12 +2001,17 @@ def _direcciones_caras_pqart(tg, cover, face, right):
       face  = +Z (FRONT)
       right = +X (RIGHT)
     Cada hoja mira una pared exterior, derecha (no chueca).
+
+    TOP mira la tapa desde arriba: eye_dir = cover (+Y), y "arriba de la foto"
+    apunta a +face (FRONT del tanque), para que operador y foto compartan la
+    misma referencia visual que las 4 vistas laterales.
     """
     return [
         ("FRONT", _tg_vec(tg, face), _tg_vec(tg, cover)),
         ("BACK", _tg_vec(tg, _scale(face, -1.0)), _tg_vec(tg, cover)),
         ("RIGHT", _tg_vec(tg, right), _tg_vec(tg, cover)),
         ("LEFT", _tg_vec(tg, _scale(right, -1.0)), _tg_vec(tg, cover)),
+        ("TOP", _tg_vec(tg, cover), _tg_vec(tg, face)),
     ]
 
 
@@ -3826,6 +3998,28 @@ def _crear_caras(inv_app, plano, ensamble):
     mapa_caras = _mapear_segmentos_a_caras(
         segmentos, face, right, bbox_caras
     )
+    # Cara adicional TOP: no forma parte del contenedor de 4 paredes, se
+    # detecta aparte. Si no se puede identificar, el flujo omite TOP con log.
+    tapa_seg = _detectar_tapa_como_segmento(
+        ensamble, face, right, cover, bbox_tanque, alcance=alcance
+    )
+    if tapa_seg is not None:
+        mapa_caras["TOP"] = tapa_seg
+        log(
+            f"  TOP <- {tapa_seg['nombre']} "
+            f"({tapa_seg.get('origen_deteccion', 'auto')}, "
+            f"piezas={len(tapa_seg['piezas'])})"
+        )
+    else:
+        log("  TOP omitido: no se detectó subensamble de tapa")
+
+    # Publica el catálogo de piezas por cara para que el orquestador
+    # `generador_tanque_completo` pueda reorganizar los JPG del flujo legado
+    # de piezas individuales en subcarpetas FRONT/BACK/LEFT/RIGHT/TOP.
+    LAST_PIEZAS_POR_CARA.clear()
+    for _cara, _seg in mapa_caras.items():
+        LAST_PIEZAS_POR_CARA[_cara] = set(_seg.get("piezas", set()))
+
     caras = _direcciones_caras_pqart(tg, cover, face, right)
     rutas_segmentos = {
         _ruta_occurrence(seg["occurrence"])
@@ -3844,6 +4038,13 @@ def _crear_caras(inv_app, plano, ensamble):
         nombre_seg = seg["nombre"] if seg else ""
         ensamble_segmento = seg.get("ensamble_segmento") if seg else None
         ocurrencia_segmento = seg.get("occurrence") if seg else None
+
+        # TOP es la 5ta cara opcional: si no se detectó tapa, saltarla con log
+        # limpio sin marcar la corrida como error. Las 4 paredes son las que
+        # se consideran obligatorias.
+        if nombre == "TOP" and (ensamble_segmento is None or ocurrencia_segmento is None):
+            log("  TOP omitido: no hay IAM de tapa mapeado, se saltea sin fallo")
+            continue
 
         try:
             if ensamble_segmento is None or ocurrencia_segmento is None:

@@ -1,18 +1,21 @@
 """
 Flujo integrado de COTAS ABIGAIL.
 
-1. Cotas por referencia de las cuatro caras del tanque.
-2. Flujo original COTAS_ILOGIC_ABIGAIL por pieza.
+1. Cotas por referencia de las 5 caras del tanque (FRONT, BACK, LEFT, RIGHT, TOP).
+2. Flujo original COTAS_ILOGIC_ABIGAIL por pieza, reorganizado en subcarpetas
+   por cara.
 
 Ambas salidas se organizan bajo JPG/<tanque>/ en carpetas separadas.
 """
 
 import os
+import re
 import shutil
 import sys
 
 import pythoncom
 
+import generador_caras_tanque
 from generador_caras_tanque import (
     _carpeta_salida_tanque,
     _encontrar_hoja_machote,
@@ -27,18 +30,108 @@ from inventor_com import conectar_inventor
 
 
 CARPETA_PIEZAS_ACOTADAS = "PIEZAS_ACOTADAS"
+SUBCARPETAS_CARA_PIEZAS = ("FRONT", "BACK", "LEFT", "RIGHT", "TOP")
+SUBCARPETA_OTROS_PIEZAS = "OTROS"
 
 
 def _limpiar_exportacion_piezas(carpeta):
-    """Evita conservar JPG de piezas que ya no existan en el tanque."""
+    """Vacia la carpeta de piezas y sus subcarpetas de cara antes de exportar."""
     os.makedirs(carpeta, exist_ok=True)
     for nombre in os.listdir(carpeta):
+        ruta = os.path.join(carpeta, nombre)
+        if os.path.isdir(ruta):
+            if nombre.upper() in SUBCARPETAS_CARA_PIEZAS or nombre.upper() == SUBCARPETA_OTROS_PIEZAS:
+                for jpg in os.listdir(ruta):
+                    if jpg.lower().endswith(".jpg"):
+                        try:
+                            os.remove(os.path.join(ruta, jpg))
+                        except OSError:
+                            pass
+            continue
         if not nombre.lower().endswith(".jpg"):
             continue
         try:
-            os.remove(os.path.join(carpeta, nombre))
+            os.remove(ruta)
         except OSError:
             pass
+
+
+def _clave_pieza(texto):
+    """Normaliza un nombre para comparar por token/subcadena robustamente."""
+    if not texto:
+        return ""
+    limpio = str(texto).upper()
+    # Quitar extensión y sufijos comunes de nombre de hoja.
+    limpio = re.sub(r"\.JPG$", "", limpio)
+    limpio = re.sub(r"[\s\-_:()\[\]{},.]+", "", limpio)
+    return limpio
+
+
+def _cara_para_pieza(nombre_archivo, mapa_por_cara):
+    """Devuelve la cara asignada al JPG según los catálogos de piezas."""
+    if not mapa_por_cara:
+        return None
+    base_archivo = os.path.splitext(os.path.basename(nombre_archivo))[0]
+    clave_archivo = _clave_pieza(base_archivo)
+    if not clave_archivo:
+        return None
+    mejor_cara = None
+    mejor_len = 0
+    for cara, piezas in mapa_por_cara.items():
+        for pieza in piezas:
+            clave_pieza = _clave_pieza(pieza)
+            if not clave_pieza:
+                continue
+            if clave_pieza in clave_archivo or clave_archivo in clave_pieza:
+                # Preferir el match más largo (más específico) ante empates.
+                if len(clave_pieza) > mejor_len:
+                    mejor_cara = cara
+                    mejor_len = len(clave_pieza)
+    return mejor_cara
+
+
+def _reorganizar_piezas_por_cara(carpeta_piezas, mapa_por_cara):
+    """
+    Mueve cada JPG de pieza individual a la subcarpeta de su cara.
+    Piezas sin match caen en OTROS/. Diseñado para no fallar: si algo sale
+    mal solo se registra por consola y los JPG originales se conservan.
+    """
+    try:
+        os.makedirs(carpeta_piezas, exist_ok=True)
+        for sub in SUBCARPETAS_CARA_PIEZAS + (SUBCARPETA_OTROS_PIEZAS,):
+            os.makedirs(os.path.join(carpeta_piezas, sub), exist_ok=True)
+    except OSError as err:
+        print(f"AVISO: no se pudieron preparar subcarpetas de PIEZAS_ACOTADAS: {err}")
+        return {}
+
+    conteo = {sub: 0 for sub in SUBCARPETAS_CARA_PIEZAS + (SUBCARPETA_OTROS_PIEZAS,)}
+    try:
+        entradas = list(os.listdir(carpeta_piezas))
+    except OSError as err:
+        print(f"AVISO: no se pudo listar {carpeta_piezas}: {err}")
+        return conteo
+
+    for nombre in entradas:
+        ruta = os.path.join(carpeta_piezas, nombre)
+        if os.path.isdir(ruta):
+            continue
+        if not nombre.lower().endswith(".jpg"):
+            continue
+        cara = _cara_para_pieza(nombre, mapa_por_cara)
+        destino_sub = cara if cara in SUBCARPETAS_CARA_PIEZAS else SUBCARPETA_OTROS_PIEZAS
+        destino = os.path.join(carpeta_piezas, destino_sub, nombre)
+        try:
+            if os.path.exists(destino):
+                os.remove(destino)
+            shutil.move(ruta, destino)
+            conteo[destino_sub] += 1
+        except OSError as err:
+            print(f"AVISO: no se pudo mover '{nombre}' a {destino_sub}/: {err}")
+
+    print("  PIEZAS_ACOTADAS por cara:")
+    for sub in SUBCARPETAS_CARA_PIEZAS + (SUBCARPETA_OTROS_PIEZAS,):
+        print(f"    {sub}: {conteo[sub]} JPG")
+    return conteo
 
 
 def _reactivar_machote(inv_app):
@@ -144,6 +237,14 @@ def ejecutar():
                 carpeta_salida=carpeta_piezas,
             )
         )
+        if ok:
+            try:
+                _reorganizar_piezas_por_cara(
+                    carpeta_piezas,
+                    dict(generador_caras_tanque.LAST_PIEZAS_POR_CARA),
+                )
+            except Exception as err:
+                print(f"AVISO: fallo en reorganización por cara de PIEZAS_ACOTADAS: {err}")
         return ok
     finally:
         if inv_app is not None:
