@@ -116,6 +116,17 @@ RUTA_LOG = os.path.join(
 LAST_PIEZAS_POR_CARA: dict = {}
 
 
+# Caches por corrida para no re-consultar RangeBox de la misma ocurrencia
+# (COM es caro). Se limpian al inicio de `ejecutar()`.
+_CACHE_BBOX_OCC: dict = {}
+_CACHE_CENTROIDE_OCC: dict = {}
+
+
+def _reset_caches_geo():
+    _CACHE_BBOX_OCC.clear()
+    _CACHE_CENTROIDE_OCC.clear()
+
+
 def log(mensaje):
     print(mensaje)
     try:
@@ -231,15 +242,25 @@ def _piezas_desde_occurrence(occ):
 
 
 def _centroide_occurrence(occ):
+    if occ is None:
+        return None
+    clave = id(occ)
+    entry = _CACHE_CENTROIDE_OCC.get(clave)
+    # Guardamos (occ, valor) y validamos identidad con `is`: si el garbage
+    # collector reciclara el id, no habría hit falso.
+    if entry is not None and entry[0] is occ:
+        return entry[1]
     try:
         box = occ.RangeBox
-        return (
+        valor = (
             (float(box.MinPoint.X) + float(box.MaxPoint.X)) * 0.5,
             (float(box.MinPoint.Y) + float(box.MaxPoint.Y)) * 0.5,
             (float(box.MinPoint.Z) + float(box.MaxPoint.Z)) * 0.5,
         )
     except Exception:
         return None
+    _CACHE_CENTROIDE_OCC[clave] = (occ, valor)
+    return valor
 
 
 def _es_nombre_contenedor_cara(nombre):
@@ -394,10 +415,19 @@ def _bbox_desde_rangebox(caja):
 
 
 def _bbox_occurrence(occ):
+    if occ is None:
+        return None
+    clave = id(occ)
+    entry = _CACHE_BBOX_OCC.get(clave)
+    if entry is not None and entry[0] is occ:
+        return entry[1]
     try:
-        return _bbox_desde_rangebox(occ.RangeBox)
+        valor = _bbox_desde_rangebox(occ.RangeBox)
     except Exception:
         return None
+    if valor is not None:
+        _CACHE_BBOX_OCC[clave] = (occ, valor)
+    return valor
 
 
 def _rango_proyectado_bbox(bbox, vector):
@@ -4151,7 +4181,7 @@ def _crear_caras(inv_app, plano, ensamble):
                 **plan_cotas,
             }
             _actualizar_inventor(inv_app)
-            time.sleep(0.25)
+            time.sleep(0.05)
         except Exception as error:
             log(f"  ERROR en {nombre}: {error}")
             log(traceback.format_exc())
@@ -4577,6 +4607,8 @@ def _exportar_caras_jpg(inv_app, plano, ensamble, planes_cotas):
 def ejecutar(gestionar_com=True):
     if gestionar_com:
         pythoncom.CoInitialize()
+
+    _reset_caches_geo()
 
     try:
         with open(RUTA_LOG, "w", encoding="utf-8") as archivo:
