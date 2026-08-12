@@ -4626,8 +4626,13 @@ def ejecutar(gestionar_com=True):
         log("Paso 1/2: Vistas de paredes + referencias reales desde (0,0)...")
         creadas, planes_cotas = _crear_caras(inv_app, plano, ensamble)
 
-        if len(creadas) != 4:
-            log(f"ERROR: Se crearon {len(creadas)}/4 hojas.")
+        # 4 paredes son obligatorias; TOP se suma como 5ta cara opcional.
+        # Aceptamos 4 (sin tapa detectada) o 5 (con tapa) como estados válidos.
+        if len(creadas) not in (4, 5):
+            log(
+                f"ERROR: Se crearon {len(creadas)} hojas; se esperaban 4 "
+                f"(4 paredes) o 5 (4 paredes + tapa)."
+            )
             for i in range(1, plano.Sheets.Count + 1):
                 try:
                     log(f"  Hoja actual #{i}: {plano.Sheets.Item(i).Name}")
@@ -4644,7 +4649,7 @@ def ejecutar(gestionar_com=True):
 
         log("")
         log("PROCESO COMPLETO:")
-        log("  1) Cuatro paredes del tanque")
+        log(f"  1) {len(creadas)} caras del tanque (4 paredes + tapa si aplica)")
         log("  2) Una cota desde (0,0) por JPG")
         log(f"  3) {exportadas} JPG en: {carpeta}")
         log("  4) Machote limpiado para reutilizar")
