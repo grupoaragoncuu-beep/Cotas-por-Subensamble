@@ -4181,7 +4181,7 @@ def _crear_caras(inv_app, plano, ensamble):
                 **plan_cotas,
             }
             _actualizar_inventor(inv_app)
-            time.sleep(0.05)
+            time.sleep(0.25)
         except Exception as error:
             log(f"  ERROR en {nombre}: {error}")
             log(traceback.format_exc())
@@ -4587,6 +4587,14 @@ def _exportar_caras_jpg(inv_app, plano, ensamble, planes_cotas):
                     pass
             finally:
                 _borrar_sketches_cotas(hoja)
+                # Respiro periódico: cada 40 fotos damos a Inventor tiempo
+                # para procesar su cola COM y evitar saturación (RPC crash).
+                if indice % 40 == 0:
+                    try:
+                        _actualizar_inventor(inv_app)
+                    except Exception:
+                        pass
+                    time.sleep(0.4)
 
         try:
             vista.Scale = estado["scale"]

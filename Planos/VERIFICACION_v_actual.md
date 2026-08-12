@@ -122,4 +122,27 @@ Si un requisito **mínimo** falla → registrar en el log/incidencia y abrir cor
 
 ## 6. Incidencias conocidas (llenar durante la corrida)
 
-_(dejar vacío hasta que aparezcan)_
+### 2026-08-12 — Crash de Inventor durante `_exportar_caras_jpg` (LEFT, OTC 62176)
+
+- **Síntoma:** después de exportar FRONT/BACK/RIGHT correctamente, a mitad de LEFT
+  (foto #93 en adelante) todas las llamadas devuelven
+  `pywintypes.com_error (-2147023174, 'El servidor RPC no está disponible.', ...)`.
+  Cuando el flujo pasa a TOP, `vista.Scale` lanza el mismo error y aparece el
+  diálogo _Autodesk Inventor Error Report — a software problem has caused
+  Autodesk Inventor to close unexpectedly_.
+- **Causa raíz:** los tiempos de espera (`time.sleep`) tras `Update()`/`Activate()`
+  se habían reducido de 0.25–0.5 s a 0.05–0.1 s como parte de la Fase 2 de
+  optimización. Con 5 caras + cientos de exportaciones `SaveAsBitmap` seguidas,
+  Inventor no alcanzaba a procesar su cola COM y el proceso colapsaba.
+- **Corrección aplicada:**
+  1. Se revirtieron todos los `time.sleep` a sus valores originales
+     (0.25–0.5 s) en `generador_caras_tanque.py` y `generador_vistas.py`.
+  2. Dentro de `_exportar_caras_jpg` se añadió un _respiro_ periódico:
+     cada 40 fotos exportadas se llama a `_actualizar_inventor(inv_app)`
+     y se espera 0.4 s para que Inventor procese eventos pendientes.
+  3. Se mantienen las Fases 1 (SilentOperation en piezas) y 3
+     (cache `_bbox_occurrence` / `_centroide_occurrence`) que **no** son
+     causa del crash y sí aportan ganancia estable.
+- **Cómo re-probar:** reabrir Inventor, cargar el ensamble + el machote de
+  planos, y volver a ejecutar el flujo. Debe completar las 5 caras sin
+  errores `RPC no disponible` y sin diálogo de crash.
