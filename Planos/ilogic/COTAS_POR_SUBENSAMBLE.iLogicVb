@@ -1,9 +1,10 @@
-' COTAS ABIGAIL - Caras del tanque
-' Regla externa visible: COTAS_CARAS_TANQUE
+' COTAS ABIGAIL - Cotas por subensamble (caras del tanque)
+' Regla externa: COTAS_POR_SUBENSAMBLE
 '
-' Valida el plano y lanza el flujo integrado en una ventana CMD. Python
-' primero crea/acota las caras y después ejecuta el flujo original
-' por pieza, dejando ambas exportaciones en carpetas independientes.
+' Ejecuta ÚNICAMENTE el flujo de cotas por caras del tanque
+' (COTAS_POR_REFERENCIA: FRONT/BACK/LEFT/RIGHT/TOP). NO corre las cotas
+' por pieza; para eso usar COTAS_ILOGIC_ABIGAIL o el flujo completo
+' COTAS_CARAS_TANQUE.
 '
 ' Rutas: NO hardcodear C:\Proyectos\...  Usar COTAS_ABIGAIL_DIR /
 ' config_planos.txt / ExternalRuleDirectories (instalador).
@@ -14,7 +15,7 @@ Sub Main()
     Const kDrawingDocument As Integer = 12292
 
     Dim invApp As Inventor.Application = ThisApplication
-    Dim titulo As String = "COTAS ABIGAIL - Caras del tanque"
+    Dim titulo As String = "COTAS ABIGAIL - Cotas por subensamble"
 
     If invApp.ActiveDocument Is Nothing OrElse
        invApp.ActiveDocument.DocumentType <> kDrawingDocument Then
@@ -49,7 +50,7 @@ Sub Main()
     End If
 
     Dim scriptPath As String =
-        System.IO.Path.Combine(planosDirFinal, "generador_tanque_completo.py")
+        System.IO.Path.Combine(planosDirFinal, "generador_caras_tanque.py")
 
     If Not System.IO.File.Exists(scriptPath) Then
         System.Windows.Forms.MessageBox.Show(
@@ -76,8 +77,8 @@ Sub Main()
 
         If proceso.ExitCode = 0 Then
             System.Windows.Forms.MessageBox.Show(
-                "Cotas del tanque generadas correctamente." & vbCrLf &
-                "Se exportaron cotas por caras y piezas acotadas.",
+                "Cotas por subensamble generadas correctamente." & vbCrLf &
+                "Revisa Planos\JPG\<tanque>\COTAS_POR_REFERENCIA\.",
                 titulo,
                 System.Windows.Forms.MessageBoxButtons.OK,
                 System.Windows.Forms.MessageBoxIcon.Information)

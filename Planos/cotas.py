@@ -5,6 +5,7 @@ from inventor_com import conectar_inventor
 from cota_estilo import aplicar_estilo_cota
 import lineal_especial
 import arcos
+from rutas_runtime import ruta_hojas_diametro
 
 kHorizontalDimensionType = 60162
 kVerticalDimensionType = 60163
@@ -16,7 +17,57 @@ OFFSET_COTA = 1.5
 
 FACTOR_VALIDACION_MIN = 0.85
 FACTOR_VALIDACION_MAX = 1.15
-RUTA_HOJAS_DIAMETRO = r"C:\Temp\hojas_para_diametro.txt"
+# Portable: Planos/.runtime/ (antes C:\Temp\...)
+RUTA_HOJAS_DIAMETRO = ruta_hojas_diametro()
+
+
+# Log detallado opt-in para diagnosticar por qué una hoja termina sin cota.
+_COTAS_LOG = os.environ.get("COTAS_LOG", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _dbg(msg):
+    if _COTAS_LOG:
+        try:
+            print(f"[COTAS_LOG] {msg}")
+        except Exception:
+            pass
+
+
+def _base_hoja(nombre):
+    """
+    Devuelve la base del nombre de hoja sin el sufijo `:N` que Inventor
+    agrega cuando el nombre ya existe.
+
+        '62176-1247-P01_FRENTE_1:54' -> '62176-1247-P01_FRENTE_1'
+    """
+    if not nombre:
+        return nombre
+    partes = str(nombre).rsplit(":", 1)
+    if len(partes) == 2 and partes[1].isdigit():
+        return partes[0]
+    return str(nombre)
+
+
+def _clampear_punto_hoja(hoja, tg, x, y, margen=1.2):
+    """
+    Fuerza el Point2d de texto de cota a caer dentro del rectángulo físico de
+    la hoja de Inventor con un margen mínimo. Sin esto, cotas colocadas
+    cerca del borde quedan fuera del rectángulo que la cámara exporta como
+    JPG (Inventor las acepta pero el bitmap no las incluye) y el resultado
+    es la clásica captura sin cota.
+
+    El margen por defecto (1.2 cm) da espacio al número + flecha para que
+    quepan enteros dentro del sheet, evitando que el recorte del JPG los
+    corte.
+    """
+    try:
+        sheet_w = float(hoja.Width)
+        sheet_h = float(hoja.Height)
+        x = max(margen, min(sheet_w - margen, x))
+        y = max(margen, min(sheet_h - margen, y))
+    except Exception:
+        pass
+    return tg.CreatePoint2d(x, y)
 
 # =========================================================
 # UTILIDADES GENERALES
@@ -85,6 +136,7 @@ def _validar_dimension(dimension, esperado_modelo, nombre_hoja, eje):
     try:
         valor = abs(float(dimension.ModelValue))
     except:
+        _dbg(f"{nombre_hoja}: {eje} sin ModelValue accesible, se acepta")
         return True
 
     minimo = esperado_modelo * FACTOR_VALIDACION_MIN
@@ -102,15 +154,16 @@ def _validar_dimension(dimension, esperado_modelo, nombre_hoja, eje):
         )
         return False
 
+    _dbg(f"{nombre_hoja}: {eje} OK valor={valor:.4f}cm esperado={esperado_modelo:.4f}cm")
     return True
 
 def _guardar_hojas_para_diametro(hojas):
     """
-    Guarda en C:\\Temp la lista de hojas que fueron clasificadas
-    para diametro.py.
+    Guarda en Planos/.runtime/ la lista de hojas clasificadas para diametro.py.
     """
     try:
-        os.makedirs(r"C:\Temp", exist_ok=True)
+        destino = ruta_hojas_diametro()
+        os.makedirs(os.path.dirname(destino), exist_ok=True)
 
         unicas = []
         vistos = set()
@@ -121,11 +174,11 @@ def _guardar_hojas_para_diametro(hojas):
                 vistos.add(hu)
                 unicas.append(hu)
 
-        with open(RUTA_HOJAS_DIAMETRO, "w", encoding="utf-8") as f:
+        with open(destino, "w", encoding="utf-8") as f:
             for h in unicas:
                 f.write(h + "\n")
 
-        print(f"📝 Lista de hojas para diámetro guardada en: {RUTA_HOJAS_DIAMETRO}")
+        print(f"📝 Lista de hojas para diámetro guardada en: {destino}")
 
     except Exception as e:
         print(f"⚠️ No se pudo guardar la lista de hojas para diámetro: {e}")
@@ -275,7 +328,9 @@ def _crear_cota_horizontal_mejorada(hoja, vista, tg, datos, nombre_hoja):
         return False
 
     try:
-        pt_texto = tg.CreatePoint2d((minx + maxx) / 2.0, maxy + OFFSET_COTA)
+        pt_texto = _clampear_punto_hoja(
+            hoja, tg, (minx + maxx) / 2.0, maxy + OFFSET_COTA
+        )
         dim = hoja.DrawingDimensions.GeneralDimensions.AddLinear(
             pt_texto, int_izq, int_der, kHorizontalDimensionType
         )
@@ -316,7 +371,9 @@ def _crear_cota_vertical_mejorada(hoja, vista, tg, datos, nombre_hoja):
         return False
 
     try:
-        pt_texto = tg.CreatePoint2d(minx - OFFSET_COTA, (miny + maxy) / 2.0)
+        pt_texto = _clampear_punto_hoja(
+            hoja, tg, minx - OFFSET_COTA, (miny + maxy) / 2.0
+        )
         dim = hoja.DrawingDimensions.GeneralDimensions.AddLinear(
             pt_texto, int_inf, int_sup, kVerticalDimensionType
         )
@@ -363,7 +420,11 @@ def _crear_cota_horizontal_legacy(hoja, vista, tg, datos, nombre_hoja):
         int_izq = hoja.CreateGeometryIntent(lin_izq)
         int_der = hoja.CreateGeometryIntent(lin_der)
 
-        pt_texto = tg.CreatePoint2d(vista.Position.X, vista.Position.Y + (vista.Height / 2.0) + OFFSET_COTA)
+        pt_texto = _clampear_punto_hoja(
+            hoja, tg,
+            vista.Position.X,
+            vista.Position.Y + (vista.Height / 2.0) + OFFSET_COTA,
+        )
         dim = hoja.DrawingDimensions.GeneralDimensions.AddLinear(
             pt_texto, int_izq, int_der, kHorizontalDimensionType
         )
@@ -393,7 +454,11 @@ def _crear_cota_vertical_legacy(hoja, vista, tg, datos, nombre_hoja):
         int_inf = hoja.CreateGeometryIntent(lin_inf)
         int_sup = hoja.CreateGeometryIntent(lin_sup)
 
-        pt_texto = tg.CreatePoint2d(vista.Position.X - (vista.Width / 2.0) - OFFSET_COTA, vista.Position.Y)
+        pt_texto = _clampear_punto_hoja(
+            hoja, tg,
+            vista.Position.X - (vista.Width / 2.0) - OFFSET_COTA,
+            vista.Position.Y,
+        )
         dim = hoja.DrawingDimensions.GeneralDimensions.AddLinear(
             pt_texto, int_inf, int_sup, kVerticalDimensionType
         )
@@ -408,8 +473,32 @@ def _crear_cota_vertical_legacy(hoja, vista, tg, datos, nombre_hoja):
 # =========================================================
 # FUNCIÓN PRINCIPAL
 # =========================================================
-def acotar_planos():
+def acotar_planos(nombres_permitidos=None, reset_diametro=True):
+    """
+    Aplica cotas lineales sobre las hojas del machote.
+
+    Parametros
+    ----------
+    nombres_permitidos : set[str] | None
+        Si se provee, solo se procesan hojas cuyo nombre (upper) esté en el
+        set. Útil para procesar por lotes (modo D).
+    reset_diametro : bool
+        Si True, borra el archivo temporal de hojas para diámetro al inicio.
+        En lotes >= 2 debe pasarse False para no perder el mapeo previo.
+    """
     print("📐 Iniciando módulo de cotas lineales (mejorado + rescate + especiales)...")
+    if _COTAS_LOG:
+        print("[COTAS_LOG] modo diagnóstico ACTIVO (COTAS_LOG=1)")
+
+    permitidos_up = None
+    if nombres_permitidos is not None:
+        permitidos_up = {str(x).upper() for x in nombres_permitidos}
+        print(f"  Modo lote: {len(permitidos_up)} hojas permitidas")
+        _dbg(
+            "primeros permitidos: "
+            + ", ".join(sorted(list(permitidos_up))[:5])
+            + (" ..." if len(permitidos_up) > 5 else "")
+        )
 
     inv_app = conectar_inventor()
 
@@ -424,15 +513,52 @@ def acotar_planos():
     hojas_para_diametro = []
     hojas_para_lineal_especial = []
 
-    # Limpiar archivo temporal de diámetro al inicio de cada corrida
-    _guardar_hojas_para_diametro([])
+    if reset_diametro:
+        _guardar_hojas_para_diametro([])
+        # También resetear la lista de piezas cilíndricas sólidas para que
+        # no arrastre nombres detectados en corridas previas del mismo día.
+        try:
+            ruta_solidas = getattr(diametro, "RUTA_PIEZAS_SOLIDAS", None)
+            if ruta_solidas and os.path.exists(ruta_solidas):
+                os.remove(ruta_solidas)
+        except Exception:
+            pass
+
+    contadores = {
+        "visitadas": 0,
+        "filtradas_por_permitidos": 0,
+        "frente1_ok": 0,
+        "frente1_legacy": 0,
+        "frente1_a_especiales": 0,
+        "frente2_ok": 0,
+        "frente2_legacy": 0,
+        "frente2_a_especiales": 0,
+        "descartada_por_curvas_vacias": 0,
+        "descartada_por_poca_geom": 0,
+        "sin_frente_match": 0,
+        "excepciones": 0,
+    }
 
     for i in range(1, plano.Sheets.Count + 1):
         hoja = plano.Sheets.Item(i)
-        nombre_hoja = str(hoja.Name).upper()
+        nombre_completo = str(hoja.Name)
+        nombre_hoja = nombre_completo.upper()
+        # Inventor agrega ":N" a nombres duplicados. Comparamos por base.
+        base_up = _base_hoja(nombre_completo).upper()
 
-        if "_LADO" in nombre_hoja:
-            print(f"⏭️ {nombre_hoja}: omitida por regla _LADO.")
+        if permitidos_up is not None and base_up not in permitidos_up:
+            contadores["filtradas_por_permitidos"] += 1
+            continue
+
+        contadores["visitadas"] += 1
+        _dbg(f"visita: {nombre_hoja} (base={base_up})")
+
+        if (
+            "_LADO" in nombre_hoja
+            or "_ALTO" in nombre_hoja
+            or "_LARGO_PATA" in nombre_hoja
+        ):
+            print(f"⏭️ {nombre_hoja}: omitida por regla _LADO/_ALTO/_LARGO_PATA.")
             continue
 
         if hoja.DrawingViews.Count == 0:
@@ -444,49 +570,71 @@ def acotar_planos():
 
         if not datos:
             print(f"⚠️ {nombre_hoja}: sin curvas válidas.")
+            contadores["descartada_por_curvas_vacias"] += 1
             hojas_para_diametro.append(nombre_hoja)
             continue
 
         # Si de plano casi no hay líneas, lo mandamos a círculos
         if not _hay_suficiente_geometria_lineal(datos):
             print(f"⚠️ {nombre_hoja}: muy poca geometría lineal, se manda a diametro.py")
+            contadores["descartada_por_poca_geom"] += 1
             hojas_para_diametro.append(nombre_hoja)
             continue
 
         cota_ok = False
+        _dbg(f"  {nombre_hoja}: {len(datos)} curvas válidas")
 
         if "_FRENTE_1" in nombre_hoja:
-            # 1) Método mejorado
-            cota_ok = _crear_cota_horizontal_mejorada(hoja, vista, tg, datos, nombre_hoja)
+            try:
+                cota_ok = _crear_cota_horizontal_mejorada(hoja, vista, tg, datos, nombre_hoja)
+            except Exception as e:
+                contadores["excepciones"] += 1
+                _dbg(f"  excepción en _crear_cota_horizontal_mejorada: {e}")
 
-            # 2) Si falla, rescate legacy
-            if not cota_ok:
+            if cota_ok:
+                contadores["frente1_ok"] += 1
+            else:
                 print(f"↩️ {nombre_hoja}: intentando rescate legacy horizontal...")
-                cota_ok = _crear_cota_horizontal_legacy(hoja, vista, tg, datos, nombre_hoja)
+                try:
+                    cota_ok = _crear_cota_horizontal_legacy(hoja, vista, tg, datos, nombre_hoja)
+                except Exception as e:
+                    contadores["excepciones"] += 1
+                    _dbg(f"  excepción en _crear_cota_horizontal_legacy: {e}")
+                if cota_ok:
+                    contadores["frente1_legacy"] += 1
 
-            # 3) Si sigue fallando, pasa a especiales
             if not cota_ok:
                 print(f"🧩 {nombre_hoja}: pasa a lineal_especial.py")
+                contadores["frente1_a_especiales"] += 1
                 hojas_para_lineal_especial.append(nombre_hoja)
 
         elif "_FRENTE_2" in nombre_hoja:
-            # 1) Método mejorado
-            cota_ok = _crear_cota_vertical_mejorada(hoja, vista, tg, datos, nombre_hoja)
+            try:
+                cota_ok = _crear_cota_vertical_mejorada(hoja, vista, tg, datos, nombre_hoja)
+            except Exception as e:
+                contadores["excepciones"] += 1
+                _dbg(f"  excepción en _crear_cota_vertical_mejorada: {e}")
 
-            # 2) Si falla, rescate legacy
-            if not cota_ok:
+            if cota_ok:
+                contadores["frente2_ok"] += 1
+            else:
                 print(f"↩️ {nombre_hoja}: intentando rescate legacy vertical...")
-                cota_ok = _crear_cota_vertical_legacy(hoja, vista, tg, datos, nombre_hoja)
+                try:
+                    cota_ok = _crear_cota_vertical_legacy(hoja, vista, tg, datos, nombre_hoja)
+                except Exception as e:
+                    contadores["excepciones"] += 1
+                    _dbg(f"  excepción en _crear_cota_vertical_legacy: {e}")
+                if cota_ok:
+                    contadores["frente2_legacy"] += 1
 
-            # 3) Si sigue fallando, pasa a especiales
             if not cota_ok:
                 print(f"🧩 {nombre_hoja}: pasa a lineal_especial.py")
+                contadores["frente2_a_especiales"] += 1
                 hojas_para_lineal_especial.append(nombre_hoja)
 
         else:
             print(f"⏭️ {nombre_hoja}: no contiene _FRENTE_1 ni _FRENTE_2.")
-
-        print("✅ Etapa principal lineal finalizada.")
+            contadores["sin_frente_match"] += 1
 
     # =====================================================
     # ETAPA ESPECIAL LINEAL
@@ -536,6 +684,11 @@ def acotar_planos():
         print("\n⚠️ Hojas lineales no resueltas automáticamente:")
         for h in pendientes_finales:
             print(f"   - {h}")
+
+    if _COTAS_LOG:
+        print("[COTAS_LOG] resumen del lote:")
+        for k, v in contadores.items():
+            print(f"  {k}: {v}")
 
     print("\n🏁 Proceso terminado.")
 

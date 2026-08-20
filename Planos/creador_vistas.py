@@ -27,59 +27,281 @@ def _log(msg):
 
 def _sleep_and_pump(seconds):
     """Pausa el script pero mantiene vivos los mensajes de Windows/DirectX"""
-    iterations = int(seconds * 10)
+    iterations = max(1, int(seconds * 10))
     for _ in range(iterations):
         pythoncom.PumpWaitingMessages()
         time.sleep(0.1)
 
-def crear_vistas(inv_app, ensamble_doc, machote_doc):
-    _log("⏳ Paso 1/4: Generando vistas con API de Python...")
-    _log(f"Ensamble activo: {ensamble_doc.DisplayName}")
-    
+
+def _es_com_transitorio(exc):
+    """Errores COM típicos de saturación / enumerador inválido (no crash total)."""
+    try:
+        code = int(exc.args[0]) if exc.args else 0
+    except Exception:
+        code = 0
+    # RPC_E_SYS_CALL_FAILED / RPC_S_SERVER_UNAVAILABLE / RPC_E_DISCONNECTED
+    return code in (-2147417856, -2147023174, -2147417848)
+
+
+def recolectar_piezas_unicas(ensamble_doc):
+    """Alias público de :func:`_recolectar_piezas_unicas` (uso desde otros módulos)."""
+    return _recolectar_piezas_unicas(ensamble_doc)
+
+
+def _recolectar_piezas_unicas(ensamble_doc):
+    """
+    Lista piezas únicas ANTES de crear hojas.
+
+    No se mantiene el enumerador AllLeafOccurrences abierto durante CopyTo/
+    AddBaseView: tras un flujo largo de caras ese handle se corrompe y
+    Item(i) lanza 'Error en la llamada de sistema' abortando PIEZAS.
+    """
+    piezas = []
+    vistos = set()
+    leaf_occs = ensamble_doc.ComponentDefinition.Occurrences.AllLeafOccurrences
+    try:
+        total = int(leaf_occs.Count)
+    except Exception as exc:
+        _log(f"ERROR: no se pudo leer AllLeafOccurrences.Count: {exc}")
+        return piezas
+
+    i = 1
+    fallos_seguidos = 0
+    while i <= total:
+        try:
+            occ = leaf_occs.Item(i)
+            fallos_seguidos = 0
+        except Exception as exc:
+            fallos_seguidos += 1
+            _log(
+                f"AVISO: leaf Item({i}/{total}) falló ({exc}); "
+                f"refresco enumerador (intento {fallos_seguidos})"
+            )
+            _sleep_and_pump(1.5)
+            try:
+                leaf_occs = (
+                    ensamble_doc.ComponentDefinition.Occurrences.AllLeafOccurrences
+                )
+                total = int(leaf_occs.Count)
+                occ = leaf_occs.Item(i)
+                fallos_seguidos = 0
+            except Exception as exc2:
+                _log(f"AVISO: se omite índice {i}: {exc2}")
+                if fallos_seguidos >= 5:
+                    _log("ERROR: demasiados fallos seguidos leyendo ocurrencias.")
+                    break
+                i += 1
+                continue
+
+        try:
+            if occ.Suppressed:
+                i += 1
+                continue
+        except Exception:
+            i += 1
+            continue
+
+        try:
+            doc_type = occ.DefinitionDocumentType
+            _log(f"Occ: {occ.Name}, type: {doc_type}")
+        except Exception:
+            pass
+
+        try:
+            part_doc = win32com.client.CastTo(occ.Definition.Document, "PartDocument")
+            if part_doc is None:
+                part_doc = occ.Definition.Document
+            ruta = part_doc.FullFileName
+        except Exception:
+            i += 1
+            continue
+
+        if not ruta or ruta in vistos:
+            i += 1
+            continue
+        vistos.add(ruta)
+        part_name = os.path.splitext(os.path.basename(ruta))[0]
+        piezas.append((part_doc, part_name))
+        i += 1
+
+    _log(f"Piezas únicas a procesar: {len(piezas)} (de {total} leaf occs)")
+    return piezas
+
+
+def _limpiar_border_y_titleblock(new_sheet):
+    """
+    Elimina TODO lo que no sea una vista dibujada en el sheet clonado:
+    border, title block, sketches del machote, sketched symbols, notas,
+    hole tables, leader notes y balloons. Sin esto, cualquier arte del
+    machote (líneas guía, LC, centerlines, logos, etc.) queda visible en
+    el JPG exportado.
+
+    La hoja original del machote (base_sheet) NO se toca — esta es una
+    copia recién creada por CopyTo.
+    """
+    def _borrar_todos(coleccion):
+        """Elimina todos los items de una colección de Inventor, del
+        último al primero para no invalidar los índices."""
+        try:
+            n = coleccion.Count
+        except Exception:
+            return
+        for idx in range(n, 0, -1):
+            try:
+                coleccion.Item(idx).Delete()
+            except Exception:
+                pass
+
+    try:
+        if new_sheet.Border is not None:
+            try:
+                new_sheet.Border.Delete()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    try:
+        if new_sheet.TitleBlock is not None:
+            try:
+                new_sheet.TitleBlock.Delete()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    for attr in (
+        "Sketches",
+        "SketchedSymbols",
+        "DrawingNotes",
+        "LeaderNotes",
+        "GeneralNotes",
+        "Balloons",
+        "HoleTables",
+        "RevisionTables",
+        "PartsLists",
+        "GeneralTables",
+    ):
+        try:
+            coleccion = getattr(new_sheet, attr, None)
+        except Exception:
+            coleccion = None
+        if coleccion is not None:
+            _borrar_todos(coleccion)
+
+
+def _crear_hoja_vista(machote_doc, base_sheet, nombre_hoja):
+    """CopyTo + Activate con un reintento ante COM transitorio."""
+    ultimo = None
+    for intento in range(2):
+        try:
+            new_sheet = base_sheet.CopyTo(machote_doc)
+            new_sheet.Name = nombre_hoja
+            new_sheet.Activate()
+            for v in range(new_sheet.DrawingViews.Count, 0, -1):
+                new_sheet.DrawingViews.Item(v).Delete()
+            _limpiar_border_y_titleblock(new_sheet)
+            return new_sheet
+        except Exception as exc:
+            ultimo = exc
+            if not _es_com_transitorio(exc) or intento == 1:
+                break
+            _log(f"AVISO: reintento CopyTo '{nombre_hoja}' tras COM: {exc}")
+            _sleep_and_pump(2.0)
+    raise ultimo
+
+
+def _area_util_hoja(sheet):
+    """
+    Devuelve (px, py, ancho_util, alto_util) para el sheet: el centro del
+    área útil (después de descontar el border si existiera) y sus dimensiones.
+
+    Como en el flujo actual el border y title block se eliminan al clonar el
+    sheet (ver ``_limpiar_border_y_titleblock``), el área útil es prácticamente
+    todo el sheet menos un pequeño margen de seguridad para que la vista no
+    quede tocando el borde físico de la hoja.
+    """
+    try:
+        sheet_w = float(sheet.Width)
+        sheet_h = float(sheet.Height)
+    except Exception:
+        return 10.0, 15.0, 20.0, 30.0
+
+    # Márgenes de seguridad (5 % de cada dimensión, con mínimo/máximo).
+    margen_x = min(3.0, max(1.0, sheet_w * 0.05))
+    margen_y = min(3.0, max(1.0, sheet_h * 0.05))
+
+    ancho_util = max(1.0, sheet_w - 2.0 * margen_x)
+    alto_util = max(1.0, sheet_h - 2.0 * margen_y)
+
+    px = sheet_w / 2.0
+    py = sheet_h / 2.0
+
+    return px, py, ancho_util, alto_util
+
+
+def crear_vistas(inv_app, ensamble_doc, machote_doc, piezas_a_saltar=None):
+    """
+    Compat: recolecta todas las piezas y las procesa en un solo lote.
+
+    Parametros
+    ----------
+    piezas_a_saltar : set[str] | None
+        Nombres base (obtener_nombre_base_corto) a NO regenerar (modo F).
+    """
     try:
         machote_doc = win32com.client.CastTo(machote_doc, "DrawingDocument")
     except:
         pass
-        
+
     try:
         ensamble_doc = win32com.client.CastTo(ensamble_doc, "AssemblyDocument")
     except:
         pass
-    
+
+    piezas = _recolectar_piezas_unicas(ensamble_doc)
+    ok, _hojas = crear_vistas_lote(
+        inv_app, ensamble_doc, machote_doc, piezas, piezas_a_saltar=piezas_a_saltar
+    )
+    return ok
+
+
+def crear_vistas_lote(
+    inv_app,
+    ensamble_doc,
+    machote_doc,
+    piezas,
+    piezas_a_saltar=None,
+    contador_inicio=0,
+):
+    """
+    Crea vistas para una lista pre-recolectada de piezas.
+
+    Retorna (ok, nombres_hojas_creadas) donde `nombres_hojas_creadas` es un
+    `set[str]` con los nombres iniciales (FRENTE_1 / FRENTE_2 / LADO) creados
+    en el machote.
+    """
+    _log("⏳ Paso 1/4: Generando vistas con API de Python...")
+    try:
+        _log(f"Ensamble activo: {ensamble_doc.DisplayName}")
+    except Exception:
+        pass
+
+    piezas_a_saltar = piezas_a_saltar or set()
     tg = inv_app.TransientGeometry
     to = inv_app.TransientObjects
-    
+
     base_sheet = machote_doc.ActiveSheet
-    processed_docs = set()
-    contador = 0
-    
+    contador = int(contador_inicio)
+    nombres_creadas = set()
+
     try:
-        leaf_occs = ensamble_doc.ComponentDefinition.Occurrences.AllLeafOccurrences
-        for i in range(1, leaf_occs.Count + 1):
-            occ = leaf_occs.Item(i)
-            if occ.Suppressed:
-                continue
-                
-            try:
-                doc_type = occ.DefinitionDocumentType
-                _log(f"Occ: {occ.Name}, type: {doc_type}")
-            except:
-                pass
-                
-            part_doc = win32com.client.CastTo(occ.Definition.Document, "PartDocument")
-            if part_doc is None:
-                try:
-                    part_doc = occ.Definition.Document
-                except:
-                    continue
-                
-            if part_doc.FullFileName in processed_docs:
-                continue
-                
-            processed_docs.add(part_doc.FullFileName)
-            
-            part_name = os.path.splitext(os.path.basename(part_doc.FullFileName))[0]
+        for part_doc, part_name in piezas:
             contador += 1
+            nombre_base = obtener_nombre_base_corto(part_name)
+            if nombre_base in piezas_a_saltar:
+                _log(f"⏭️ {part_name} ya tiene JPG previo (base={nombre_base}). Saltada.")
+                continue
             _log(f"Procesando pieza: {part_name}")
             
             is_sm = False
@@ -103,18 +325,28 @@ def crear_vistas(inv_app, ensamble_doc, machote_doc):
             frente_face, v_frente, area_frente = res_frente
             
             res_lado = elegir_lado(caras_a_medir, frente_face, v_frente, area_frente, use_flat_pattern)
-            uso_fallback_lado = False
             if not res_lado:
                 v_lado = obtener_lado_fallback(tg, v_frente)
-                uso_fallback_lado = True
-                area_lado = 0.0
-                lado_face = None
             else:
                 lado_face, v_lado, area_lado = res_lado
                 
             cx, cy, cz = obtener_centro(part_doc, cuerpo_medicion)
             
             tiene_guia_frente, v_guia_frente = obtener_vector_guia_frente(frente_face, v_frente, tg)
+
+            # Orientación LADO desde sólido doblado (chapa con flat pattern).
+            lado_cx, lado_cy, lado_cz = cx, cy, cz
+            lado_eye, lado_up = v_lado, v_frente
+            if use_flat_pattern:
+                ori = _orientacion_lado_doblado(part_doc, tg, to, v_frente)
+                if ori:
+                    lado_eye = ori["v_lado"]
+                    lado_up = ori["v_up"]
+                    lado_cx, lado_cy, lado_cz = ori["cx"], ori["cy"], ori["cz"]
+                    _log(
+                        f"  {part_name}: LADO orientado desde modelo doblado "
+                        f"({ori.get('modo', '?')})"
+                    )
             
             sufijos = ["FRENTE_1", "FRENTE_2", "LADO"]
             es_lado = [False, False, True]
@@ -124,15 +356,11 @@ def crear_vistas(inv_app, ensamble_doc, machote_doc):
                 nombre_hoja = construir_nombre_hoja(machote_doc, part_name, sufijos[idx])
                 
                 try:
-                    new_sheet = base_sheet.CopyTo(machote_doc)
-                    new_sheet.Name = nombre_hoja
-                    new_sheet.Activate()
-                    
-                    for v in range(new_sheet.DrawingViews.Count, 0, -1):
-                        new_sheet.DrawingViews.Item(v).Delete()
+                    new_sheet = _crear_hoja_vista(machote_doc, base_sheet, nombre_hoja)
                 except Exception as e:
                     _log(f"⚠️ {part_name} -> no se pudo crear hoja {nombre_hoja}: {e}")
                     continue
+                nombres_creadas.add(nombre_hoja)
                     
                 try:
                     if new_sheet.TitleBlock is not None:
@@ -141,61 +369,79 @@ def crear_vistas(inv_app, ensamble_doc, machote_doc):
                 except:
                     pass
                     
-                px, py = 10.0, 15.0
-                
-                if is_side:
-                    eye_dir = v_lado.Copy()
-                    up_hint = v_frente.Copy()
-                else:
-                    eye_dir = v_frente.Copy()
-                    if tiene_guia_frente:
-                        up_hint = v_guia_frente.Copy()
-                    else:
-                        up_hint = v_lado.Copy()
-                        
-                cam = crear_camara(part_doc, tg, to, cx, cy, cz, eye_dir, up_hint)
-                
+                px, py, ancho_util, alto_util = _area_util_hoja(new_sheet)
+
                 view = None
                 try:
-                    options = to.CreateNameValueMap()
-                    if use_flat_pattern:
-                        options.Add("SheetMetalFoldedModel", False)
-                        
-                    view = new_sheet.DrawingViews.AddBaseView(
-                        part_doc,
-                        tg.CreatePoint2d(px, py),
-                        1.0,
-                        kArbitraryViewOrientation,
-                        kHiddenLineRemovedDrawingViewStyle,
-                        "",
-                        cam,
-                        options
-                    )
+                    if is_side:
+                        view = _crear_vista_lado_con_reintentos(
+                            new_sheet,
+                            part_doc,
+                            tg,
+                            to,
+                            px,
+                            py,
+                            lado_cx,
+                            lado_cy,
+                            lado_cz,
+                            lado_eye,
+                            lado_up,
+                        )
+                    else:
+                        if tiene_guia_frente:
+                            up_hint = v_guia_frente.Copy()
+                        else:
+                            up_hint = v_lado.Copy()
+                        cam = crear_camara(
+                            part_doc, tg, to, cx, cy, cz, v_frente.Copy(), up_hint
+                        )
+                        view = _crear_vista_base(
+                            new_sheet,
+                            part_doc,
+                            tg,
+                            to,
+                            px,
+                            py,
+                            cam,
+                            use_flat_pattern_view=use_flat_pattern,
+                        )
                 except Exception as ex1:
                     try:
-                        view = new_sheet.DrawingViews.AddBaseView(
-                            part_doc,
-                            tg.CreatePoint2d(px, py),
-                            1.0,
-                            kDefaultViewOrientation,
-                            kHiddenLineRemovedDrawingViewStyle
-                        )
+                        # Solo frentes pueden caer a default; LADO no (rompe THK).
+                        if not is_side:
+                            view = new_sheet.DrawingViews.AddBaseView(
+                                part_doc,
+                                tg.CreatePoint2d(px, py),
+                                1.0,
+                                kDefaultViewOrientation,
+                                kHiddenLineRemovedDrawingViewStyle
+                            )
+                        else:
+                            _log(
+                                f"⚠️ {part_name} -> no se pudo crear vista LADO "
+                                f"con cámara de perfil: {ex1}"
+                            )
                     except:
                         _log(f"⚠️ {part_name} -> no se pudo crear vista {sufijos[idx]}")
                         
                 if view is not None:
-                    escalar_vista(machote_doc, view, tg, px, py)
+                    escalar_vista(
+                        machote_doc, view, tg, px, py, ancho_util, alto_util
+                    )
             
-            # Dar respiro a la tarjeta gráfica y bombear mensajes para evitar TDR (cuelgue DX12)
+            # Respiro a la tarjeta gráfica y bombeo de mensajes para evitar TDR.
+            # Antes: 4s por pieza + 10s cada 10 (~10 min muertos en OTC).
+            # Ahora: 1.2s por pieza + 3s cada 20; suficiente para el TDR sin
+            # sobrecosto acumulado.
             try:
                 inv_app.ActiveView.Update()
             except:
                 pass
-            _sleep_and_pump(4)
-            
-            if contador % 10 == 0:
-                _log(f"Descanso de 10 segundos por cada 10 componentes (vamos en {contador})...")
-                _sleep_and_pump(10)
+            _sleep_and_pump(1.2)
+
+            if contador % 20 == 0:
+                _log(f"Descanso cada 20 componentes (vamos en {contador})...")
+                _sleep_and_pump(3.0)
                     
     finally:
         try:
@@ -203,8 +449,8 @@ def crear_vistas(inv_app, ensamble_doc, machote_doc):
         except:
             pass
 
-    _log(f"✅ Vistas generadas correctamente para {contador} piezas.")
-    return True
+    _log(f"✅ Vistas generadas correctamente para {contador} piezas (lote).")
+    return True, nombres_creadas
 
 
 def preparar_geometria(part_doc, is_sm, to):
@@ -259,6 +505,273 @@ def preparar_geometria(part_doc, is_sm, to):
     except:
         return None
 
+
+def _caras_y_cuerpo_doblado(part_doc, to):
+    """Caras del modelo doblado (no flat pattern) para orientar LADO/THK."""
+    caras = to.CreateObjectCollection()
+    cuerpo = None
+    try:
+        cdef = part_doc.ComponentDefinition
+        for i in range(1, cdef.SurfaceBodies.Count + 1):
+            body = cdef.SurfaceBodies.Item(i)
+            if cuerpo is None:
+                cuerpo = body
+            for j in range(1, body.Faces.Count + 1):
+                caras.Add(body.Faces.Item(j))
+    except Exception:
+        pass
+    return caras, cuerpo
+
+
+def _orientacion_lado_doblado(part_doc, tg, to, v_frente_fallback):
+    """
+    Calcula eye/up/centro de LADO desde el sólido doblado.
+
+    Preferencia:
+    1) Perfil de escuadra L/U: mirar según el eje de doblez
+       (cruz de normales de las dos caras grandes ~perpendiculares).
+    2) Fallback: cara de espesor más chica ⊥ a la cara grande.
+    """
+    caras, cuerpo = _caras_y_cuerpo_doblado(part_doc, to)
+    if caras is None or caras.Count == 0:
+        return None
+
+    cx, cy, cz = obtener_centro(part_doc, cuerpo)
+
+    # --- 1) Intentar eje de doblez (perfil L real) ---
+    planas = []
+    try:
+        for i in range(1, caras.Count + 1):
+            face = caras.Item(i)
+            if face.SurfaceType != kPlaneSurface:
+                continue
+            ok, n = obtener_normal_cara(face)
+            if not ok:
+                continue
+            try:
+                area = float(face.Evaluator.Area)
+            except Exception:
+                continue
+            if area <= 0:
+                continue
+            n.Normalize()
+            planas.append((area, n))
+    except Exception:
+        planas = []
+
+    planas.sort(key=lambda x: x[0], reverse=True)
+    tope = min(8, len(planas))
+    for i in range(tope):
+        for j in range(i + 1, tope):
+            area1, n1 = planas[i]
+            area2, n2 = planas[j]
+            if area2 < area1 * 0.12:
+                continue
+            # Casi perpendiculares → tipico L/U
+            if abs(n1.DotProduct(n2)) > 0.35:
+                continue
+            try:
+                eye = n1.CrossProduct(n2)
+            except Exception:
+                continue
+            if eye is None or eye.Length < 0.001:
+                continue
+            eye.Normalize()
+            # Up en el plano del perfil L (dirección de una pata)
+            try:
+                up = eye.CrossProduct(n1)
+                if up.Length < 0.001:
+                    up = eye.CrossProduct(n2)
+                if up.Length < 0.001:
+                    continue
+                up.Normalize()
+            except Exception:
+                continue
+            return {
+                "v_lado": eye,
+                "v_up": up,
+                "cx": cx,
+                "cy": cy,
+                "cz": cz,
+                "modo": "eje_doblez_L",
+            }
+
+    # --- 2) Fallback clásico: espesor ⊥ frente ---
+    res_frente = elegir_frente(caras)
+    if not res_frente:
+        return None
+
+    frente_face, v_frente, area_frente = res_frente
+    res_lado = elegir_lado(
+        caras, frente_face, v_frente, area_frente, use_flat_pattern=False
+    )
+    if res_lado:
+        v_lado = res_lado[1]
+    else:
+        v_lado = obtener_lado_fallback(tg, v_frente)
+
+    return {
+        "v_lado": v_lado,
+        "v_up": v_frente,
+        "cx": cx,
+        "cy": cy,
+        "cz": cz,
+        "modo": "espesor",
+    }
+
+
+def _crear_vista_base(new_sheet, part_doc, tg, to, px, py, cam, use_flat_pattern_view):
+    options = to.CreateNameValueMap()
+    if use_flat_pattern_view:
+        options.Add("SheetMetalFoldedModel", False)
+    return new_sheet.DrawingViews.AddBaseView(
+        part_doc,
+        tg.CreatePoint2d(px, py),
+        1.0,
+        kArbitraryViewOrientation,
+        kHiddenLineRemovedDrawingViewStyle,
+        "",
+        cam,
+        options,
+    )
+
+
+def _grosor_3d_pieza(part_doc):
+    """
+    Devuelve el lado MÁS PEQUEÑO del bbox 3D de la pieza (en cm de Inventor).
+    Se usa como referencia para validar que la vista LADO efectivamente está
+    mostrando el canto delgado y no la cara grande.
+    """
+    try:
+        rb = part_doc.ComponentDefinition.RangeBox
+        dims = [
+            abs(float(rb.MaxPoint.X) - float(rb.MinPoint.X)),
+            abs(float(rb.MaxPoint.Y) - float(rb.MinPoint.Y)),
+            abs(float(rb.MaxPoint.Z) - float(rb.MinPoint.Z)),
+        ]
+        dims.sort()
+        return dims[0]
+    except Exception:
+        return None
+
+
+def _vista_lado_muestra_canto(view, grosor_3d):
+    """
+    Verifica que la vista LADO tenga un lado corto compatible con el grosor
+    real de la pieza. Si el lado más chico del bbox 2D es mucho mayor que el
+    grosor 3D, la orientación de la cámara está mal (probablemente Inventor
+    la ignoró y usó la cara grande).
+
+    Umbral: el lado corto 2D no puede ser > 3× el grosor 3D. Este margen
+    tolera perfiles L/U/redondeados donde el bbox 2D es más gordo que el
+    grosor real.
+    """
+    if grosor_3d is None or grosor_3d <= 0:
+        return True
+    try:
+        scale = float(view.Scale)
+        if scale <= 0:
+            return True
+        w = float(view.Width) / scale
+        h = float(view.Height) / scale
+        menor_2d = min(w, h)
+    except Exception:
+        return True
+    return menor_2d <= grosor_3d * 3.0
+
+
+def _borrar_todas_las_vistas(sheet):
+    """Borra todas las vistas del sheet, en orden inverso para no invalidar
+    índices. Fuerza un Update al final para que Inventor procese los deletes
+    antes de seguir agregando vistas."""
+    try:
+        n = sheet.DrawingViews.Count
+    except Exception:
+        n = 0
+    for idx in range(n, 0, -1):
+        try:
+            sheet.DrawingViews.Item(idx).Delete()
+        except Exception:
+            pass
+    try:
+        sheet.Update()
+    except Exception:
+        pass
+
+
+def _crear_vista_lado_con_reintentos(
+    new_sheet, part_doc, tg, to, px, py, cx, cy, cz, eye_dir, up_hint
+):
+    """
+    Intenta varias cámaras para LADO. Nunca cae a DefaultViewOrientation
+    (eso suele mostrar la cara grande y deja THK vacío).
+
+    Estrategia (simple y segura, sin dejar vistas fantasma en el sheet):
+    1. Para cada candidato, borra TODAS las vistas del sheet, crea una
+       vista con esa cámara y valida con ``_vista_lado_muestra_canto``.
+    2. Si la vista es de canto real → retorna esa (única) vista.
+    3. Si no lo es → sigue al siguiente candidato (que borrará esta antes
+       de crear la próxima).
+    4. Si NINGÚN candidato produjo vista de canto → deja la ÚLTIMA como
+       fallback (una sola vista, no acumuladas). Mejor tener algo dudoso
+       que dejar el sheet vacío.
+    """
+    candidatos = []
+    try:
+        e0 = eye_dir.Copy()
+        u0 = up_hint.Copy()
+        candidatos.append((e0, u0))
+        e1 = eye_dir.Copy()
+        e1.ScaleBy(-1.0)
+        candidatos.append((e1, u0.Copy()))
+        u1 = up_hint.Copy()
+        u1.ScaleBy(-1.0)
+        candidatos.append((e0.Copy(), u1))
+        cruz = eye_dir.CrossProduct(up_hint)
+        if cruz is not None and cruz.Length > 0.001:
+            cruz.Normalize()
+            candidatos.append((cruz, up_hint.Copy()))
+            cruz2 = cruz.Copy()
+            cruz2.ScaleBy(-1.0)
+            candidatos.append((cruz2, up_hint.Copy()))
+    except Exception:
+        candidatos = [(eye_dir, up_hint)]
+
+    grosor_3d = _grosor_3d_pieza(part_doc)
+
+    ultimo_error = None
+    vista_actual = None
+    for eye, up in candidatos:
+        # Antes de crear, borra CUALQUIER vista previa en el sheet (incluida
+        # la que dejó el candidato anterior si no pasó la validación).
+        _borrar_todas_las_vistas(new_sheet)
+        vista_actual = None
+
+        try:
+            cam = crear_camara(part_doc, tg, to, cx, cy, cz, eye, up)
+            vista_actual = _crear_vista_base(
+                new_sheet, part_doc, tg, to, px, py, cam, use_flat_pattern_view=False
+            )
+        except Exception as exc:
+            ultimo_error = exc
+            continue
+
+        if vista_actual is None:
+            continue
+
+        if _vista_lado_muestra_canto(vista_actual, grosor_3d):
+            return vista_actual
+
+        # No es canto: seguimos iterando. La próxima iteración la borrará
+        # antes de crear la siguiente candidata.
+
+    # Si llegamos aquí y hay UNA vista aún viva en el sheet (fallback),
+    # devolverla. Si no hay ninguna, propagar el último error.
+    if vista_actual is not None:
+        return vista_actual
+    if ultimo_error:
+        raise ultimo_error
+    return None
 
 def elegir_frente(caras_a_medir):
     frente_face = None
@@ -463,30 +976,120 @@ def crear_camara(part_doc, tg, to, cx, cy, cz, eye_dir, up_hint):
     return cam
 
 
-def escalar_vista(doc, view, tg, px, py):
+def escalar_vista(doc, view, tg, px, py, ancho_util=None, alto_util=None):
+    """
+    Escala y centra la vista de forma que la PIEZA + espacio para cotas
+    quede DENTRO del sheet físico. La regla es:
+
+    - Reserva 2.5 cm de espacio para cotas por cada lado (número + flecha
+      + margen al borde caben siempre).
+    - La pieza sola no puede ocupar más del 55 % del área útil.
+    - Se elige la escala discreta MÁS GRANDE cuyo bbox de vista + reserva
+      de cotas cabe dentro del área útil.
+    - VERIFICACIÓN POST-ESCALA: después de aplicar escala y posición,
+      leemos ``view.Left``/``view.Top``/``view.Width``/``view.Height`` y
+      confirmamos que el rectángulo real de la vista está DENTRO del sheet
+      físico. Si no lo está (por asimetría del bbox 2D o errores de
+      redondeo), bajamos a la siguiente escala y reintentamos.
+
+    Con esto se garantiza que:
+    1. La pieza nunca se sale del sheet, aunque su bbox 2D esté descentrado.
+    2. Las cotas nunca se pierden en el borde.
+    """
     try:
         doc.Update()
         curr_w = view.Width
         curr_h = view.Height
         curr_scale = view.Scale
-        
-        if curr_w <= 0 or curr_h <= 0 or curr_scale <= 0: return
-        
+
+        if curr_w <= 0 or curr_h <= 0 or curr_scale <= 0:
+            return
+
         real_w = curr_w / curr_scale
         real_h = curr_h / curr_scale
-        
-        ratio = min(15.0 / real_w, 20.0 / real_h) * 0.8
-        escalas = [5.0, 4.0, 3.0, 2.0, 1.5, 1.0, 0.75, 0.5, 0.25, 0.2, 0.15, 0.1, 0.05, 0.02, 0.01]
-        final_scale = 0.01
-        
-        for e_val in escalas:
-            if ratio >= e_val:
-                final_scale = e_val
+
+        if ancho_util is None or ancho_util <= 0:
+            ancho_util = 15.0
+        if alto_util is None or alto_util <= 0:
+            alto_util = 20.0
+
+        # Reserva para cotas (cm) por cada lado.
+        reserva_cotas = 2.5
+        max_ancho_pieza = max(1e-3, ancho_util - 2.0 * reserva_cotas)
+        max_alto_pieza = max(1e-3, alto_util - 2.0 * reserva_cotas)
+
+        # La pieza sola nunca puede pasar del 55 % del área útil.
+        max_ancho_pieza = min(max_ancho_pieza, ancho_util * 0.55)
+        max_alto_pieza = min(max_alto_pieza, alto_util * 0.55)
+
+        escalas = [
+            5.0, 4.0, 3.0, 2.0, 1.5, 1.0, 0.75, 0.5,
+            0.4, 0.3, 0.25, 0.2, 0.15, 0.1, 0.08, 0.05,
+            0.04, 0.03, 0.02, 0.015, 0.01, 0.008, 0.005,
+            0.004, 0.003, 0.002, 0.0015, 0.001,
+        ]
+
+        # Índice inicial: primera escala cuyo bbox teórico cabe.
+        indice_inicial = len(escalas) - 1
+        for idx, e_val in enumerate(escalas):
+            w_esc = real_w * e_val
+            h_esc = real_h * e_val
+            if w_esc <= max_ancho_pieza and h_esc <= max_alto_pieza:
+                indice_inicial = idx
                 break
-                
-        view.Scale = final_scale
-        view.Position = tg.CreatePoint2d(px, py)
-    except:
+
+        # Sheet físico (para la verificación post-escala).
+        sheet_w = None
+        sheet_h = None
+        try:
+            sheet = view.Parent
+            sheet_w = float(sheet.Width)
+            sheet_h = float(sheet.Height)
+        except Exception:
+            pass
+
+        # Aplicamos escalas de forma progresiva bajando si la vista sigue
+        # saliéndose del sheet. Máximo 5 reintentos para no ciclar mucho.
+        for offset in range(6):
+            idx_actual = min(indice_inicial + offset, len(escalas) - 1)
+            e_val = escalas[idx_actual]
+
+            try:
+                view.Scale = e_val
+                view.Position = tg.CreatePoint2d(px, py)
+                doc.Update()
+            except Exception:
+                continue
+
+            if sheet_w is None or sheet_h is None:
+                return
+
+            try:
+                left = float(view.Left)
+                top = float(view.Top)
+                width = float(view.Width)
+                height = float(view.Height)
+            except Exception:
+                return
+
+            right = left + width
+            bottom = top - height
+
+            # Margen mínimo al borde del sheet: 1.5 cm (para que la cota
+            # tenga espacio de dibujarse sin salirse).
+            margen = 1.5
+            fits = (
+                left >= margen
+                and right <= sheet_w - margen
+                and bottom >= margen
+                and top <= sheet_h - margen
+            )
+            if fits:
+                return
+
+            # No cabe: siguiente iteración probará la escala más chica.
+
+    except Exception:
         pass
 
 

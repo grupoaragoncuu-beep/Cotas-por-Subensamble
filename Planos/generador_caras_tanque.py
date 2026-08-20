@@ -55,6 +55,7 @@ MARGEN_RECORTE_CARAS = 0.18
 
 TIPO_DOCUMENTO_DIBUJO = 12292
 TIPO_DOCUMENTO_ENSAMBLE = 12291
+TIPO_DOCUMENTO_PIEZA = 12290
 PREFIJO_HOJA = "TANQUE_DATUM_"
 PREFIJO_SKETCH_COTAS = "TANQUE_COTAS_"
 
@@ -114,6 +115,289 @@ RUTA_LOG = os.path.join(
 # Se pobla en cada corrida de `_crear_caras`. `generador_tanque_completo`
 # lo consume para enrutar los JPG por pieza a subcarpetas por cara.
 LAST_PIEZAS_POR_CARA: dict = {}
+
+# Archivo JSON donde se persiste el mapa por cara dentro de la carpeta del
+# tanque. Sirve para que el flujo "solo piezas" pueda reorganizar por cara
+# aunque la sesión de Inventor se haya reiniciado entre corridas.
+NOMBRE_MAPA_PIEZAS_CARA = ".piezas_por_cara.json"
+
+# ------------------------------------------------------------------
+# Mapa alternativo por CLASIFICACIÓN (iProperty "Clasificación" que
+# escribe el iLogic ``Colorimetria Sub Assembly + Norman.iLogicVb``).
+# El flujo PIEZAS_ACOTADAS usa este mapa en lugar del geométrico para
+# segmentar por proceso (Almacén / Corte / Maquinado / Doblado /
+# Plasma / Plasma Doblado) según lo que el usuario clasificó.
+# ------------------------------------------------------------------
+
+# Nombre del PropertySet donde el iLogic guarda la clasificación (idéntico
+# al que usa `Colorimetria Sub Assembly + Norman.iLogicVb`).
+_PROPSET_USER_DEFINED = "Inventor User Defined Properties"
+_PROP_CLASIFICACION = "Clasificación"
+
+# Valores válidos que el iLogic escribe. Se usa como filtro para descartar
+# valores no reconocidos (ruido de plantillas anteriores) y como orden fijo
+# de reporte en logs.
+CLASIFICACIONES_VALIDAS = (
+    "Almacén",
+    "Corte",
+    "Maquinado",
+    "Doblado",
+    "Plasma",
+    "Plasma Doblado",
+)
+
+# Etiqueta para piezas sin iProperty asignado (o con valor no reconocido).
+# Con espacio (como carpeta legible) según convención del usuario.
+CLASIFICACION_SIN_ASIGNAR = "SIN CLASIFICACION"
+
+LAST_PIEZAS_POR_CLASIFICACION: dict = {}
+
+NOMBRE_MAPA_PIEZAS_CLASIFICACION = ".piezas_por_clasificacion.json"
+
+
+def guardar_mapa_piezas_por_cara(carpeta_tanque, mapa=None):
+    """Serializa ``LAST_PIEZAS_POR_CARA`` (o ``mapa``) a JSON dentro del tanque.
+
+    Se llama al terminar el flujo de caras. Convierte los sets a listas
+    ordenadas para que el JSON sea diffable. No lanza excepciones al caller;
+    devuelve la ruta o ``None`` si falló.
+    """
+    import json
+    fuente = mapa if mapa is not None else LAST_PIEZAS_POR_CARA
+    if not fuente:
+        return None
+    try:
+        os.makedirs(carpeta_tanque, exist_ok=True)
+        ruta = os.path.join(carpeta_tanque, NOMBRE_MAPA_PIEZAS_CARA)
+        payload = {
+            str(cara): sorted(str(p) for p in piezas)
+            for cara, piezas in fuente.items()
+        }
+        with open(ruta, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        return ruta
+    except Exception as err:
+        try:
+            print(f"AVISO: no se pudo guardar mapa de piezas por cara: {err}")
+        except Exception:
+            pass
+        return None
+
+
+def cargar_mapa_piezas_por_cara(carpeta_tanque):
+    """Carga el mapa persistido y también repuebla ``LAST_PIEZAS_POR_CARA``.
+
+    Devuelve un dict ``{cara: set(piezas)}`` (vacío si no hay archivo o falla
+    la lectura). Silencioso ante errores de I/O.
+    """
+    import json
+    ruta = os.path.join(carpeta_tanque, NOMBRE_MAPA_PIEZAS_CARA)
+    if not os.path.isfile(ruta):
+        return {}
+    try:
+        with open(ruta, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        mapa = {str(cara): set(map(str, piezas)) for cara, piezas in payload.items()}
+        LAST_PIEZAS_POR_CARA.clear()
+        LAST_PIEZAS_POR_CARA.update({k: set(v) for k, v in mapa.items()})
+        return mapa
+    except Exception as err:
+        try:
+            print(f"AVISO: no se pudo leer mapa de piezas por cara: {err}")
+        except Exception:
+            pass
+        return {}
+
+
+# --------------------------------------------------------------------
+# Mapa por CLASIFICACIÓN (iProperty escrita por el iLogic Colorimetria)
+# --------------------------------------------------------------------
+
+def guardar_mapa_piezas_por_clasificacion(carpeta_tanque, mapa=None):
+    """Serializa el mapa por clasificación a ``.piezas_por_clasificacion.json``.
+
+    Simétrica a ``guardar_mapa_piezas_por_cara`` pero para el mapa por
+    Clasificación (iProperty). Devuelve la ruta o ``None`` si falló.
+    """
+    import json
+    fuente = mapa if mapa is not None else LAST_PIEZAS_POR_CLASIFICACION
+    if not fuente:
+        return None
+    try:
+        os.makedirs(carpeta_tanque, exist_ok=True)
+        ruta = os.path.join(carpeta_tanque, NOMBRE_MAPA_PIEZAS_CLASIFICACION)
+        payload = {
+            str(clase): sorted(str(p) for p in piezas)
+            for clase, piezas in fuente.items()
+        }
+        with open(ruta, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        return ruta
+    except Exception as err:
+        try:
+            print(f"AVISO: no se pudo guardar mapa por clasificación: {err}")
+        except Exception:
+            pass
+        return None
+
+
+def cargar_mapa_piezas_por_clasificacion(carpeta_tanque):
+    """Carga el mapa por clasificación persistido y repuebla el global.
+
+    Devuelve un dict ``{clasificación: set(piezas)}`` (vacío si no hay
+    archivo o falla la lectura). Silencioso ante errores de I/O.
+    """
+    import json
+    ruta = os.path.join(carpeta_tanque, NOMBRE_MAPA_PIEZAS_CLASIFICACION)
+    if not os.path.isfile(ruta):
+        return {}
+    try:
+        with open(ruta, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        mapa = {str(clase): set(map(str, piezas)) for clase, piezas in payload.items()}
+        LAST_PIEZAS_POR_CLASIFICACION.clear()
+        LAST_PIEZAS_POR_CLASIFICACION.update({k: set(v) for k, v in mapa.items()})
+        return mapa
+    except Exception as err:
+        try:
+            print(f"AVISO: no se pudo leer mapa por clasificación: {err}")
+        except Exception:
+            pass
+        return {}
+
+
+def _leer_clasificacion_de_part(part_doc):
+    """Lee el iProperty ``Clasificación`` del PropertySet
+    ``Inventor User Defined Properties`` de un PartDocument.
+
+    Retorna:
+    - ``str`` con la clasificación normalizada si está entre las válidas.
+    - ``None`` si no existe la propiedad, está vacía, o el valor no
+      corresponde a ninguna clasificación válida (se marcará como
+      SIN CLASIFICACION en el mapa).
+    """
+    if part_doc is None:
+        return None
+    try:
+        propsets = part_doc.PropertySets
+    except Exception:
+        return None
+    try:
+        user_props = propsets.Item(_PROPSET_USER_DEFINED)
+    except Exception:
+        return None
+    try:
+        prop = user_props.Item(_PROP_CLASIFICACION)
+    except Exception:
+        return None
+    try:
+        valor = prop.Value
+    except Exception:
+        return None
+    if valor is None:
+        return None
+    texto = str(valor).strip()
+    if not texto:
+        return None
+    # Match tolerante: comparación case-insensitive contra las válidas para
+    # tolerar mayúsculas/minúsculas ("almacén" vs "Almacén"). El acento SÍ
+    # importa (así lo escribe el iLogic).
+    for valida in CLASIFICACIONES_VALIDAS:
+        if texto.casefold() == valida.casefold():
+            return valida
+    return None
+
+
+def detectar_mapa_piezas_por_clasificacion(inv_app, ensamble):
+    """Recorre TODAS las leaf occurrences del ensamble y construye un mapa
+    ``{clasificación: set(nombre_base_pieza)}`` leyendo el iProperty
+    ``Clasificación`` del PartDocument de cada una.
+
+    - Piezas cuyo PartDocument tiene una clasificación válida se agrupan
+      bajo la clasificación (``"Almacén"``, ``"Corte"``, ``"Maquinado"``,
+      ``"Doblado"``, ``"Plasma"``, ``"Plasma Doblado"``).
+    - Piezas SIN iProperty asignado o con valor no reconocido caen bajo
+      ``CLASIFICACION_SIN_ASIGNAR`` ("SIN CLASIFICACION").
+    - Ensambles no aportan al mapa (sólo piezas ``.ipt``).
+
+    El mapa se poblará también en ``LAST_PIEZAS_POR_CLASIFICACION`` para
+    consumo del reordenamiento posterior.
+
+    Cada instancia se cuenta una sola vez (por nombre base de archivo);
+    varias ocurrencias del mismo `.ipt` sólo agregan el nombre 1 vez al
+    set correspondiente.
+    """
+    LAST_PIEZAS_POR_CLASIFICACION.clear()
+    resultado = {clase: set() for clase in CLASIFICACIONES_VALIDAS}
+    resultado[CLASIFICACION_SIN_ASIGNAR] = set()
+
+    if ensamble is None:
+        return resultado
+
+    try:
+        leaf_occs = ensamble.ComponentDefinition.Occurrences.AllLeafOccurrences
+        total = int(leaf_occs.Count)
+    except Exception as err:
+        print(f"AVISO: no se pudieron enumerar ocurrencias: {err}")
+        LAST_PIEZAS_POR_CLASIFICACION.update(resultado)
+        return resultado
+
+    procesadas = 0
+    for i in range(1, total + 1):
+        try:
+            occ = leaf_occs.Item(i)
+            if occ.Suppressed:
+                continue
+        except Exception:
+            continue
+
+        try:
+            part_doc = occ.Definition.Document
+        except Exception:
+            part_doc = None
+
+        # Sólo piezas (.ipt). Los subensambles no llevan Clasificación.
+        try:
+            if part_doc is not None:
+                if part_doc.DocumentType != TIPO_DOCUMENTO_PIEZA:
+                    continue
+        except Exception:
+            pass
+
+        try:
+            ruta = part_doc.FullFileName
+            nombre_base = os.path.splitext(os.path.basename(ruta))[0].upper()
+        except Exception:
+            try:
+                nombre_base = str(occ.Name).split(":")[0].strip().upper()
+            except Exception:
+                continue
+        if not nombre_base:
+            continue
+
+        clasificacion = _leer_clasificacion_de_part(part_doc)
+        destino = clasificacion if clasificacion else CLASIFICACION_SIN_ASIGNAR
+        resultado[destino].add(nombre_base)
+        procesadas += 1
+
+    LAST_PIEZAS_POR_CLASIFICACION.update(resultado)
+
+    total_asignadas = sum(
+        len(resultado[c]) for c in CLASIFICACIONES_VALIDAS
+    )
+    total_sin = len(resultado[CLASIFICACION_SIN_ASIGNAR])
+    print(
+        f"  Clasificación (iProperty) leída de {procesadas} piezas: "
+        f"{total_asignadas} clasificadas + {total_sin} sin clasificar."
+    )
+    for clase in CLASIFICACIONES_VALIDAS:
+        n = len(resultado[clase])
+        if n:
+            print(f"    - {clase}: {n} piezas")
+    if total_sin:
+        print(f"    - {CLASIFICACION_SIN_ASIGNAR}: {total_sin} piezas")
+
+    return resultado
 
 
 # Caches por corrida para no re-consultar RangeBox de la misma ocurrencia
@@ -1440,13 +1724,16 @@ def _es_hoja_de_caras(hoja):
 
 
 def _es_hoja_pieza_acotada(hoja):
-    """Hojas residuales del flujo por pieza (ANCHO/LARGO/THK/diámetro)."""
+    """Hojas residuales del flujo por pieza (ANCHO/LARGO/THK/diámetro/FRENTE/LADO)."""
     nombre = str(getattr(hoja, "Name", "") or "").upper()
     if _es_hoja_de_caras(hoja) or _es_hoja_modelo_autocad(hoja):
         return False
     claves = (
-        "_ANCHO", "_LARGO", "_THK",
+        "_ANCHO", "_LARGO", "_THK", "_ALTO",
         "DIAMETRO_EXTERIOR", "DIAMETRO_INTERIOR", "_DIAMETRO",
+        # creador_vistas nombra así antes del rename final; si el flujo
+        # aborta a mitad, estas hojas quedan y saturan el machote.
+        "_FRENTE_1", "_FRENTE_2", "_LADO",
     )
     return any(clave in nombre for clave in claves)
 
@@ -1539,10 +1826,14 @@ def _nombre_tanque(ensamble):
 
 
 def _carpeta_salida_tanque(plano, ensamble):
-    """JPG/<nombre_del_tanque>/ junto al machote."""
-    ruta_dibujo = str(plano.FullFileName or "")
-    base = os.path.dirname(ruta_dibujo) if ruta_dibujo else os.path.dirname(os.path.abspath(__file__))
-    carpeta = os.path.join(base, CARPETA_EXPORTACION, _nombre_tanque(ensamble))
+    """
+    Salida fija del flujo: Planos/JPG/<nombre_del_tanque>/.
+
+    No depende de dónde esté guardado el machote (p. ej. Tanques/), para
+    que siempre se encuentre en la misma ruta del proyecto.
+    """
+    base_planos = os.path.dirname(os.path.abspath(__file__))
+    carpeta = os.path.join(base_planos, CARPETA_EXPORTACION, _nombre_tanque(ensamble))
     os.makedirs(carpeta, exist_ok=True)
     return carpeta
 
@@ -3991,6 +4282,196 @@ def _acotar_vista(
     }
 
 
+def detectar_mapa_piezas_por_cara(inv_app, ensamble):
+    """
+    Ejecuta SÓLO la detección geométrica de segmentos por cara del tanque
+    (FRONT/BACK/LEFT/RIGHT + TOP si existe), sin crear vistas ni hojas.
+
+    Diseñado para que el flujo "solo piezas" (COTAS_ILOGIC_ABIGAIL) pueda
+    clasificar las piezas en subcarpetas por cara aunque el usuario nunca
+    haya corrido el flujo de caras: se ejecuta el mismo mapeo geométrico
+    que usa ``_crear_caras`` y se publica el catálogo en
+    ``LAST_PIEZAS_POR_CARA``.
+
+    Devuelve un dict ``{cara: set(piezas)}`` (vacío si no se pudo detectar).
+    """
+    try:
+        bbox_tanque = _bbox_ensamble(ensamble)
+        log("Detección de caras (solo mapping, sin hojas)...")
+        cover, face, right = marco_como_pqart(ensamble, bbox_tanque, log)
+        alcance = _resolver_contenedor_paredes(
+            ensamble,
+            face=face,
+            right=right,
+            cover=cover,
+            bbox=bbox_tanque,
+        )
+        if not alcance.get("valido"):
+            log(
+                "  AVISO: no se detectaron cuatro paredes: "
+                + str(alcance.get("motivo", "sin detalle"))
+            )
+            return {}
+        bbox_caras = alcance.get("bbox_caras") or bbox_tanque
+        segmentos = _detectar_segmentos_en_ensamble(ensamble, inv_app, alcance)
+        mapa_caras = _mapear_segmentos_a_caras(
+            segmentos, face, right, bbox_caras
+        )
+        tapa_seg = _detectar_tapa_como_segmento(
+            ensamble, face, right, cover, bbox_tanque, alcance=alcance
+        )
+        if tapa_seg is not None:
+            mapa_caras["TOP"] = tapa_seg
+            log(
+                f"  TOP <- {tapa_seg['nombre']} "
+                f"(piezas={len(tapa_seg['piezas'])})"
+            )
+    except Exception as err:
+        log(f"AVISO: fallo en detección de mapa piezas/cara: {err}")
+        return {}
+
+    LAST_PIEZAS_POR_CARA.clear()
+    resultado = {}
+    for _cara, _seg in mapa_caras.items():
+        piezas = set(_seg.get("piezas", set()))
+        resultado[_cara] = piezas
+        LAST_PIEZAS_POR_CARA[_cara] = set(piezas)
+
+    # Post-proceso: heredar cara por proximidad geométrica al centroide.
+    # Corrida 08:50 dejó 39 piezas en OTROS aunque muchas eran hijas de
+    # subensambles internos (rodillos, tabs, accesorios) que sí tenían
+    # ubicación clara dentro del tanque. Este pase adopta huérfanas a la
+    # cara cuyo centroide 3D quede más próximo al centroide de la pieza.
+    try:
+        _adoptar_huerfanas_por_proximidad(
+            ensamble, mapa_caras, resultado, LAST_PIEZAS_POR_CARA
+        )
+    except Exception as err:
+        log(f"AVISO: adopción de huérfanas falló: {err}")
+
+    return resultado
+
+
+def _adoptar_huerfanas_por_proximidad(
+    ensamble, mapa_caras, resultado, mapa_global
+):
+    """
+    Asigna piezas huérfanas (no mapeadas geométricamente a ningún segmento)
+    a la cara cuyo CENTROIDE 3D esté más próximo al centroide de la pieza.
+
+    Piezas huérfanas típicas del OTC 62176:
+        62176-1252-P01, 62176-1253-P0X, 62176-1254-P0X, SP-776_N,
+        SP-792_N, FT-PRD-01, SF-CP-04_*, SP-710, SP-742, SP-798, SP-800.
+
+    Estas viven en subensambles auxiliares (rodillos, sump, manways) que
+    no son "walls" físicas pero sí tienen posición conocida.
+    """
+    if not mapa_caras:
+        return
+
+    # Extraer centroides por cara. Usamos el punto medio de las piezas ya
+    # confirmadas del segmento como centroide de la cara.
+    centroides_cara: dict = {}
+    for cara, seg in mapa_caras.items():
+        centroide = seg.get("centroide")
+        if centroide is None:
+            continue
+        try:
+            centroides_cara[cara] = (
+                float(centroide[0]),
+                float(centroide[1]),
+                float(centroide[2]),
+            )
+        except Exception:
+            continue
+
+    if not centroides_cara:
+        return
+
+    # Set global de piezas ya cubiertas por CUALQUIER cara.
+    piezas_ya_cubiertas = set()
+    for piezas in resultado.values():
+        for p in piezas:
+            piezas_ya_cubiertas.add(str(p).upper())
+
+    try:
+        leaf_occs = ensamble.ComponentDefinition.Occurrences.AllLeafOccurrences
+        total = int(leaf_occs.Count)
+    except Exception as err:
+        log(f"  AVISO: no se pudo enumerar leafs para adopción: {err}")
+        return
+
+    adoptadas: dict = {cara: 0 for cara in centroides_cara}
+    total_huerfanas = 0
+    for i in range(1, total + 1):
+        try:
+            occ = leaf_occs.Item(i)
+            if occ.Suppressed:
+                continue
+            nombre_occ = str(occ.Name).split(":")[0].strip().upper()
+        except Exception:
+            continue
+
+        # Nombre base del archivo .ipt (mismo formato que exportar_hojas_jpg usa).
+        try:
+            ruta = occ.Definition.Document.FullFileName
+            nombre_base = os.path.splitext(os.path.basename(ruta))[0].upper()
+        except Exception:
+            nombre_base = nombre_occ
+
+        if not nombre_base:
+            continue
+
+        # ¿Ya está cubierta por prefijo? (matching sustring como _cara_para_pieza)
+        cubierta = False
+        for cubierto in piezas_ya_cubiertas:
+            if not cubierto:
+                continue
+            if cubierto in nombre_base or nombre_base in cubierto:
+                cubierta = True
+                break
+        if cubierta:
+            continue
+
+        # Es huérfana: calcular centroide y asignar a la cara más cercana.
+        try:
+            box = occ.RangeBox
+            cx = (float(box.MinPoint.X) + float(box.MaxPoint.X)) * 0.5
+            cy = (float(box.MinPoint.Y) + float(box.MaxPoint.Y)) * 0.5
+            cz = (float(box.MinPoint.Z) + float(box.MaxPoint.Z)) * 0.5
+        except Exception:
+            continue
+
+        mejor_cara = None
+        mejor_dist2 = None
+        for cara, (ex, ey, ez) in centroides_cara.items():
+            d2 = (cx - ex) ** 2 + (cy - ey) ** 2 + (cz - ez) ** 2
+            if mejor_dist2 is None or d2 < mejor_dist2:
+                mejor_dist2 = d2
+                mejor_cara = cara
+
+        if mejor_cara is None:
+            continue
+
+        # Adoptar: agregar nombre_base y nombre_occ al set de esa cara.
+        piezas_dest = resultado.setdefault(mejor_cara, set())
+        piezas_dest.add(nombre_base)
+        piezas_dest.add(nombre_occ)
+        mapa_global.setdefault(mejor_cara, set()).update({nombre_base, nombre_occ})
+        piezas_ya_cubiertas.add(nombre_base)
+        piezas_ya_cubiertas.add(nombre_occ)
+        adoptadas[mejor_cara] += 1
+        total_huerfanas += 1
+
+    if total_huerfanas:
+        log(
+            f"  Adopción por proximidad: {total_huerfanas} huérfanas asignadas "
+            f"({', '.join(f'{c}={n}' for c, n in adoptadas.items() if n)})."
+        )
+    else:
+        log("  Adopción por proximidad: no había huérfanas por adoptar.")
+
+
 def _crear_caras(inv_app, plano, ensamble):
     tg = inv_app.TransientGeometry
     to = inv_app.TransientObjects
@@ -4047,8 +4528,20 @@ def _crear_caras(inv_app, plano, ensamble):
     # `generador_tanque_completo` pueda reorganizar los JPG del flujo legado
     # de piezas individuales en subcarpetas FRONT/BACK/LEFT/RIGHT/TOP.
     LAST_PIEZAS_POR_CARA.clear()
+    resultado_mapping = {}
     for _cara, _seg in mapa_caras.items():
-        LAST_PIEZAS_POR_CARA[_cara] = set(_seg.get("piezas", set()))
+        piezas_seg = set(_seg.get("piezas", set()))
+        LAST_PIEZAS_POR_CARA[_cara] = piezas_seg
+        resultado_mapping[_cara] = piezas_seg
+
+    # Post-proceso: adoptar piezas huérfanas por proximidad (rodillos, tabs,
+    # accesorios internos). Ver `_adoptar_huerfanas_por_proximidad`.
+    try:
+        _adoptar_huerfanas_por_proximidad(
+            ensamble, mapa_caras, resultado_mapping, LAST_PIEZAS_POR_CARA
+        )
+    except Exception as err:
+        log(f"AVISO: adopción de huérfanas falló: {err}")
 
     caras = _direcciones_caras_pqart(tg, cover, face, right)
     rutas_segmentos = {
@@ -4679,6 +5172,17 @@ def ejecutar(gestionar_com=True):
                 except Exception:
                     pass
             return False
+
+        # Persistir el mapa de piezas por cara para que el flujo "solo piezas"
+        # (COTAS_ILOGIC_ABIGAIL) pueda clasificar aunque cierren Inventor.
+        try:
+            ruta_mapa = guardar_mapa_piezas_por_cara(
+                _carpeta_salida_tanque(plano, ensamble)
+            )
+            if ruta_mapa:
+                log(f"  Mapa piezas/cara persistido en: {ruta_mapa}")
+        except Exception as err:
+            log(f"  AVISO al persistir mapa piezas/cara: {err}")
 
         log("Paso 2/2: Exportando una fotografía por referencia...")
         exportadas, esperadas, carpeta = _exportar_caras_jpg(

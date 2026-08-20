@@ -24,5 +24,16 @@ Desktop.ini
 *.pem
 credentials.json
 
+# Config local por PC (generado por instalar_boton_inventor.py)
+Planos/ilogic/config_planos.txt
+
+# Runtime inter-módulos (antes C:\Temp)
+Planos/.runtime/
+
+# Logs de corridas locales (rutas/máquina específicas)
+Planos/error_log.txt
+Planos/error_log_caras.txt
+Planos/error_log_creador.txt
+
 # Duplicate archive of Planos/ (folder already versioned)
 Planos.zip

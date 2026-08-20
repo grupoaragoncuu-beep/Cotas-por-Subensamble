@@ -1,0 +1,9 @@
+# Plantilla de configuración local (por PC).
+# El instalador genera `config_planos.txt` a partir de esta idea.
+# NO versionar `config_planos.txt` (rutas de cada máquina).
+#
+# Copia este archivo a config_planos.txt y ajusta, O mejor:
+#   Planos\instalar_boton_inventor.bat
+
+PLANOS_DIR=C:\ruta\al\repo\Planos
+PYTHON_EXE=C:\ruta\a\python.exe

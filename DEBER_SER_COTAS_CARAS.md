@@ -10,8 +10,13 @@ Documento de verdad del flujo. Si el código o una conversación contradicen est
 
 Generar una **fotografía por cada referencia dimensional** de las piezas en las cuatro paredes del tanque. Cada foto contiene una sola cota real desde `(0,0)` para que en piso se pueda identificar y medir sin mezclar dimensiones.
 
-Regla iLogic: `COTAS_CARAS_TANQUE`  
-Código principal: `Planos/generador_caras_tanque.py`
+Reglas iLogic disponibles:
+
+| Regla | Alcance | Script Python |
+|-------|---------|---------------|
+| `COTAS_CARAS_TANQUE` | Flujo **completo** (caras + piezas) | `Planos/generador_tanque_completo.py` |
+| `COTAS_POR_SUBENSAMBLE` | Solo **cotas por caras** (`COTAS_POR_REFERENCIA`) | `Planos/generador_caras_tanque.py` |
+| `COTAS_ILOGIC_ABIGAIL` | Solo **piezas acotadas** (`PIEZAS_ACOTADAS`) | `Planos/generador_piezas.py` |
 
 ---
 
@@ -31,7 +36,7 @@ El flujo obtiene los segmentos del **árbol del tanque completo**. Cada vista se
 
 - Carpeta raíz: `Planos/JPG/<nombre_ensamble>/`.
 - `COTAS_POR_REFERENCIA/`: subcarpetas `FRONT/`, `BACK/`, `LEFT/`, `RIGHT/`, `TOP/`; cada una contiene una foto JPG por referencia de esa cara, con nombre secuencial, eje y extremo.
-- `PIEZAS_ACOTADAS/`: salida independiente del flujo original `COTAS_ILOGIC_ABIGAIL`. Se **divide por cara** con las mismas subcarpetas `FRONT/ BACK/ LEFT/ RIGHT/ TOP/` y una carpeta `OTROS/` para piezas que no puedan mapearse a una cara. Cada JPG por pieza cae en la subcarpeta del segmento al que pertenece por geometría.
+- `PIEZAS_ACOTADAS/`: salida independiente del flujo original `COTAS_ILOGIC_ABIGAIL`. Se **divide por cara** con las mismas subcarpetas `FRONT/ BACK/ LEFT/ RIGHT/ TOP/` y una carpeta `OTROS/` para piezas que no puedan mapearse a una cara. Dentro de cada cara, **cada pieza tiene su propia carpeta** (`<CARA>/<PIEZA>/`) que agrupa sus JPG (`LARGO`, `ANCHO`, `THK`, `DIAMETRO_*`).
 - Log: `Planos/error_log_caras.txt` (debe registrar `cara <- segmento/subensamble` para las 5 caras y el conteo por subcarpeta de `PIEZAS_ACOTADAS`).
 - Al terminar: borrar hojas temporales `TANQUE_DATUM_*` y dejar visible la hoja plantilla del machote (**nunca** quedarse en `Model (AutoCAD)`).
 

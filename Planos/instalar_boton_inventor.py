@@ -27,12 +27,18 @@ def _carpeta_ilogic(planos_dir):
 
 
 def _detectar_python():
+    """Prefiere la ruta absoluta del intérprete actual (portable entre PCs)."""
+    try:
+        if sys.executable and os.path.isfile(sys.executable):
+            return sys.executable
+    except Exception:
+        pass
     for candidato in ("python", "py"):
         try:
             import shutil
             ruta = shutil.which(candidato)
             if ruta:
-                return candidato
+                return ruta
         except Exception:
             pass
     return "python"
@@ -41,6 +47,8 @@ def _detectar_python():
 def _escribir_config(planos_dir, python_exe):
     cfg_path = os.path.join(_carpeta_ilogic(planos_dir), "config_planos.txt")
     contenido = (
+        "# Generado por instalar_boton_inventor.py — NO editar a mano salvo\n"
+        "# que sepas lo que haces. Este archivo es local a cada PC.\n"
         f"PLANOS_DIR={planos_dir}\n"
         f"PYTHON_EXE={python_exe}\n"
     )
@@ -79,8 +87,9 @@ def _imprimir_instrucciones_ribbon():
     print("   'Reglas de iLogic'")
     print()
     print("3. Busca las reglas y agregalas al panel que prefieras:")
-    print(f"   - {NOMBRE_REGLA}      (planos de piezas)")
-    print("   - COTAS_CARAS_TANQUE       (caras del tanque)")
+    print("   - COTAS_CARAS_TANQUE       (flujo completo: caras + piezas)")
+    print("   - COTAS_POR_SUBENSAMBLE    (solo cotas por caras)")
+    print(f"   - {NOMBRE_REGLA}      (solo piezas acotadas)")
     print()
     print("4. Opcional: activa 'Texto' y tamano grande en el boton.")
     print()

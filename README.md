@@ -62,15 +62,19 @@ Artefactos **no** versionados (regenerables / temporales): `Planos/dist/`, `Plan
 
 ## Cómo usarlo (PC Windows + Inventor)
 
+> **Otra PC / clon nuevo:** sigue [`DEPLOY.md`](DEPLOY.md) (rutas portables, instalador, checklist).
+
 ### Opción A — Botón / flujo iLogic
 
 1. Abre Inventor.
 2. Abre el **tanque completo** y el **machote** de planos.
 3. Si aún no está instalado el botón:
    ```bat
+   python -m pip install -r requirements.txt
    Planos\instalar_boton_inventor.bat
    ```
-4. Ejecuta la regla / botón de cotas por caras (`COTAS_CARAS_TANQUE` / flujo Abigail según configuración).
+   (cierra y reabre Inventor después)
+4. Ejecuta la regla / botón (`COTAS_CARAS_TANQUE`, `COTAS_POR_SUBENSAMBLE` o `COTAS_ILOGIC_ABIGAIL`).
 5. Revisa salidas en `Planos/JPG/<ensamble>/` y el log `Planos/error_log_caras.txt`.
 
 ### Opción B — Interfaz Python

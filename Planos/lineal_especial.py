@@ -12,6 +12,20 @@ FACTOR_VALIDACION_MIN = 0.80
 FACTOR_VALIDACION_MAX = 1.15
 
 
+def _clampear_punto_hoja(hoja, tg, x, y, margen=1.2):
+    """Fuerza el Point2d de texto a caer dentro del rectángulo físico de la
+    hoja con margen para número + flecha. Sin esto, Inventor acepta la cota
+    pero la cámara del JPG no la captura porque queda fuera del sheet."""
+    try:
+        sheet_w = float(hoja.Width)
+        sheet_h = float(hoja.Height)
+        x = max(margen, min(sheet_w - margen, x))
+        y = max(margen, min(sheet_h - margen, y))
+    except Exception:
+        pass
+    return tg.CreatePoint2d(x, y)
+
+
 def _bbox_curva(curva):
     try:
         caja = curva.Evaluator2D.RangeBox
@@ -232,7 +246,9 @@ def _crear_cota_horizontal_por_puntos(hoja, vista, tg, datos, puntos, nombre_hoj
         return False
 
     try:
-        pt_texto = tg.CreatePoint2d((minx + maxx) / 2.0, maxy + OFFSET_COTA)
+        pt_texto = _clampear_punto_hoja(
+            hoja, tg, (minx + maxx) / 2.0, maxy + OFFSET_COTA
+        )
         dim = hoja.DrawingDimensions.GeneralDimensions.AddLinear(
             pt_texto, int_izq, int_der, kHorizontalDimensionType
         )
@@ -261,7 +277,9 @@ def _crear_cota_vertical_por_puntos(hoja, vista, tg, puntos, nombre_hoja):
         return False
 
     try:
-        pt_texto = tg.CreatePoint2d(minx - OFFSET_COTA, (miny + maxy) / 2.0)
+        pt_texto = _clampear_punto_hoja(
+            hoja, tg, minx - OFFSET_COTA, (miny + maxy) / 2.0
+        )
         dim = hoja.DrawingDimensions.GeneralDimensions.AddLinear(
             pt_texto, int_inf, int_sup, kVerticalDimensionType
         )

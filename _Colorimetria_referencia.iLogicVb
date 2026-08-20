@@ -1,0 +1,860 @@
+﻿Imports WinForms = System.Windows.Forms
+Imports Inventor
+Imports System.Collections.Generic
+' Ojo: no usamos Imports System.IO para evitar conflicto con Inventor.Path
+
+' iLogic / Inventor VB.NET
+' Mini toolbar para clasificar piezas por apariencia
+' y generar un CSV de todas las piezas con iProperty "Clasificación" = "Almacén"
+' en TODO el ensamble cuando se presiona la paloma verde.
+
+Sub Main()
+    Dim MiniToolbar As New MiniToolbarWrapper(ThisApplication)
+    MiniToolbar.Pick()
+End Sub
+
+'-------------------------------------------------------------
+' CLASE: MiniToolbarWrapper
+'-------------------------------------------------------------
+Public Class MiniToolbarWrapper
+
+    Private _interactEvents As InteractionEvents
+    Private _selectEvents As SelectEvents
+    Private _mouseEvents As MouseEvents
+    Private _inventor As Inventor.Application
+    Private _toolBar As MiniToolbar
+    Private _stillSelecting As Boolean
+    Private _selectedOccs As New List(Of ComponentOccurrence)
+    Private oAsm As AssemblyDocument
+    Private _clasificacionElegida As String = ""
+    Private _modoClasificacion As String = "" ' "PorArchivo" o "PorInstancia"
+
+    ' ====== ESTRUCTURA Y PILA PARA UNDO ======
+    Private Class ChangeRecord
+        Public Property Occ As ComponentOccurrence
+        Public Property OldClass As String
+        Public Property OldAppearance As String
+    End Class
+
+    Private _undoStack As New Stack(Of ChangeRecord)
+    ' ========================================
+
+    Public Sub New(ThisApplication As Inventor.Application)
+        _inventor = ThisApplication
+        oAsm = TryCast(_inventor.ActiveDocument, AssemblyDocument)
+    End Sub
+
+    Public Sub Pick()
+        If oAsm Is Nothing Then
+            WinForms.MessageBox.Show("Este script solo puede ejecutarse en documentos de ensamblaje.",
+                                     "Error", WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Error)
+            Exit Sub
+        End If
+
+        ' Activar apariencias desde biblioteca
+        ActivarAparencias()
+
+        _stillSelecting = True
+        _interactEvents = _inventor.CommandManager.CreateInteractionEvents
+        _selectEvents = _interactEvents.SelectEvents
+        _mouseEvents = _interactEvents.MouseEvents
+
+        _selectEvents.ClearSelectionFilter()
+        _selectEvents.SingleSelectEnabled = True
+        _selectEvents.Enabled = True
+
+        AddHandler _selectEvents.OnSelect, AddressOf OnSelectOcc
+        AddHandler _mouseEvents.OnMouseClick, AddressOf OnMouseClickHandler
+        AddHandler _interactEvents.OnTerminate, AddressOf OnTerminateHandler
+
+        _toolBar = _interactEvents.CreateMiniToolbar()
+
+        ' === SECCIÓN: Clasificación por archivo (mismas piezas .ipt) ===
+        _toolBar.Controls.AddNewLine()
+
+        Dim btnAlmacen = _toolBar.Controls.AddButton("btnAlmacen", "🟩", "Clasificar como Almacén (Piezas Iguales)")
+        Dim btnCorte = _toolBar.Controls.AddButton("btnCorte", "🟥", "Clasificar como Corte (Piezas Iguales)")
+        Dim btnMaquinado = _toolBar.Controls.AddButton("btnMaquinado", "🟦", "Clasificar como Maquinado (Piezas Iguales)")
+        Dim btnDoblado = _toolBar.Controls.AddButton("btnDoblado", "🟪", "Clasificar como Doblado (Piezas Iguales)")
+        Dim btnPlasma = _toolBar.Controls.AddButton("btnPlasma", "🟨", "Clasificar como Plasma (Piezas Iguales)")
+        Dim btnPlasmaDoblado = _toolBar.Controls.AddButton("btnPlasmaDoblado", "⚪", "Clasificar como Plasma Doblado (Piezas Iguales)")
+
+        AddHandler btnAlmacen.OnClick, Sub() IniciarClasificacion("Almacén", "PorArchivo")
+        AddHandler btnCorte.OnClick, Sub() IniciarClasificacion("Corte", "PorArchivo")
+        AddHandler btnMaquinado.OnClick, Sub() IniciarClasificacion("Maquinado", "PorArchivo")
+        AddHandler btnDoblado.OnClick, Sub() IniciarClasificacion("Doblado", "PorArchivo")
+        AddHandler btnPlasma.OnClick, Sub() IniciarClasificacion("Plasma", "PorArchivo")
+        AddHandler btnPlasmaDoblado.OnClick, Sub() IniciarClasificacion("Plasma Doblado", "PorArchivo")
+
+        _toolBar.Controls.AddTextBox("lblArchivo", "Sub ensamble")
+        _toolBar.Controls.AddNewLine()
+
+        ' === Clasificación por instancia ===
+        Dim btnAlmacen1 = _toolBar.Controls.AddButton("btnAlmacen1", "🟩", "Clasificar solo esta instancia como Almacén")
+        Dim btnCorte1 = _toolBar.Controls.AddButton("btnCorte1", "🟥", "Clasificar solo esta instancia como Corte")
+        Dim btnMaquinado1 = _toolBar.Controls.AddButton("btnMaquinado1", "🟦", "Clasificar solo esta instancia como Maquinado")
+        Dim btnDoblado1 = _toolBar.Controls.AddButton("btnDoblado1", "🟪", "Clasificar solo esta instancia como Doblado")
+        Dim btnPlasma1 = _toolBar.Controls.AddButton("btnPlasma1", "🟨", "Clasificar solo esta instancia como Plasma")
+        Dim btnPlasmaDoblado1 = _toolBar.Controls.AddButton("btnPlasmaDoblado1", "⚪", "Clasificar solo esta instancia como Plasma Doblado")
+
+        AddHandler btnAlmacen1.OnClick, Sub() IniciarClasificacion("Almacén", "PorInstancia")
+        AddHandler btnCorte1.OnClick, Sub() IniciarClasificacion("Corte", "PorInstancia")
+        AddHandler btnMaquinado1.OnClick, Sub() IniciarClasificacion("Maquinado", "PorInstancia")
+        AddHandler btnDoblado1.OnClick, Sub() IniciarClasificacion("Doblado", "PorInstancia")
+        AddHandler btnPlasma1.OnClick, Sub() IniciarClasificacion("Plasma", "PorInstancia")
+        AddHandler btnPlasmaDoblado1.OnClick, Sub() IniciarClasificacion("Plasma Doblado", "PorInstancia")
+
+        _toolBar.Controls.AddTextBox("lblInstancia", "Componente")
+        _toolBar.Controls.AddNewLine()
+
+        ' === Botones finales ===
+        Dim btnAceptar = _toolBar.Controls.AddButton("btnAceptar", "✔", "Generar CSV de clasificación de todo el ensamble + Almacén")
+        Dim btnCancelar = _toolBar.Controls.AddButton("btnCancelar", "✖", "Salir")
+
+        AddHandler btnAceptar.OnClick,
+            Sub()
+                GenerarReporteClasificacionCompleto()
+                GenerarReporteAlmacen()
+                EjecutarIgnorarNesting()
+            End Sub
+
+        AddHandler btnCancelar.OnClick, AddressOf Salir
+
+        ' === Botón UNDO de clasificación ===
+        Dim btnUndoOp = _toolBar.Controls.AddButton("btnUndoOp", "⏪", "Deshacer última clasificación aplicada")
+        AddHandler btnUndoOp.OnClick, AddressOf DeshacerUltimaClasificacion
+
+        _toolBar.ShowApply = False
+        _toolBar.Visible = True
+
+        _interactEvents.Start()
+        Do While _stillSelecting
+            _inventor.UserInterfaceManager.DoEvents()
+        Loop
+
+        If _interactEvents IsNot Nothing Then
+            _interactEvents.Stop()
+        End If
+
+        _toolBar.Delete()
+    End Sub
+
+    '-------------------------------------------------------------
+    ' Activar apariencias desde biblioteca
+    '-------------------------------------------------------------
+    Private Sub ActivarAparencias()
+        Try
+            Dim oLib As Inventor.AssetLibrary = Nothing
+            Try
+                oLib = _inventor.AssetLibraries.Item("Autodesk Biblioteca de aspecto")
+            Catch ex As Exception
+                WinForms.MessageBox.Show("❌ No se pudo acceder a la biblioteca de apariencias: " & ex.Message)
+                Exit Sub
+            End Try
+
+            Dim aparienciasPorClasificacion As New Dictionary(Of String, List(Of String)) From {
+                {"Almacén", New List(Of String) From {
+                    "Dark Green",
+                    "Verde oscuro"
+                }},
+                {"Corte", New List(Of String) From {
+                    "Rojo naranja"
+                }},
+                {"Maquinado", New List(Of String) From {
+                    "Blue - Wall Paint - Glossy",
+                    "Azul - Pintura mural - Brillante"
+                }},
+                {"Doblado", New List(Of String) From {
+                    "Violeta"
+                }},
+                {"Plasma", New List(Of String) From {
+                    "Yellow - Wall Paint - Glossy",
+                    "Amarillo - Pintura mural - Brillante",
+                    "Yellow",
+                    "Amarillo"
+                }},
+                {"Plasma Doblado", New List(Of String) From {
+                    "White - Wall Paint - Glossy",
+                    "Blanco - Pintura mural - Brillante",
+                    "White",
+                    "Blanco"
+                }}
+            }
+
+            For Each entry In aparienciasPorClasificacion
+                Dim cargado As Boolean = False
+                For Each nombre In entry.Value
+                    Try
+                        If Not oAsm.Assets.Cast(Of Inventor.Asset)().Any(Function(x) x.DisplayName = nombre) Then
+                            Dim a As Inventor.Asset = oLib.AppearanceAssets.Item(nombre)
+                            a.CopyTo(oAsm)
+                        End If
+                        cargado = True
+                        Exit For
+                    Catch
+                    End Try
+                Next
+                If Not cargado Then
+                    WinForms.MessageBox.Show("No se pudo cargar la apariencia para: " & entry.Key,
+                        "Carga de Apariencias",
+                        WinForms.MessageBoxButtons.OK,
+                        WinForms.MessageBoxIcon.Warning)
+                End If
+            Next
+
+        Catch ex As Exception
+            WinForms.MessageBox.Show("Error accediendo a la biblioteca de apariencias: " & ex.Message)
+        End Try
+    End Sub
+
+    '-------------------------------------------------------------
+    ' EVENTOS DE SELECCIÓN
+    '-------------------------------------------------------------
+    Private Sub OnSelectOcc(JustSelectedEntities As ObjectsEnumerator,
+                             SelectionDevice As SelectionDeviceEnum,
+                             ModelPosition As Inventor.Point,
+                             ViewPosition As Inventor.Point2d,
+                             ByVal View As Inventor.View)
+
+        If JustSelectedEntities Is Nothing OrElse JustSelectedEntities.Count = 0 Then Exit Sub
+
+        _selectedOccs.Clear()
+
+        For Each sel As Object In JustSelectedEntities
+            Dim occ As ComponentOccurrence = ResolveOccurrence(sel)
+            If occ IsNot Nothing Then
+                _selectedOccs.Add(occ)
+            End If
+        Next
+
+        If _selectedOccs.Count > 0 Then
+            _inventor.StatusBarText = "Ocurrencia seleccionada: " & _selectedOccs(0).Name
+        End If
+    End Sub
+
+    Private Function ResolveOccurrence(sel As Object) As ComponentOccurrence
+        Dim occ As ComponentOccurrence = Nothing
+
+        occ = TryCast(sel, ComponentOccurrence)
+        If occ Is Nothing Then
+            Try : occ = DirectCast(sel, FaceProxy).ContainingOccurrence : Catch : End Try
+            Try : occ = DirectCast(sel, EdgeProxy).ContainingOccurrence : Catch : End Try
+            Try : occ = DirectCast(sel, VertexProxy).ContainingOccurrence : Catch : End Try
+            Try : occ = DirectCast(sel, SurfaceBodyProxy).ContainingOccurrence : Catch : End Try
+        End If
+
+        If occ Is Nothing Then Return Nothing
+
+        Try
+            While occ.DefinitionDocumentType = DocumentTypeEnum.kAssemblyDocumentObject
+                If occ.SubOccurrences.Count = 1 Then
+                    occ = occ.SubOccurrences(1)
+                Else
+                    Exit While
+                End If
+            End While
+        Catch
+        End Try
+
+        Return occ
+    End Function
+
+    '-------------------------------------------------------------
+    ' Click izquierdo: aplica clasificación
+    '-------------------------------------------------------------
+    Private Sub OnMouseClickHandler(Button As MouseButtonEnum, ShiftKeys As ShiftStateEnum,
+                                ModelPosition As Inventor.Point, ViewPosition As Inventor.Point2d, ByVal View As Inventor.View)
+
+        If Button = MouseButtonEnum.kLeftMouseButton Then
+            If _clasificacionElegida <> "" AndAlso _selectedOccs.Count > 0 Then
+                If _modoClasificacion = "PorArchivo" Then
+                    AplicarClasificacionPorArchivo()
+                ElseIf _modoClasificacion = "PorInstancia" Then
+                    AplicarClasificacionPorInstancia()
+                End If
+
+                _inventor.StatusBarText =
+                    "✅ Clasificación '" & _clasificacionElegida & "' aplicada (" & _modoClasificacion & "). " &
+                    "Sigue seleccionando piezas o elige otro botón para cambiar."
+            Else
+                _inventor.StatusBarText = "Selecciona un tipo de clasificación en el mini toolbar."
+            End If
+        End If
+    End Sub
+
+    '-------------------------------------------------------------
+    ' Inicia modo de clasificación
+    '-------------------------------------------------------------
+    Private Sub IniciarClasificacion(nombre As String, modo As String)
+        _clasificacionElegida = nombre
+        _modoClasificacion = modo
+        _selectedOccs.Clear()
+        _inventor.StatusBarText =
+            "Modo activo: " & nombre & " (" & modo & "). Haz clic en las piezas para aplicar."
+    End Sub
+
+    '-------------------------------------------------------------
+    ' Helpers para leer estado anterior
+    '-------------------------------------------------------------
+    Private Function GetClasificacionActual(doc As Document) As String
+        Dim res As String = ""
+        Try
+            Dim customProps As PropertySet =
+                doc.PropertySets.Item("Inventor User Defined Properties")
+            Dim prop As [Property] = Nothing
+            Try
+                prop = customProps.Item("Clasificación")
+                If prop.Value IsNot Nothing Then
+                    res = prop.Value.ToString().Trim()
+                End If
+            Catch
+            End Try
+        Catch
+        End Try
+        Return res
+    End Function
+
+    Private Function GetAppearanceName(occ As ComponentOccurrence) As String
+        Dim res As String = ""
+        Try
+            If occ.Appearance IsNot Nothing Then
+                res = occ.Appearance.DisplayName
+            End If
+        Catch
+        End Try
+        Return res
+    End Function
+
+    '-------------------------------------------------------------
+    ' Clasificación por archivo
+    '-------------------------------------------------------------
+    Private Sub AplicarClasificacionPorArchivo()
+
+        If _clasificacionElegida = "" Then Exit Sub
+        If _selectedOccs.Count = 0 Then Exit Sub
+
+        Dim aparienciasMap As New Dictionary(Of String, IEnumerable(Of String)) From {
+            {"Almacén", {"Dark Green", "Verde oscuro"}},
+            {"Corte", {"Rojo naranja"}},
+            {"Maquinado", {"Blue - Wall Paint - Glossy", "Azul - Pintura mural - Brillante"}},
+            {"Doblado", {"Violeta"}},
+            {"Plasma", {"Yellow - Wall Paint - Glossy",
+                        "Amarillo - Pintura mural - Brillante",
+                        "Yellow",
+                        "Amarillo"}},
+            {"Plasma Doblado", {"White - Wall Paint - Glossy",
+                                "Blanco - Pintura mural - Brillante",
+                                "White",
+                                "Blanco"}}
+        }
+
+        If Not aparienciasMap.ContainsKey(_clasificacionElegida) Then Exit Sub
+        Dim posiblesNombres = aparienciasMap(_clasificacionElegida)
+
+        Dim todas As New List(Of ComponentOccurrence)
+        CollectAllOccurrences(oAsm.ComponentDefinition.Occurrences, todas)
+
+        For Each occSeleccionada As ComponentOccurrence In _selectedOccs
+            Dim refFullName As String = ""
+            Try
+                refFullName = occSeleccionada.Definition.Document.FullFileName
+            Catch
+                refFullName = ""
+            End Try
+
+            If String.IsNullOrEmpty(refFullName) Then Continue For
+            Dim refFullNameLower As String = refFullName.ToLower()
+
+            For Each occ As ComponentOccurrence In todas
+                Try
+                    Dim occDoc As Document = occ.Definition.Document
+                    Dim occDocPath As String = ""
+                    Try
+                        occDocPath = occDoc.FullFileName
+                    Catch
+                        occDocPath = ""
+                    End Try
+
+                    If Not String.IsNullOrEmpty(occDocPath) AndAlso occDocPath.ToLower() = refFullNameLower Then
+
+                        ' --- GUARDAR ESTADO ANTERIOR EN PILA UNDO ---
+                        Dim oldClass As String = GetClasificacionActual(occDoc)
+                        Dim oldApp As String = GetAppearanceName(occ)
+                        Dim rec As New ChangeRecord With {
+                            .Occ = occ,
+                            .OldClass = oldClass,
+                            .OldAppearance = oldApp
+                        }
+                        _undoStack.Push(rec)
+                        ' --------------------------------------------
+
+                        SetAppearance(occ, posiblesNombres)
+
+                        Try
+                            Dim customProps As PropertySet =
+                                occDoc.PropertySets.Item("Inventor User Defined Properties")
+                            Dim prop As [Property] = Nothing
+                            Try
+                                prop = customProps.Item("Clasificación")
+                                prop.Value = _clasificacionElegida
+                            Catch
+                                customProps.Add(_clasificacionElegida, "Clasificación")
+                            End Try
+
+                            If occDoc.ReadOnly = False Then
+                                occDoc.Save()
+                            End If
+                        Catch
+                        End Try
+                    End If
+                Catch
+                End Try
+            Next
+        Next
+
+        _selectedOccs.Clear()
+    End Sub
+
+    '-------------------------------------------------------------
+    ' Clasificación por instancia
+    '-------------------------------------------------------------
+    Private Sub AplicarClasificacionPorInstancia()
+        If _clasificacionElegida = "" Then Exit Sub
+        If _selectedOccs.Count = 0 Then Exit Sub
+
+        Dim aparienciasMap As New Dictionary(Of String, IEnumerable(Of String)) From {
+            {"Almacén", {"Dark Green", "Verde oscuro"}},
+            {"Corte", {"Rojo naranja"}},
+            {"Maquinado", {"Blue - Wall Paint - Glossy", "Azul - Pintura mural - Brillante"}},
+            {"Doblado", {"Violeta"}},
+            {"Plasma", {"Yellow - Wall Paint - Glossy",
+                        "Amarillo - Pintura mural - Brillante",
+                        "Yellow",
+                        "Amarillo"}},
+            {"Plasma Doblado", {"White - Wall Paint - Glossy",
+                                "Blanco - Pintura mural - Brillante",
+                                "White",
+                                "Blanco"}}
+        }
+
+        Dim posiblesNombres = aparienciasMap(_clasificacionElegida)
+
+        For Each occ In _selectedOccs
+
+            ' --- GUARDAR ESTADO ANTERIOR EN PILA UNDO ---
+            Try
+                Dim occDoc As Document = occ.Definition.Document
+                Dim oldClass As String = GetClasificacionActual(occDoc)
+                Dim oldApp As String = GetAppearanceName(occ)
+                Dim rec As New ChangeRecord With {
+                    .Occ = occ,
+                    .OldClass = oldClass,
+                    .OldAppearance = oldApp
+                }
+                _undoStack.Push(rec)
+            Catch
+            End Try
+            ' --------------------------------------------
+
+            SetAppearance(occ, posiblesNombres)
+
+            Try
+                Dim occDoc As Document = occ.Definition.Document
+                Dim occDocPath As String = ""
+                Try
+                    occDocPath = occDoc.FullFileName
+                Catch
+                    occDocPath = ""
+                End Try
+
+                Try
+                    Dim customProps As PropertySet =
+                        occDoc.PropertySets.Item("Inventor User Defined Properties")
+                    Dim prop As [Property] = Nothing
+                    Try
+                        prop = customProps.Item("Clasificación")
+                        prop.Value = _clasificacionElegida
+                    Catch
+                        customProps.Add(_clasificacionElegida, "Clasificación")
+                    End Try
+
+                    If occDoc.ReadOnly = False Then
+                        occDoc.Save()
+                    End If
+                Catch
+                End Try
+
+            Catch
+            End Try
+        Next
+
+        _selectedOccs.Clear()
+    End Sub
+
+    '-------------------------------------------------------------
+    ' Recolectar ocurrencias recursivamente
+    '-------------------------------------------------------------
+    Private Sub CollectAllOccurrences(occs As ComponentOccurrences, ByRef list As List(Of ComponentOccurrence))
+        For Each o As ComponentOccurrence In occs
+            list.Add(o)
+            Try
+                If o.SubOccurrences IsNot Nothing AndAlso o.SubOccurrences.Count > 0 Then
+                    CollectAllOccurrences(o.SubOccurrences, list)
+                End If
+            Catch
+            End Try
+        Next
+    End Sub
+
+    '-------------------------------------------------------------
+    ' Aplicar apariencia
+    '-------------------------------------------------------------
+    Private Sub SetAppearance(oOcc As ComponentOccurrence, posiblesNombres As IEnumerable(Of String))
+        Dim oAsset As Inventor.Asset = Nothing
+
+        For Each a As Inventor.Asset In oAsm.Assets
+            If posiblesNombres.Contains(a.DisplayName) Then
+                oAsset = a
+                Exit For
+            End If
+        Next
+
+        If oAsset IsNot Nothing Then
+            Try
+                oOcc.Appearance = oAsset
+            Catch
+            End Try
+
+            Try
+                Dim doc As Document = oOcc.Definition.Document
+                Dim partDoc As PartDocument = TryCast(doc, PartDocument)
+                If partDoc IsNot Nothing Then
+                    Try
+                        partDoc.ComponentDefinition.Appearance = oAsset
+                        If partDoc.ReadOnly = False Then
+                            partDoc.Save()
+                        End If
+                    Catch
+                    End Try
+                End If
+            Catch
+            End Try
+        End If
+    End Sub
+
+    '-------------------------------------------------------------
+    ' Generar CSV completo: nombre de pieza + Clasificación (todo el ensamble)
+    '-------------------------------------------------------------
+    Private Sub GenerarReporteClasificacionCompleto()
+        If String.IsNullOrEmpty(oAsm.FullFileName) Then
+            WinForms.MessageBox.Show("El ensamble no está guardado. Guarda el archivo antes de generar el CSV.",
+                                     "Reporte Clasificación",
+                                     WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Warning)
+            Return
+        End If
+
+        Dim partMap As New Dictionary(Of String, String())(StringComparer.OrdinalIgnoreCase)
+        ' Value: {0}=fullName, {1}=fileName, {2}=clasificacion, {3}=qty
+
+        Dim todas As New List(Of ComponentOccurrence)
+        CollectAllOccurrences(oAsm.ComponentDefinition.Occurrences, todas)
+
+        For Each occ As ComponentOccurrence In todas
+            Try
+                Dim doc As Document = occ.Definition.Document
+                If Not TypeOf doc Is PartDocument Then Continue For
+
+                Dim fullName As String = ""
+                Try
+                    fullName = doc.FullFileName
+                Catch
+                    fullName = ""
+                End Try
+                If String.IsNullOrEmpty(fullName) Then Continue For
+
+                Dim clasificacion As String = GetClasificacionActual(doc)
+                Dim fileName As String = System.IO.Path.GetFileName(fullName)
+
+                If partMap.ContainsKey(fullName) Then
+                    Dim row = partMap(fullName)
+                    row(3) = (CInt(row(3)) + 1).ToString()
+                    If String.IsNullOrEmpty(row(2)) AndAlso Not String.IsNullOrEmpty(clasificacion) Then
+                        row(2) = clasificacion
+                    End If
+                    partMap(fullName) = row
+                Else
+                    partMap(fullName) = New String() {fullName, fileName, clasificacion, "1"}
+                End If
+            Catch
+            End Try
+        Next
+
+        If partMap.Count = 0 Then
+            WinForms.MessageBox.Show("No se encontraron piezas (.ipt) en este ensamble.",
+                                     "Reporte Clasificación",
+                                     WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information)
+            Return
+        End If
+
+        Dim carpeta As String = System.IO.Path.GetDirectoryName(oAsm.FullFileName)
+        Dim nombreAsm As String = System.IO.Path.GetFileNameWithoutExtension(oAsm.FullFileName)
+        Dim nombreArchivo As String = "CLASIFICACION_" & nombreAsm & "_" &
+                                      DateTime.Now.ToString("yyyyMMdd_HHmmss") & ".csv"
+        Dim rutaArchivo As String = System.IO.Path.Combine(carpeta, nombreArchivo)
+
+        Try
+            Using sw As New System.IO.StreamWriter(rutaArchivo, False, System.Text.Encoding.UTF8)
+                sw.WriteLine("NombreComponente;Clasificacion")
+                For Each kvp In partMap
+                    Dim row = kvp.Value
+                    Dim nombreComponente As String = System.IO.Path.GetFileNameWithoutExtension(row(1))
+                    sw.WriteLine(CsvSafe(nombreComponente) & ";" & CsvSafe(row(2)))
+                Next
+            End Using
+        Catch ex As Exception
+            WinForms.MessageBox.Show("Error al crear el CSV de clasificación:" & vbCrLf & ex.Message,
+                                     "Reporte Clasificación",
+                                     WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Error)
+            Return
+        End Try
+
+        WinForms.MessageBox.Show(
+            "Se generó el CSV de clasificación para procesos externos." & vbCrLf &
+            "Piezas únicas: " & partMap.Count.ToString() & vbCrLf & vbCrLf &
+            rutaArchivo,
+            "Reporte Clasificación",
+            WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information)
+    End Sub
+
+    Private Function CsvSafe(value As String) As String
+        If String.IsNullOrEmpty(value) Then Return ""
+        Return value.Replace(";", ",").Replace(vbCr, " ").Replace(vbLf, " ")
+    End Function
+
+    '-------------------------------------------------------------
+    ' Generar reporte CSV de TODAS las piezas "Almacén" en el ensamble
+    '-------------------------------------------------------------
+    Private Sub GenerarReporteAlmacen()
+        If String.IsNullOrEmpty(oAsm.FullFileName) Then
+            WinForms.MessageBox.Show("El ensamble no está guardado. Guarda el archivo antes de generar el Excel.",
+                                     "Reporte Almacén",
+                                     WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Warning)
+            Return
+        End If
+
+        Dim almacenMap As New Dictionary(Of String, Integer)(StringComparer.OrdinalIgnoreCase)
+
+        Dim todas As New List(Of ComponentOccurrence)
+        CollectAllOccurrences(oAsm.ComponentDefinition.Occurrences, todas)
+
+        For Each occ As ComponentOccurrence In todas
+            Try
+                Dim doc As Document = occ.Definition.Document
+                If Not TypeOf doc Is PartDocument Then Continue For
+
+                Dim fullName As String = ""
+                Try
+                    fullName = doc.FullFileName
+                Catch
+                    fullName = ""
+                End Try
+                If String.IsNullOrEmpty(fullName) Then Continue For
+
+                Dim esAlmacen As Boolean = False
+                Try
+                    Dim customProps As PropertySet =
+                        doc.PropertySets.Item("Inventor User Defined Properties")
+                    Dim prop As [Property] = Nothing
+                    Try
+                        prop = customProps.Item("Clasificación")
+                        Dim val As String = ""
+                        If prop.Value IsNot Nothing Then
+                            val = prop.Value.ToString().Trim()
+                        End If
+                        If String.Equals(val, "Almacén", StringComparison.OrdinalIgnoreCase) Then
+                            esAlmacen = True
+                        End If
+                    Catch
+                    End Try
+                Catch
+                End Try
+
+                If esAlmacen Then
+                    If almacenMap.ContainsKey(fullName) Then
+                        almacenMap(fullName) += 1
+                    Else
+                        almacenMap(fullName) = 1
+                    End If
+                End If
+
+            Catch
+            End Try
+        Next
+
+        If almacenMap.Count = 0 Then
+            WinForms.MessageBox.Show("No se encontraron piezas con iProperty 'Clasificación' = 'Almacén' en este ensamble.",
+                                     "Reporte Almacén",
+                                     WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information)
+            Return
+        End If
+
+        Dim carpeta As String = System.IO.Path.GetDirectoryName(oAsm.FullFileName)
+        Dim nombreAsm As String = System.IO.Path.GetFileNameWithoutExtension(oAsm.FullFileName)
+        Dim nombreArchivo As String = "ALMACEN_" & nombreAsm & "_" &
+                                      DateTime.Now.ToString("yyyyMMdd_HHmmss") & ".csv"
+        Dim rutaArchivo As String = System.IO.Path.Combine(carpeta, nombreArchivo)
+
+        Try
+            Using sw As New System.IO.StreamWriter(rutaArchivo, False, System.Text.Encoding.UTF8)
+                sw.WriteLine("Archivo;NombrePieza;CantidadAlmacen")
+
+                For Each kvp In almacenMap
+                    Dim fullName As String = kvp.Key
+                    Dim qty As Integer = kvp.Value
+                    Dim fileName As String = System.IO.Path.GetFileName(fullName)
+
+                    sw.WriteLine(fullName & ";" & fileName & ";" & qty.ToString())
+                Next
+            End Using
+
+        Catch ex As Exception
+            WinForms.MessageBox.Show("Error al crear el archivo de Almacén:" & vbCrLf & ex.Message,
+                                     "Reporte Almacén",
+                                     WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Error)
+            Return
+        End Try
+
+        Dim total As Integer = 0
+        For Each v In almacenMap.Values
+            total += v
+        Next
+
+        WinForms.MessageBox.Show(
+            "Se generó el archivo Excel (CSV) de piezas Almacén." & vbCrLf &
+            "Total de piezas con Clasificación = 'Almacén' encontradas en el ensamble: " & total.ToString() & vbCrLf & vbCrLf &
+            "Ubicación del archivo:" & vbCrLf &
+            rutaArchivo,
+            "Reporte Almacén",
+            WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information)
+
+    End Sub
+
+    '-------------------------------------------------------------
+    ' Ejecutar regla externa "Ignorar Nesting.iLogicVb"
+    '-------------------------------------------------------------
+    Private Sub EjecutarIgnorarNesting()
+        Try
+            If oAsm Is Nothing Then Exit Sub
+
+            Dim iLogicAddIn As ApplicationAddIn =
+                _inventor.ApplicationAddIns.ItemById("{3BDD8D79-2179-4B11-8A5A-257B1C0263AC}")
+
+            If iLogicAddIn Is Nothing Then
+                WinForms.MessageBox.Show("No se encontró el complemento de iLogic. No se pudo ejecutar 'Ignorar Nesting'.",
+                                         "Ignorar Nesting",
+                                         WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Error)
+                Exit Sub
+            End If
+
+            If Not iLogicAddIn.Activated Then
+                iLogicAddIn.Activate()
+            End If
+
+            Dim iLogicAuto As Object = iLogicAddIn.Automation
+
+            Dim rutaRegla As String =
+                "Z:\♦♦GRUPO ARGA CARPETAS COMPARTIDAS♦♦\BIENVENIDO\Departamentos _antes TIK\21. Desarrollo y Tecnologia\2.- Códigos Desarrollo y Tecnología\7.- Configuración para equipos de Computo\Ignorar Nesting.iLogicVb"
+
+            iLogicAuto.RunExternalRule(oAsm, rutaRegla)
+
+        Catch ex As Exception
+            WinForms.MessageBox.Show("Error al ejecutar la regla 'Ignorar Nesting':" & vbCrLf & ex.Message,
+                                     "Ignorar Nesting",
+                                     WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Error)
+        End Try
+    End Sub
+
+    '-------------------------------------------------------------
+    ' UNDO de última clasificación aplicada
+    '-------------------------------------------------------------
+    Private Sub DeshacerUltimaClasificacion()
+
+        If _undoStack Is Nothing OrElse _undoStack.Count = 0 Then
+            _inventor.StatusBarText = "No hay cambios para deshacer."
+            Exit Sub
+        End If
+
+        Dim rec As ChangeRecord = _undoStack.Pop()
+        If rec Is Nothing OrElse rec.Occ Is Nothing Then Exit Sub
+
+        Dim occ As ComponentOccurrence = rec.Occ
+
+        ' Restaurar apariencia
+        Try
+            If Not String.IsNullOrEmpty(rec.OldAppearance) Then
+                Dim oAsset As Inventor.Asset = Nothing
+                For Each a As Inventor.Asset In oAsm.Assets
+                    If a.DisplayName = rec.OldAppearance Then
+                        oAsset = a
+                        Exit For
+                    End If
+                Next
+
+                If oAsset IsNot Nothing Then
+                    Try
+                        occ.Appearance = oAsset
+                    Catch
+                    End Try
+                End If
+            End If
+        Catch
+        End Try
+
+        ' Restaurar iProperty "Clasificación"
+        Try
+            Dim doc As Document = occ.Definition.Document
+            Dim customProps As PropertySet =
+                doc.PropertySets.Item("Inventor User Defined Properties")
+
+            Dim prop As [Property] = Nothing
+
+            If String.IsNullOrEmpty(rec.OldClass) Then
+                ' Antes NO tenía clasificación: intentamos borrar la propiedad
+                Try
+                    prop = customProps.Item("Clasificación")
+                    prop.Delete()
+                Catch
+                End Try
+            Else
+                ' Antes tenía un valor: lo restauramos
+                Try
+                    prop = customProps.Item("Clasificación")
+                    prop.Value = rec.OldClass
+                Catch
+                    customProps.Add(rec.OldClass, "Clasificación")
+                End Try
+            End If
+
+            If doc.ReadOnly = False Then
+                doc.Save()
+            End If
+
+        Catch
+        End Try
+
+        _inventor.StatusBarText = "⏪ Se deshizo la última clasificación aplicada."
+
+    End Sub
+
+    Private Sub OnTerminateHandler()
+        _stillSelecting = False
+    End Sub
+
+    Private Sub Salir()
+        _clasificacionElegida = ""
+        _modoClasificacion = ""
+        _selectedOccs.Clear()
+        _stillSelecting = False
+    End Sub
+
+End Class

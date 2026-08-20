@@ -146,3 +146,18 @@ Si un requisito **mínimo** falla → registrar en el log/incidencia y abrir cor
 - **Cómo re-probar:** reabrir Inventor, cargar el ensamble + el machote de
   planos, y volver a ejecutar el flujo. Debe completar las 5 caras sin
   errores `RPC no disponible` y sin diálogo de crash.
+
+### 2026-08-12 — Fallo en PIEZAS_ACOTADAS tras COTAS_POR_REFERENCIA OK (OTC 62176)
+
+- **Síntoma:** `COTAS_POR_REFERENCIA` terminó 508/508 (incluye TOP). Al pasar a
+  piezas: `creador_vistas` aborta con
+  `(-2147417856, 'Error en la llamada de sistema.')` en
+  `AllLeafOccurrences.Item(i)` / `CopyTo`. `PIEZAS_ACOTADAS` quedó en 0 JPG.
+- **Causa:** tras 508 `SaveAsBitmap`, el enumerador leaf se corrompe si se
+  mantiene abierto durante la creación de hojas; además hojas residuales
+  `_FRENTE_*`/`_LADO` no se limpiaban (solo se buscaban `_ANCHO`/`_LARGO`/`_THK`).
+- **Corrección:**
+  1. Recolectar piezas únicas primero; luego crear hojas (sin enumerator vivo).
+  2. Reintento en `CopyTo` ante COM transitorio.
+  3. Limpiar residuales `_FRENTE_1/_FRENTE_2/_LADO` + respiro COM antes de piezas.
+  4. `ScreenUpdating=True` durante `crear_vistas`; se apaga después.

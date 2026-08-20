@@ -1,12 +1,21 @@
-﻿' COTAS ABIGAIL - Generar planos completos
+﻿' COTAS ABIGAIL - Solo piezas acotadas (PIEZAS_ACOTADAS)
 ' Regla externa: COTAS_ILOGIC_ABIGAIL
+'
+' Genera únicamente las cotas por pieza (largo/ancho/thk/diámetros),
+' organizadas por clasificación (iProperty Colorimetria). NO ejecuta las
+' cotas por caras del tanque; para eso usar COTAS_POR_SUBENSAMBLE o
+' COTAS_CARAS_TANQUE (flujo completo).
+'
+' Rutas: NO hardcodear C:\Proyectos\...  Usar COTAS_ABIGAIL_DIR /
+' config_planos.txt / ExternalRuleDirectories (instalador).
+
+Imports System.Collections.Generic
 
 Sub Main()
     Const kDrawingDocument As Integer = 12292
-    Const planosDirInstalado As String = "c:\Proyectos\COTAS ABIGAIL\COTAS ABIGAIL\Planos"
 
     Dim invApp As Inventor.Application = ThisApplication
-    Dim titulo As String = "COTAS ABIGAIL"
+    Dim titulo As String = "COTAS ABIGAIL - Solo piezas"
 
     If invApp.ActiveDocument Is Nothing Then
         System.Windows.Forms.MessageBox.Show(
@@ -35,65 +44,30 @@ Sub Main()
         Exit Sub
     End If
 
-    ' --- Resolver carpeta Planos ---
-    Dim planosDirFinal As String = planosDirInstalado
-
+    Dim planosDirFinal As String = ResolverPlanosDir(invApp)
     If String.IsNullOrWhiteSpace(planosDirFinal) Then
-        Try
-            planosDirFinal = System.Environment.GetEnvironmentVariable("COTAS_ABIGAIL_DIR")
-        Catch
-        End Try
-    End If
-
-    If String.IsNullOrWhiteSpace(planosDirFinal) Then
-        Try
-            Dim cfgPath As String = System.IO.Path.Combine(planosDirInstalado, "ilogic\config_planos.txt")
-            If System.IO.File.Exists(cfgPath) Then
-                For Each linea As String In System.IO.File.ReadAllLines(cfgPath)
-                    If linea.StartsWith("PLANOS_DIR=", StringComparison.OrdinalIgnoreCase) Then
-                        planosDirFinal = linea.Substring("PLANOS_DIR=".Length).Trim()
-                        Exit For
-                    End If
-                Next
-            End If
-        Catch
-        End Try
-    End If
-
-    If String.IsNullOrWhiteSpace(planosDirFinal) OrElse Not System.IO.Directory.Exists(planosDirFinal) Then
         System.Windows.Forms.MessageBox.Show(
             "No se encontro la carpeta Planos." & vbCrLf &
-            "Ejecuta instalar_boton_inventor.bat una vez.",
+            "En esta PC ejecuta una vez:" & vbCrLf &
+            "  Planos\instalar_boton_inventor.bat" & vbCrLf &
+            "Luego cierra y vuelve a abrir Inventor.",
             titulo,
             System.Windows.Forms.MessageBoxButtons.OK,
             System.Windows.Forms.MessageBoxIcon.Error)
         Exit Sub
     End If
 
-    Dim scriptPath As String = System.IO.Path.Combine(planosDirFinal, "generador_vistas.py")
+    Dim scriptPath As String = System.IO.Path.Combine(planosDirFinal, "generador_piezas.py")
     If Not System.IO.File.Exists(scriptPath) Then
         System.Windows.Forms.MessageBox.Show(
-            "No se encontro generador_vistas.py en:" & vbCrLf & planosDirFinal,
+            "No se encontro generador_piezas.py en:" & vbCrLf & planosDirFinal,
             titulo,
             System.Windows.Forms.MessageBoxButtons.OK,
             System.Windows.Forms.MessageBoxIcon.Error)
         Exit Sub
     End If
 
-    ' --- Resolver Python ---
-    Dim pythonExeFinal As String = "python"
-    Try
-        Dim cfgPathPy As String = System.IO.Path.Combine(planosDirInstalado, "ilogic\config_planos.txt")
-        If System.IO.File.Exists(cfgPathPy) Then
-            For Each linea As String In System.IO.File.ReadAllLines(cfgPathPy)
-                If linea.StartsWith("PYTHON_EXE=", StringComparison.OrdinalIgnoreCase) Then
-                    pythonExeFinal = linea.Substring("PYTHON_EXE=".Length).Trim()
-                    Exit For
-                End If
-            Next
-        End If
-    Catch
-    End Try
+    Dim pythonExeFinal As String = ResolverPythonExe(planosDirFinal)
 
     Dim psi As New System.Diagnostics.ProcessStartInfo()
     psi.FileName = pythonExeFinal
@@ -108,8 +82,8 @@ Sub Main()
 
         If proc.ExitCode = 0 Then
             System.Windows.Forms.MessageBox.Show(
-                "Planos generados correctamente." & vbCrLf &
-                "Vistas, cotas, renombrado y JPG exportados.",
+                "Piezas acotadas exportadas correctamente." & vbCrLf &
+                "Revisa Planos\JPG\<tanque>\PIEZAS_ACOTADAS\.",
                 titulo,
                 System.Windows.Forms.MessageBoxButtons.OK,
                 System.Windows.Forms.MessageBoxIcon.Information)
@@ -123,9 +97,150 @@ Sub Main()
         End If
     Catch ex As Exception
         System.Windows.Forms.MessageBox.Show(
-            "No se pudo ejecutar Python:" & vbCrLf & ex.Message,
+            "No se pudo lanzar Python:" & vbCrLf & ex.Message & vbCrLf &
+            "Python resuelto: " & pythonExeFinal,
             titulo,
             System.Windows.Forms.MessageBoxButtons.OK,
             System.Windows.Forms.MessageBoxIcon.Error)
     End Try
 End Sub
+
+'------------------------------------------------------------
+' Resolver carpeta Planos (portable entre PCs)
+' Orden: ENV COTAS_ABIGAIL_DIR -> config_planos.txt ->
+'        ExternalRuleDirectories de iLogic
+'------------------------------------------------------------
+Function ResolverPlanosDir(invApp As Inventor.Application) As String
+    Try
+        Dim variable As String =
+            System.Environment.GetEnvironmentVariable("COTAS_ABIGAIL_DIR")
+        If Not String.IsNullOrWhiteSpace(variable) AndAlso
+           System.IO.Directory.Exists(variable) AndAlso
+           EsCarpetaPlanosValida(variable) Then
+            Return variable
+        End If
+    Catch
+    End Try
+
+    Dim desdeCfg As String = LeerPlanosDirDesdeConfigCandidatos(invApp)
+    If Not String.IsNullOrWhiteSpace(desdeCfg) Then
+        Return desdeCfg
+    End If
+
+    Dim desdeExt As String = BuscarPlanosEnExternalRuleDirs(invApp)
+    If Not String.IsNullOrWhiteSpace(desdeExt) Then
+        Return desdeExt
+    End If
+
+    Return ""
+End Function
+
+Function EsCarpetaPlanosValida(dirPlanos As String) As Boolean
+    Try
+        If System.IO.File.Exists(System.IO.Path.Combine(dirPlanos, "generador_piezas.py")) Then Return True
+        If System.IO.File.Exists(System.IO.Path.Combine(dirPlanos, "generador_tanque_completo.py")) Then Return True
+        If System.IO.File.Exists(System.IO.Path.Combine(dirPlanos, "generador_caras_tanque.py")) Then Return True
+    Catch
+    End Try
+    Return False
+End Function
+
+Function LeerValorConfig(cfgPath As String, clave As String) As String
+    Try
+        If Not System.IO.File.Exists(cfgPath) Then Return ""
+        Dim prefijo As String = clave & "="
+        For Each linea As String In System.IO.File.ReadAllLines(cfgPath)
+            If linea.StartsWith(prefijo, StringComparison.OrdinalIgnoreCase) Then
+                Return linea.Substring(prefijo.Length).Trim()
+            End If
+        Next
+    Catch
+    End Try
+    Return ""
+End Function
+
+Function LeerPlanosDirDesdeConfigCandidatos(invApp As Inventor.Application) As String
+    Dim candidatos As New System.Collections.Generic.List(Of String)
+
+    Try
+        Dim env As String =
+            System.Environment.GetEnvironmentVariable("COTAS_ABIGAIL_DIR")
+        If Not String.IsNullOrWhiteSpace(env) Then
+            candidatos.Add(System.IO.Path.Combine(env, "ilogic\config_planos.txt"))
+            candidatos.Add(System.IO.Path.Combine(env, "config_planos.txt"))
+        End If
+    Catch
+    End Try
+
+    Try
+        Dim dirs = ObtenerExternalRuleDirectories(invApp)
+        If dirs IsNot Nothing Then
+            For Each d As String In dirs
+                If String.IsNullOrWhiteSpace(d) Then Continue For
+                candidatos.Add(System.IO.Path.Combine(d, "config_planos.txt"))
+                Dim padre As String = System.IO.Path.GetDirectoryName(d)
+                If Not String.IsNullOrWhiteSpace(padre) Then
+                    candidatos.Add(System.IO.Path.Combine(padre, "ilogic\config_planos.txt"))
+                    candidatos.Add(System.IO.Path.Combine(padre, "config_planos.txt"))
+                End If
+            Next
+        End If
+    Catch
+    End Try
+
+    For Each cfg As String In candidatos
+        Try
+            Dim valor As String = LeerValorConfig(cfg, "PLANOS_DIR")
+            If Not String.IsNullOrWhiteSpace(valor) AndAlso
+               System.IO.Directory.Exists(valor) AndAlso
+               EsCarpetaPlanosValida(valor) Then
+                Return valor
+            End If
+            ' Si el config está en Planos\ilogic\, el padre es Planos.
+            Dim carpetaCfg As String = System.IO.Path.GetDirectoryName(cfg)
+            If Not String.IsNullOrWhiteSpace(carpetaCfg) Then
+                Dim posiblePlanos As String = System.IO.Path.GetDirectoryName(carpetaCfg)
+                If EsCarpetaPlanosValida(posiblePlanos) Then Return posiblePlanos
+                If EsCarpetaPlanosValida(carpetaCfg) Then Return carpetaCfg
+            End If
+        Catch
+        End Try
+    Next
+    Return ""
+End Function
+
+Function ObtenerExternalRuleDirectories(invApp As Inventor.Application) As Object
+    Try
+        Dim iLogicAddIn As ApplicationAddIn =
+            invApp.ApplicationAddIns.ItemById("{3BDD8D79-2179-4B11-8A5A-257B1C0263AC}")
+        If iLogicAddIn Is Nothing Then Return Nothing
+        If Not iLogicAddIn.Activated Then iLogicAddIn.Activate()
+        Dim auto As Object = iLogicAddIn.Automation
+        Return auto.FileOptions.ExternalRuleDirectories
+    Catch
+        Return Nothing
+    End Try
+End Function
+
+Function BuscarPlanosEnExternalRuleDirs(invApp As Inventor.Application) As String
+    Try
+        Dim dirs = ObtenerExternalRuleDirectories(invApp)
+        If dirs Is Nothing Then Return ""
+        For Each d As String In dirs
+            If String.IsNullOrWhiteSpace(d) Then Continue For
+            If EsCarpetaPlanosValida(d) Then Return d
+            Dim padre As String = System.IO.Path.GetDirectoryName(d)
+            If EsCarpetaPlanosValida(padre) Then Return padre
+        Next
+    Catch
+    End Try
+    Return ""
+End Function
+
+Function ResolverPythonExe(planosDir As String) As String
+    Dim cfgPath As String =
+        System.IO.Path.Combine(planosDir, "ilogic\config_planos.txt")
+    Dim valor As String = LeerValorConfig(cfgPath, "PYTHON_EXE")
+    If Not String.IsNullOrWhiteSpace(valor) Then Return valor
+    Return "python"
+End Function
