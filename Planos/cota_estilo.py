@@ -177,7 +177,7 @@ def aplicar_estilo_cota(dimension, inv_app=None, hoja=None, solo_color=False):
         pass
 
 
-def aplicar_estilo_texto_cota(text_obj, texto, inv_app):
+def aplicar_estilo_texto_cota(text_obj, texto, inv_app, vertical=False):
     """
     Mismo estilo para TextBoxes de sketch (arcos.py).
     """
@@ -190,8 +190,9 @@ def aplicar_estilo_texto_cota(text_obj, texto, inv_app):
         return
 
     bold = "True" if COTA_BOLD else "False"
+    angle_attr = " Angle='90'" if vertical else ""
     formatted = (
-        f"<StyleOverride FontSize='{COTA_FONT_SIZE_CM}' Bold='{bold}'>"
+        f"<StyleOverride FontSize='{COTA_FONT_SIZE_CM}' Bold='{bold}'{angle_attr}>"
         f"{texto}</StyleOverride>"
     )
 

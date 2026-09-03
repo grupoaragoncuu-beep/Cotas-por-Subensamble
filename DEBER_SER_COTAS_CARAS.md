@@ -2,21 +2,21 @@
 
 Documento de verdad del flujo. Si el código o una conversación contradicen esto, gana este archivo.
 
-Última actualización: 2026-08-12
+Última actualización: 2026-09-01
 
 ---
 
 ## 1. Propósito
 
-Generar una **fotografía por cada referencia dimensional** de las piezas en las cuatro paredes del tanque. Cada foto contiene una sola cota real desde `(0,0)` para que en piso se pueda identificar y medir sin mezclar dimensiones.
+Generar fotografías de cotas desde `(0,0)` sobre las paredes del tanque, **agrupando piezas iguales** para reducir capturas: un JPG por tipo de pieza con todas sus cotas X e Y a la vez.
 
 Reglas iLogic disponibles:
 
 | Regla | Alcance | Script Python |
 |-------|---------|---------------|
-| `COTAS_CARAS_TANQUE` | Flujo **completo** (caras + piezas) | `Planos/generador_tanque_completo.py` |
-| `COTAS_POR_SUBENSAMBLE` | Solo **cotas por caras** (`COTAS_POR_REFERENCIA`) | `Planos/generador_caras_tanque.py` |
-| `COTAS_ILOGIC_ABIGAIL` | Solo **piezas acotadas** (`PIEZAS_ACOTADAS`) | `Planos/generador_piezas.py` |
+| `COTAS_POR_SUBENSAMBLE` | Cotas por caras + **Top Cover** (selección manual) | `generador_caras_tanque.py --seleccion …` |
+| `COTAS_ILOGIC_ABIGAIL` | Piezas acotadas + **Top Cover** en mapa de caras | `generador_piezas.py --seleccion …` |
+| `COTAS_CARAS_TANQUE` | Flujo **completo** (caras auto + piezas) | `generador_tanque_completo.py` |
 
 ---
 
@@ -27,145 +27,160 @@ Siempre:
 1. Plano **machote** activo (`MACHOTE PLANOS.dwg` o equivalente).
 2. **Tanque completo** (ensamble principal) abierto junto al machote.
 
-No es requisito abrir por separado `Assembly Segmento 1..4` u otros IAM de cara.  
-El flujo obtiene los segmentos del **árbol del tanque completo**. Cada vista se compone desde el tanque principal, aislando el IAM del segmento de esa cara y cualquier accesorio raíz físicamente ubicado en la misma pared (por ejemplo un bracket agregado fuera del IAM por ingeniería). La placa madre y el `(0,0)` siguen saliendo exclusivamente del segmento.
+### Selección manual (obligatoria en ambas reglas de producción)
+
+Tras lanzar `COTAS_POR_SUBENSAMBLE` **o** `COTAS_ILOGIC_ABIGAIL`, el operador selecciona en orden:
+
+1. **TOP COVER** (cara plana de la tapa) — se integra en ambos flujos.
+2. Cara expuesta del **SEGMENTO 1**.
+3. Cara expuesta del **SEGMENTO 2**.
+4. Cara expuesta del **SEGMENTO 3**.
+5. Cara expuesta del **SEGMENTO 4**.
+
+iLogic escribe `Planos/seleccion_caras.json` y lanza Python con `--seleccion`.
+
+| Regla | Uso del Top Cover |
+|-------|-------------------|
+| `COTAS_POR_SUBENSAMBLE` | Vista `TOP/` con cotas H/V de accesorios sobre la tapa |
+| `COTAS_ILOGIC_ABIGAIL` | Piezas de la tapa en `PIEZAS_ACOTADAS/TOP/...` (largo/ancho/thk) |
+
+### Compat automático (`COTAS_CARAS_TANQUE` / import sin JSON)
+
+Si Python se llama **sin** `--seleccion`, caras usa mapeo geométrico FRONT/BACK/…; piezas solo clasificación.
 
 ---
 
 ## 3. Salida
 
 - Carpeta raíz: `Planos/JPG/<nombre_ensamble>/`.
-- `COTAS_POR_REFERENCIA/`: subcarpetas `FRONT/`, `BACK/`, `LEFT/`, `RIGHT/`, `TOP/`; cada una contiene una foto JPG por referencia de esa cara, con nombre secuencial, eje y extremo.
-- `PIEZAS_ACOTADAS/`: salida independiente del flujo original `COTAS_ILOGIC_ABIGAIL`. Se **divide por cara** con las mismas subcarpetas `FRONT/ BACK/ LEFT/ RIGHT/ TOP/` y una carpeta `OTROS/` para piezas que no puedan mapearse a una cara. Dentro de cada cara, **cada pieza tiene su propia carpeta** (`<CARA>/<PIEZA>/`) que agrupa sus JPG (`LARGO`, `ANCHO`, `THK`, `DIAMETRO_*`).
-- Log: `Planos/error_log_caras.txt` (debe registrar `cara <- segmento/subensamble` para las 5 caras y el conteo por subcarpeta de `PIEZAS_ACOTADAS`).
+- `COTAS_POR_REFERENCIA/`:
+  - Con selección: subcarpetas `SEGM1/`, `SEGM2/`, `SEGM3/`, `SEGM4/`, `TOP/`.
+  - Automático: `FRONT/`, `BACK/`, `LEFT/`, `RIGHT/`, `TOP/`.
+  - Dentro de cada cara: **un JPG por tipo de pieza**, nombre `NNN_QTYK_<tipo>.jpg`.
+- `PIEZAS_ACOTADAS/`:
+  - Con selección: `<SEGM*|TOP|OTROS>/<CLASIFICACIÓN>/<PIEZA>/*.jpg` (Top Cover incluido).
+  - Sin selección: `<CLASIFICACIÓN>/<PIEZA>/*.jpg`.
+- Log: `Planos/error_log_caras.txt` / `error_log.txt` según flujo.
 - Al terminar: borrar hojas temporales `TANQUE_DATUM_*` y dejar visible la hoja plantilla del machote (**nunca** quedarse en `Model (AutoCAD)`).
 
 ---
 
 ## 4. Origen (0,0)
 
-En cada vista de pared:
+En cada vista:
 
-- **(0,0)** = esquina **inferior-izquierda de la placa madre del segmento** en esa cara.
-- La placa madre es la superficie rectangular del segmento que el personal usa como referencia, no la base exterior, soleras de base ni otros elementos estructurales externos.
-- **No** usar picos de lifting lug, bridas sueltas, la base del tanque ni ruido de HLR como datum.
-
-El origen es un datum interno de cálculo: **no** se dibuja la etiqueta, cruz ni indicador visual `(0,0)` en el JPG.
+- Con selección manual: **(0,0)** = esquina **inferior-izquierda** (min X / min Y en hoja) de la **cara seleccionada**.
+- Sin selección: **(0,0)** = esquina inferior-izquierda de la placa madre del segmento.
+- El origen es un datum interno de cálculo: **no** se dibuja etiqueta, cruz ni indicador visual `(0,0)` en el JPG.
 
 ---
 
 ## 5. Cotas (cómo deben verse)
 
 - Cotas **horizontales y verticales con líneas, extensiones y flechas**.
-- Desde el **origen (0,0)** se deben señalar el **inicio y el fin** de cada componente en ambos ejes: `Xmin`, `Xmax`, `Ymin` y `Ymax` de su proyección. No basta una sola esquina de referencia.
-- Una pieza rectangular produce **cuatro referencias**: `Xmin`, `Xmax`, `Ymin`, `Ymax`. Cada JPG muestra una única referencia desde el datum oculto.
-- Una pieza circular, como flange, boss o puerto circular visto de frente, produce solo **dos fotografías**: `Xcentro` y `Ycentro`. No se acotan sus extremos exterior izquierdo/derecho/superior/inferior.
-- En piezas rectangulares, incluso soleras delgadas, deben existir las **cuatro referencias**: dos X y dos Y. No se pierde un extremo por una tolerancia aplicada en coordenadas de hoja.
-- Cuando dos o más piezas distintas comparten exactamente una referencia, se exporta una sola cota con el sufijo **`TYP`** y puntos azules sobre todos los accesorios a los que aplica. Extremos distintos de una misma pieza nunca se fusionan.
-- Texto y líneas **fuera del tanque**, legibles, en stacks H/V. La vista se escala y desplaza después de contar las cotas para reservarles el mayor espacio útil de la hoja. El JPG se recorta a las curvas del dibujo y a su cota; no muestra marco, título ni esquinas del plano.
-- La envolvente 3D de la ocurrencia conserva las cuatro referencias de una solera aunque el HLR muestre pocas aristas. Al reencuadrar cada JPG, el origen y el extremo seleccionado se **releen de las curvas HLR vigentes**: la línea de extensión debe terminar exactamente sobre la arista visible, nunca en una coordenada transformada de forma aproximada.
-- No existe un tope que descarte cotas por cantidad de accesorios: se conserva cada extremo y el encuadre adapta la escala/posición de la vista.
-- Estilo: números azules, sin símbolos de diámetros/unidades que confundan.
-
-La API nativa de dimensiones de Inventor ha sido inestable para estas vistas
-arbitrarias (`AddLinear` generó abanicos; `OrdinateDimensions` dejó texto
-suelto). La salida de producción usa un `DrawingSketch` que dibuja las líneas,
-flechas y textos H/V; el valor real se calcula como distancia en hoja dividida
-entre la escala ortográfica de la vista y se formatea con las unidades del
-machote.
+- Desde el origen se señalan inicio/fin (o centro si es circular) de cada instancia: `Xmin`/`Xmax`/`Ymin`/`Ymax` o `Xcentro`/`Ycentro`.
+- **Agrupación:** piezas con el mismo código OTC `PROYECTO-FAMILIA-Pxx` (p. ej. `P17_403` y `P17_HOLE_404` → `P17`; `P35_Bottom Flange_372` → `P35`) o, si no es OTC, la misma base tras quitar `_\d+$` (`SP-852_1`/`_2`). Un JPG por tipo con QTY.
+- **Inicio/fin obligatorio:** toda pieza lleva Xmin/Xmax e Ymin/Ymax desde (0,0). Nunca reemplazar por solo centro (salvo bore adicional en L845/SP-*).
+- **Barrenos:** no sustituyen la envolvente (P35 bottom flange = solo inicio/fin). Centro de bore solo en L845/SP-*/*_HOLE como complemento.
+- Valores idénticos dentro del grupo se fusionan en una sola línea con texto `TYP`. Las donas azules van en el **punto de extensión** de cada miembro tipico (no en el centro de la pieza).
+- **Encuadre por grupo:** reserva dinámica según # cotas; stacks Y a izquierda y derecha si >8; texto vertical en stacks largos.
+- Texto y líneas **fuera del tanque**, legibles, en stacks H/V. El JPG se recorta a las curvas del dibujo y a sus cotas.
 
 ### Prohibido
 
 - Cotas **alineadas / inclinadas** (abanico).
-- **Números flotantes** sin líneas (Ordinate + `HideValue` o estilos que apaguen la cota).
-- Acotar el **tamaño** de la pieza como si fuera el dato principal; el dato principal es **dónde está** respecto a (0,0).
+- **Números flotantes** sin líneas.
+- Acotar el **tamaño** de la pieza como dato principal; el dato principal es **dónde está** respecto a (0,0).
 - Mezclar en una cara accesorios de **otro** segmento/pared.
+- Depender de vistas Front/Right nativas de Inventor para nombrar segmentos cuando hay selección manual.
 
 ---
 
 ## 6. Qué se acota en cada cara
 
-Se acotan **todas las piezas independientes que están sobre la superficie física de la cara**, con sus extremos de inicio/fin desde el datum. El nombre del `.iam` o de la pieza no decide si se acota.
-
-Incluye (ejemplos transversales): flanges, nipples, ground pads, tierras, lugs, jacking pads, parking stands, patches, bosses, gauges, manways, bushing patches, pipes, valves, etc.
-
-También piezas con **código opaco** (OTC `62201-…`, `SP-###`, PTT `AS000…`) si pertenecen al subensamble/segmento de esa pared, y accesorios independientes colgados directamente del tanque si su ubicación física corresponde a esa cara.
-
-Los **barrenos, agujeros y curvas de una placa no son piezas** y no se acotan por sí mismos. Se excluye únicamente la placa madre de la pared (la ocurrencia de mayor área proyectada de la cara); se incluyen las soleras, bases, refuerzos y demás ocurrencias independientes aunque formen parte de la estructura.
+Se acotan **las piezas del IAM del segmento/cara seleccionado** (todas las capas colgadas de esa rama). Con selección, el catálogo sale del contenedor raíz de la rama; no se mezclan extras de BASE u otras caras.
 
 ### No se acota
 
-- La **placa madre** usada para fijar el `(0,0)`.
-- Barrenos, agujeros o aristas que pertenezcan a una pieza, pero que no sean una ocurrencia independiente.
-- Elementos que estén en otra pared física.
-
-Las soleras, bases, refuerzos y demás ocurrencias independientes **sí** se acotan si están en la superficie física de la cara.
+- La **placa madre** usada como referencia de pared.
+- Barrenos/agujeros que no sean ocurrencias independientes.
+- Elementos de otra pared física.
+- Piezas de otra cara ya mapeada (p. ej. BASE no entra en SEGM).
 
 ---
 
-## 7. Segmentos y mapeo a caras
+## 7. Segmentos y mapeo
 
-### Vantran (y similares)
+### Con selección manual
 
-Suelen existir `Assembly Segmento 1..4` (o `Placa Segmento N`) **dentro** del IAM principal.
+| Carpeta | Origen |
+|---------|--------|
+| `TOP` | Pick 1 — Top Cover |
+| `SEGM1`…`SEGM4` | Picks 2–5 — caras expuestas (rama IAM completa del segmento, no solo la placa partida) |
+| `BASE` | Pick 6 — base / fondo del tanque |
 
-### Otras familias (OTC, SWE, GIGA, SUNBELT, PTT, …)
+Cámara: mira la cara (`eye` = normal saliente); `up` = normal del Top Cover (en TOP/BASE, `up` ≈ normal de SEGM1).
 
-Muchas **no** usan la palabra “Segmento”. Hay que:
+### Familia OTC (estructura real — global en piso)
 
-1. Detectar subensambles (o clusters) asociados a cada pared exterior, y/o  
-2. Asignar por **geometría** (centroide vs normales de las 4 paredes).
+Validado en **11 OPs OTC** bajo `ORDENES DE PRODUCCION` (planos `*-46/47/48.xx` en todas). Detalle: [`PATRONES_OTC_GLOBAL.md`](PATRONES_OTC_GLOBAL.md).
 
-### Mapeo FRONT / BACK / LEFT / RIGHT / TOP
+El rol lo dan los **últimos 2 dígitos** de la familia (`1246`→46, `1247`→47, `1248`→48), no el número de proyecto:
 
-No confiar en el número del nombre (`Segmento 1` ≠ FRONT siempre).
+```
+*-*46-A01.iam      ← TANQUE          (plano *-*46.00)
+├── *-*47-A0N      ← TOP COVER       (plano *-*47.00 / 47.01; a veces A01..A07)
+└── *-*48-A01      ← casco / shell   (plano *-*48.00; NO acotar como una cara)
+    ├── *-*48-A02  ← BASE
+    ├── *-*48-A03  ← pared / SEGM
+    ├── *-*48-A04  ← pared / SEGM
+    ├── *-*48-A05  ← pared / SEGM
+    └── *-*48-A06  ← pared / SEGM
+         (+ A07+ = subensambles de pared, no caras)
+```
 
-Mapear por centroide 3D del contenedor contra las normales de cámara estilo PQart:
+El pick de una cara debe resolver al IAM `48-A02`…`A06` (o cualquier `47-A*`), nunca a `48-A01` ni `46-A01`.
 
-- FRONT ↔ `+face`
-- BACK ↔ `-face`
-- RIGHT ↔ `+right`
-- LEFT ↔ `-right`
-- **TOP ↔ `+cover` (tapa)**
+El contenedor de un SEGM es el **subensamble de esa cara** (p. ej. `A03`/`A0x` con sus capas), **no** el casco multi-cara `A01` que agrupa las 4 paredes. Subir al shell mezclaba BASE y piezas de laterales (SP-852).
 
-Log obligatorio por cara, por ejemplo:  
-`FRONT <- Assembly Segmento 2` o `FRONT <- 62201-1248-A05 (auto)` o `TOP <- TAPA_A01 (por nombre)`.
+Accesorios estándar recurrentes entre OTC: `SP-852`, `SP-855`, `SP-800`, `SP-752`, `L845.RADVLV`, `SF-NP-*`, etc. (planos SP sueltos en `4. Planos`).
+
+### Automático (compat)
+
+Mapear por centroide contra el marco PQart (`FRONT`/`BACK`/`LEFT`/`RIGHT`/`TOP`). No confiar en el número del nombre (`Segmento 1` ≠ FRONT siempre).
+
+Log obligatorio, por ejemplo:  
+`SEGM2 <- 62201-1248-A05` o `FRONT <- Assembly Segmento 2`.
 
 ---
 
 ## 8. Cámara y orientación
 
-- Criterio PQart de postura: tapa/arriba ≈ **+Y**; cara principal ≈ **+Z** (`face`); lateral ≈ **+X** (`right`).
-- Las cámaras de foto miran las **paredes reales** (normales de caras planas), **sin** forzar ejes mundo puros (eso deja el tanque “chueco” en el JPG).
-- Enderezar la vista en hoja si los bordes largos salen rotados unos grados.
-- Para la cara **TOP** la cámara mira desde `+Y` hacia abajo, usando la misma placa madre lógica: la superficie superior del ensamble de tapa (mayor área proyectada horizontal).
-
-**Base (fondo) del tanque:** **NO** se acota. Solo se cubren las 4 paredes laterales + TOP.
+- Selección: normal de la cara elegida + up del Top Cover.
+- Automático: criterio PQart (tapa ≈ +Y, cara ≈ +Z, lateral ≈ +X), cámaras a paredes reales **sin** snap a ejes mundo.
+- Enderezar la vista en hoja si los bordes salen rotados unos grados.
+- **Base del tanque:** carpeta `BASE` con pick manual (no mezclar en SEGM).
 
 ---
 
 ## 9. Familias reales (contexto de piso)
 
-Análisis de Órdenes de Producción (`Z:\…\ORDENES DE PRODUCCION`, carpeta `10. Solidos`):
-
-- Familias vistas: **VANTRAN, OTC, SWE, GIGA, SUNBELT, PTT**, …
-- ~**84%** de nombres `PRODUCT` en STEP son códigos sin keyword inglesa.
+- Familias: **VANTRAN, OTC, SWE, GIGA, SUNBELT, PTT**, …
 - Solo Vantran usa de forma estable `Assembly Segmento N`.
-- Por eso: **geometría + árbol del ensamble**, no hardcode de un cliente.
-
-Detalle del barrido: `Planos/_analisis_steps_op_resultado.txt` (auxiliar).
+- OTC suele distinguir copias con sufijo `_NNN` → se agrupan por base.
+- Otros tanques con el mismo nombre exacto se agrupan por igualdad.
 
 ---
 
 ## 10. Anti-regresiones (no volver a romper)
 
-1. No dejar la hoja activa en **Model (AutoCAD)** (fondo negro / machote sucio).
+1. No dejar la hoja activa en **Model (AutoCAD)**.
 2. No **snap** de cámara a ±X/±Z mundo si el ensamble viene inclinado.
-3. No borrar cotas H/V válidas con heurísticas de RangeBox “demasiado grandes”.
-4. No mezclar el catálogo de los **4** segmentos en **una** sola cara.
-5. El JPG debe **encuadrar vista + cotas** (si `cotas_detectadas=0` en el log, el recorte está mal).
-6. No mutar `dim.Style` compartido del machote de forma que apague cotas.
-7. OriginIndicator: no eliminarlo a lo bruto si las cotas dependen de él; si no se usa ordinate, igual puede marcar (0,0).
+3. No mezclar el catálogo de los **4** segmentos en **una** sola cara.
+4. El JPG debe **encuadrar vista + cotas**.
+5. No mutar `dim.Style` compartido del machote.
+6. No reintroducir 1 JPG por referencia individual; las cotas coincidentes sí llevan `TYP`.
+7. Con selección, no renombrar carpetas a FRONT/BACK “por costumbre” de Inventor.
 
 ---
 
@@ -173,16 +188,15 @@ Detalle del barrido: `Planos/_analisis_steps_op_resultado.txt` (auxiliar).
 
 | Check | OK |
 |-------|----|
-| Preparación | Machote + tanque completo |
-| Caras generadas | 5: FRONT, BACK, LEFT, RIGHT, TOP (una por carpeta con sus JPG) |
-| Cotas | Líneas H/V desde (0,0) de cada cara, legibles |
-| Contenido de cada cara | Accesorios del segmento + accesorios raíz físicamente asignados a esa cara |
-| PIEZAS_ACOTADAS | Subcarpetas FRONT/ BACK/ LEFT/ RIGHT/ TOP/ (+ OTROS si aplica) con conteo coherente |
-| Base | No hay carpeta ni JPG de la base |
-| Log | Mapeo `cara <- segmento` para 5 caras y conteos de PIEZAS_ACOTADAS por subcarpeta |
+| Preparación | Machote + tanque + 5 picks (Top+SEGM) en subensamble **y** en piezas |
+| Caras | 4 segmentos + TOP |
+| Piezas | Incluyen carpeta `TOP/` cuando hay selección |
+| Cotas caras | Líneas H/V desde (0,0), 1 JPG por tipo |
+| Agrupación | Piezas iguales en un solo JPG; nombre `QTY*` |
+| TYP | Texto `TYP` + dona pequeña en los otros extremos del mismo valor (no en el centro de la pieza) |
 | Machote | Limpio, plantilla visible |
 
-Validar al menos: **Vantran** (segmentos claros) y un **OTC** (códigos, sin “Segmento”). Si un tanque no tiene tapa detectable, el flujo debe reportarlo en el log y **omitir TOP** sin abortar el resto.
+Validar al menos: un **OTC** con sufijos `_NNN` y un tanque con nombres exactos repetidos.
 
 ---
 
@@ -190,11 +204,12 @@ Validar al menos: **Vantran** (segmentos claros) y un **OTC** (códigos, sin “
 
 | Archivo | Rol |
 |---------|-----|
-| `Planos/generador_caras_tanque.py` | Vistas, segmentos, cotas, JPG |
-| `Planos/orientacion_pqart.py` | Marco tapa/cara/lateral |
+| `Planos/generador_caras_tanque.py` | Vistas, selección, grupos, JPG |
+| `Planos/seleccion_caras.json` | Salida temporal de los 5 picks iLogic |
+| `Planos/orientacion_pqart.py` | Marco tapa/cara/lateral (modo auto) |
 | `Planos/cota_estilo.py` | Color/negrita texto de cota |
 | `Planos/error_log_caras.txt` | Log de la última corrida |
-| Regla iLogic `COTAS_CARAS_TANQUE` | Lanza el generador |
+| Regla iLogic `COTAS_POR_SUBENSAMBLE` | Picks + lanza generador |
 
 ---
 
@@ -202,10 +217,10 @@ Validar al menos: **Vantran** (segmentos claros) y un **OTC** (códigos, sin “
 
 ```
 Machote + tanque completo
-  → detectar 4 segmentos/contenedores en el IAM
-  → mapear cada uno a FRONT/BACK/LEFT/RIGHT (centroide)
-  → por cada cara: cámara PQart + vista HLR
-  → acotar solo accesorios de ese segmento desde (0,0) H/V
-  → exportar JPG encuadrado
+  → iLogic: pick Top + SEGM1..4 → seleccion_caras.json
+  → por cada SEGM/TOP: cámara por normal + vista HLR
+  → origen (0,0) = esquina IL de la cara seleccionada
+  → agrupar piezas por clave de tipo
+  → 1 JPG por tipo con todas las cotas X+Y
   → limpiar hojas temporales del machote
 ```

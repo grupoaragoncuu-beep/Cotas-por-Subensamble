@@ -1,11 +1,14 @@
-' COTAS ABIGAIL - Cotas por subensamble (caras del tanque)
-' Regla externa: COTAS_POR_SUBENSAMBLE
+' COTAS ABIGAIL - Prueba rapida de UNA cara
+' Regla externa: COTAS_POR_SEG
 '
-' 1) Seleccion manual: Top Cover + Segmentos 1-4 + BASE.
-' 2) Guarda seleccion_caras.json con normales, origen y ocurrencias.
-' 3) Lanza generador_caras_tanque.py --seleccion <json>
+' Equivalente a una sola etapa de COTAS_POR_SUBENSAMBLE:
+'   SEGM1 | SEGM2 | SEGM3 | SEGM4 | TOP | BASE
 '
-' Salida: COTAS_POR_REFERENCIA/SEGM1..4/TOP/BASE con 1 JPG por tipo de pieza.
+' 1) Elige cual cara procesar.
+' 2) Pick TOP COVER (referencia de up) + pick de esa cara (si no es TOP).
+' 3) Lanza generador_caras_tanque.py --seleccion <json> --solo <CARA>
+'
+' Salida: solo COTAS_POR_REFERENCIA\<CARA>\ (mas rapido para iterar).
 '
 ' Rutas: NO hardcodear C:\Proyectos\...  Usar COTAS_ABIGAIL_DIR /
 ' config_planos.txt / ExternalRuleDirectories (instalador).
@@ -17,7 +20,7 @@ Sub Main()
     Const kDrawingDocument As Integer = 12292
 
     Dim invApp As Inventor.Application = ThisApplication
-    Dim titulo As String = "COTAS ABIGAIL - Cotas por subensamble"
+    Dim titulo As String = "COTAS ABIGAIL - Cotas por SEG (prueba)"
 
     If invApp.ActiveDocument Is Nothing OrElse
        invApp.ActiveDocument.DocumentType <> kDrawingDocument Then
@@ -75,6 +78,27 @@ Sub Main()
         Exit Sub
     End If
 
+    Dim caraElegida As String = InputBox( _
+        "Cara a procesar (prueba rapida de UNA etapa):" & vbCrLf & vbCrLf & _
+        "  SEGM1  SEGM2  SEGM3  SEGM4" & vbCrLf & _
+        "  TOP    BASE" & vbCrLf & vbCrLf & _
+        "Escribe exactamente una de esas etiquetas:", _
+        titulo, _
+        "SEGM1")
+    If String.IsNullOrWhiteSpace(caraElegida) Then Exit Sub
+    caraElegida = caraElegida.Trim().ToUpperInvariant()
+    If caraElegida <> "SEGM1" AndAlso caraElegida <> "SEGM2" AndAlso _
+       caraElegida <> "SEGM3" AndAlso caraElegida <> "SEGM4" AndAlso _
+       caraElegida <> "TOP" AndAlso caraElegida <> "BASE" Then
+        System.Windows.Forms.MessageBox.Show( _
+            "Etiqueta no valida: " & caraElegida & vbCrLf & _
+            "Usa SEGM1, SEGM2, SEGM3, SEGM4, TOP o BASE.", _
+            titulo, _
+            System.Windows.Forms.MessageBoxButtons.OK, _
+            System.Windows.Forms.MessageBoxIcon.Warning)
+        Exit Sub
+    End If
+
     Const lenToMm As Double = 10.0
     Dim preBoxCm As Double() = CombinedRootOccurrenceRangeBoxCm(asmDoc)
     Dim pivotMm As Double() = Vec( _
@@ -82,17 +106,18 @@ Sub Main()
         preBoxCm(7) * lenToMm, _
         preBoxCm(8) * lenToMm)
 
+    Dim paso2 As String
+    If caraElegida = "TOP" Then
+        paso2 = "2. (TOP ya cubierto con el pick anterior.)"
+    Else
+        paso2 = "2. Selecciona la cara de " & caraElegida & "."
+    End If
+
     System.Windows.Forms.MessageBox.Show( _
-        "Seleccion manual de segmentos (igual espiritu que PQart)." & vbCrLf & vbCrLf & _
-        "Despues de aceptar, realiza estas 6 selecciones en orden:" & vbCrLf & _
-        "1. TOP COVER (tapa / referencia de arriba)." & vbCrLf & _
-        "2. Cara expuesta del SEGMENTO 1." & vbCrLf & _
-        "3. Cara expuesta del SEGMENTO 2." & vbCrLf & _
-        "4. Cara expuesta del SEGMENTO 3." & vbCrLf & _
-        "5. Cara expuesta del SEGMENTO 4." & vbCrLf & _
-        "6. Cara / placa de la BASE del tanque." & vbCrLf & vbCrLf & _
-        "El origen (0,0) de cada pared es la esquina inferior-izquierda" & vbCrLf & _
-        "del muro completo (aunque este partido). BASE va a su carpeta.", _
+        "Prueba rapida: solo " & caraElegida & vbCrLf & vbCrLf & _
+        "1. Selecciona el TOP COVER (siempre, como referencia de arriba)." & vbCrLf & _
+        paso2 & vbCrLf & vbCrLf & _
+        "Luego se exporta solo COTAS_POR_REFERENCIA\" & caraElegida & "\.", _
         titulo)
 
     Try
@@ -101,47 +126,50 @@ Sub Main()
     End Try
 
     Dim topPick As Object = PedirCaraPlana( _
-        invApp, "Selecciona el TOP COVER (tapa)", pivotMm, lenToMm, "TOP")
+        invApp, "Selecciona el TOP COVER (tapa / up de camara)", pivotMm, lenToMm, "TOP")
     If topPick Is Nothing Then
         ReactivarPlano(planoDoc)
         Exit Sub
     End If
 
     Dim segmentos As New List(Of Object)
-    Dim iSeg As Integer
-    For iSeg = 1 To 4
+    Dim basePick As Object = Nothing
+
+    If caraElegida.StartsWith("SEGM") Then
         Dim segPick As Object = PedirCaraPlana( _
             invApp, _
-            "Selecciona la cara expuesta del SEGMENTO " & iSeg, _
+            "Selecciona la cara expuesta de " & caraElegida, _
             pivotMm, _
             lenToMm, _
-            "SEGM" & iSeg)
+            caraElegida)
         If segPick Is Nothing Then
             ReactivarPlano(planoDoc)
             Exit Sub
         End If
         segmentos.Add(segPick)
-    Next
-
-    Dim basePick As Object = PedirCaraPlana( _
-        invApp, "Selecciona la BASE del tanque", pivotMm, lenToMm, "BASE")
-    If basePick Is Nothing Then
-        ReactivarPlano(planoDoc)
-        Exit Sub
+    ElseIf caraElegida = "BASE" Then
+        basePick = PedirCaraPlana( _
+            invApp, "Selecciona la BASE del tanque", pivotMm, lenToMm, "BASE")
+        If basePick Is Nothing Then
+            ReactivarPlano(planoDoc)
+            Exit Sub
+        End If
     End If
+    ' TOP: solo el pick de tapa (ya hecho).
 
     ReactivarPlano(planoDoc)
 
     Dim jsonPath As String = System.IO.Path.Combine( _
         planosDirFinal, "seleccion_caras.json")
     Try
-        GuardarSeleccionJson( _
+        GuardarSeleccionJsonSolo( _
             jsonPath, _
             asmDoc.DisplayName, _
             preBoxCm, _
             topPick, _
             segmentos, _
-            basePick)
+            basePick, _
+            caraElegida)
     Catch ex As Exception
         System.Windows.Forms.MessageBox.Show(
             "No se pudo guardar la seleccion:" & vbCrLf & ex.Message,
@@ -155,7 +183,8 @@ Sub Main()
 
     Dim psi As New System.Diagnostics.ProcessStartInfo()
     psi.FileName = pythonExeFinal
-    psi.Arguments = """" & scriptPath & """ --seleccion """ & jsonPath & """"
+    psi.Arguments = """" & scriptPath & """ --seleccion """ & jsonPath & _
+        """ --solo " & caraElegida
     psi.WorkingDirectory = planosDirFinal
     psi.UseShellExecute = False
     psi.CreateNoWindow = False
@@ -167,8 +196,8 @@ Sub Main()
 
         If proceso.ExitCode = 0 Then
             System.Windows.Forms.MessageBox.Show(
-                "Cotas por subensamble generadas correctamente." & vbCrLf &
-                "Revisa Planos\JPG\<tanque>\COTAS_POR_REFERENCIA\SEGM1..4\TOP\BASE.",
+                "Cara " & caraElegida & " generada." & vbCrLf &
+                "Revisa Planos\JPG\<tanque>\COTAS_POR_REFERENCIA\" & caraElegida & "\.",
                 titulo,
                 System.Windows.Forms.MessageBoxButtons.OK,
                 System.Windows.Forms.MessageBoxIcon.Information)
@@ -272,17 +301,19 @@ End Function
 ' JSON
 ' ------------------------------------------------------------
 
-Sub GuardarSeleccionJson( _
+Sub GuardarSeleccionJsonSolo( _
     ruta As String, _
     ensambleNombre As String, _
     pivotCm As Double(), _
     topPick As Object, _
     segmentos As List(Of Object), _
-    Optional basePick As Object = Nothing)
+    basePick As Object, _
+    solo As String)
 
     Dim sb As New StringBuilder()
     sb.AppendLine("{")
     sb.AppendLine("  ""version"": 1,")
+    sb.AppendLine("  ""solo"": " & JsonStr(solo) & ",")
     sb.AppendLine("  ""ensamble"": " & JsonStr(ensambleNombre) & ",")
     sb.AppendLine( _
         "  ""pivot_cm"": [" & _
@@ -302,6 +333,18 @@ Sub GuardarSeleccionJson( _
     End If
     sb.AppendLine("}")
     System.IO.File.WriteAllText(ruta, sb.ToString(), Encoding.UTF8)
+End Sub
+
+Sub GuardarSeleccionJson( _
+    ruta As String, _
+    ensambleNombre As String, _
+    pivotCm As Double(), _
+    topPick As Object, _
+    segmentos As List(Of Object), _
+    Optional basePick As Object = Nothing)
+
+    GuardarSeleccionJsonSolo( _
+        ruta, ensambleNombre, pivotCm, topPick, segmentos, basePick, "")
 End Sub
 
 Function FacePickToJson(pickObj As Object, indent As String) As String

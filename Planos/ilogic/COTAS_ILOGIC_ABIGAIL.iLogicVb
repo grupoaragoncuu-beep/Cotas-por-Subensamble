@@ -1,15 +1,15 @@
 ﻿' COTAS ABIGAIL - Solo piezas acotadas (PIEZAS_ACOTADAS)
 ' Regla externa: COTAS_ILOGIC_ABIGAIL
 '
-' Genera únicamente las cotas por pieza (largo/ancho/thk/diámetros),
-' organizadas por clasificación (iProperty Colorimetria). NO ejecuta las
-' cotas por caras del tanque; para eso usar COTAS_POR_SUBENSAMBLE o
-' COTAS_CARAS_TANQUE (flujo completo).
+' 1) Seleccion manual Top Cover + SEGM1-4 (mismo JSON que subensamble).
+' 2) Acota cada pieza (largo/ancho/thk/diametros).
+' 3) Organiza PIEZAS_ACOTADAS por cara SEGM1..4/TOP (+ clasificacion).
 '
 ' Rutas: NO hardcodear C:\Proyectos\...  Usar COTAS_ABIGAIL_DIR /
 ' config_planos.txt / ExternalRuleDirectories (instalador).
 
 Imports System.Collections.Generic
+Imports System.Text
 
 Sub Main()
     Const kDrawingDocument As Integer = 12292
@@ -35,7 +35,9 @@ Sub Main()
         Exit Sub
     End If
 
-    If String.IsNullOrWhiteSpace(invApp.ActiveDocument.FullDocumentName) Then
+    Dim planoDoc As Document = invApp.ActiveDocument
+
+    If String.IsNullOrWhiteSpace(planoDoc.FullDocumentName) Then
         System.Windows.Forms.MessageBox.Show(
             "Guarda el plano antes de ejecutar (necesario para exportar JPG).",
             titulo,
@@ -67,11 +69,93 @@ Sub Main()
         Exit Sub
     End If
 
+    Dim asmDoc As AssemblyDocument = BuscarEnsambleTanque(invApp)
+    If asmDoc Is Nothing Then
+        System.Windows.Forms.MessageBox.Show(
+            "Abre el ensamble (.iam) del tanque junto al machote.",
+            titulo,
+            System.Windows.Forms.MessageBoxButtons.OK,
+            System.Windows.Forms.MessageBoxIcon.Warning)
+        Exit Sub
+    End If
+
+    Const lenToMm As Double = 10.0
+    Dim preBoxCm As Double() = CombinedRootOccurrenceRangeBoxCm(asmDoc)
+    Dim pivotMm As Double() = Vec( _
+        preBoxCm(6) * lenToMm, _
+        preBoxCm(7) * lenToMm, _
+        preBoxCm(8) * lenToMm)
+
+    System.Windows.Forms.MessageBox.Show( _
+        "Seleccion de Top Cover + segmentos + BASE (para clasificar piezas)." & vbCrLf & vbCrLf & _
+        "Despues de aceptar, realiza estas 6 selecciones:" & vbCrLf & _
+        "1. TOP COVER (tapa)." & vbCrLf & _
+        "2-5. Cara expuesta de SEGMENTO 1 a 4." & vbCrLf & _
+        "6. BASE del tanque." & vbCrLf & vbCrLf & _
+        "Las piezas iran a PIEZAS_ACOTADAS\SEGM*\TOP\BASE\.", _
+        titulo)
+
+    Try
+        asmDoc.Activate()
+    Catch
+    End Try
+
+    Dim topPick As Object = PedirCaraPlana( _
+        invApp, "Selecciona el TOP COVER (tapa)", pivotMm, lenToMm, "TOP")
+    If topPick Is Nothing Then
+        ReactivarPlano(planoDoc)
+        Exit Sub
+    End If
+
+    Dim segmentos As New List(Of Object)
+    Dim iSeg As Integer
+    For iSeg = 1 To 4
+        Dim segPick As Object = PedirCaraPlana( _
+            invApp, _
+            "Selecciona la cara expuesta del SEGMENTO " & iSeg, _
+            pivotMm, _
+            lenToMm, _
+            "SEGM" & iSeg)
+        If segPick Is Nothing Then
+            ReactivarPlano(planoDoc)
+            Exit Sub
+        End If
+        segmentos.Add(segPick)
+    Next
+
+    Dim basePick As Object = PedirCaraPlana( _
+        invApp, "Selecciona la BASE del tanque", pivotMm, lenToMm, "BASE")
+    If basePick Is Nothing Then
+        ReactivarPlano(planoDoc)
+        Exit Sub
+    End If
+
+    ReactivarPlano(planoDoc)
+
+    Dim jsonPath As String = System.IO.Path.Combine( _
+        planosDirFinal, "seleccion_caras.json")
+    Try
+        GuardarSeleccionJson( _
+            jsonPath, _
+            asmDoc.DisplayName, _
+            preBoxCm, _
+            topPick, _
+            segmentos, _
+            basePick)
+    Catch ex As Exception
+        System.Windows.Forms.MessageBox.Show(
+            "No se pudo guardar la seleccion:" & vbCrLf & ex.Message,
+            titulo,
+            System.Windows.Forms.MessageBoxButtons.OK,
+            System.Windows.Forms.MessageBoxIcon.Error)
+        Exit Sub
+    End Try
+
     Dim pythonExeFinal As String = ResolverPythonExe(planosDirFinal)
 
     Dim psi As New System.Diagnostics.ProcessStartInfo()
     psi.FileName = pythonExeFinal
-    psi.Arguments = """" & scriptPath & """"
+    psi.Arguments = """" & scriptPath & """ --seleccion """ & jsonPath & """"
     psi.WorkingDirectory = planosDirFinal
     psi.UseShellExecute = False
     psi.CreateNoWindow = False
@@ -83,7 +167,7 @@ Sub Main()
         If proc.ExitCode = 0 Then
             System.Windows.Forms.MessageBox.Show(
                 "Piezas acotadas exportadas correctamente." & vbCrLf &
-                "Revisa Planos\JPG\<tanque>\PIEZAS_ACOTADAS\.",
+                "Revisa Planos\JPG\<tanque>\PIEZAS_ACOTADAS\SEGM*\TOP\BASE\.",
                 titulo,
                 System.Windows.Forms.MessageBoxButtons.OK,
                 System.Windows.Forms.MessageBoxIcon.Information)
@@ -106,9 +190,294 @@ Sub Main()
 End Sub
 
 '------------------------------------------------------------
+' Seleccion Top + SEGM (mismo contrato que COTAS_POR_SUBENSAMBLE)
+'------------------------------------------------------------
+
+Function PedirCaraPlana( _
+    invApp As Inventor.Application, _
+    prompt As String, _
+    pivotMm As Double(), _
+    lenToMm As Double, _
+    etiqueta As String) As Object
+
+    Dim obj As Object = invApp.CommandManager.Pick( _
+        SelectionFilterEnum.kPartFacePlanarFilter, _
+        prompt)
+
+    If obj Is Nothing Then Return Nothing
+
+    Dim face As FaceProxy = TryCast(obj, FaceProxy)
+    If face Is Nothing Then
+        System.Windows.Forms.MessageBox.Show( _
+            "Selecciona una cara plana del ensamble.", _
+            "COTAS ABIGAIL", _
+            System.Windows.Forms.MessageBoxButtons.OK, _
+            System.Windows.Forms.MessageBoxIcon.Warning)
+        Return Nothing
+    End If
+
+    Dim occName As String = ""
+    Try
+        occName = face.ContainingOccurrence.Name
+    Catch
+        occName = ""
+    End Try
+
+    Dim puntoMm As Double() = FacePointMm(face, lenToMm)
+    Dim nImported As Double() = FaceNormal(face)
+    Dim normal As Double() = NormalizeVec( _
+        ForceNormalAwayFromPivot(nImported, puntoMm, pivotMm))
+    Dim vertices As List(Of Double()) = FaceVerticesMm(face, lenToMm)
+
+    Dim data As New Dictionary(Of String, Object)
+    data("etiqueta") = etiqueta
+    data("occ_name") = occName
+    data("normal") = normal
+    data("punto_mm") = puntoMm
+    data("vertices_mm") = vertices
+    Return data
+End Function
+
+Sub ReactivarPlano(planoDoc As Document)
+    Try
+        planoDoc.Activate()
+    Catch
+    End Try
+End Sub
+
+Function BuscarEnsambleTanque(invApp As Inventor.Application) As AssemblyDocument
+    Dim mejor As AssemblyDocument = Nothing
+    Dim mayor As Integer = -1
+    Dim doc As Document
+    For Each doc In invApp.Documents
+        Try
+            If doc.DocumentType <> DocumentTypeEnum.kAssemblyDocumentObject Then
+                Continue For
+            End If
+            Dim asm As AssemblyDocument = CType(doc, AssemblyDocument)
+            Dim cantidad As Integer =
+                asm.ComponentDefinition.Occurrences.AllLeafOccurrences.Count
+            If cantidad > mayor Then
+                mayor = cantidad
+                mejor = asm
+            End If
+        Catch
+        End Try
+    Next
+    Return mejor
+End Function
+
+Sub GuardarSeleccionJson( _
+    ruta As String, _
+    ensambleNombre As String, _
+    pivotCm As Double(), _
+    topPick As Object, _
+    segmentos As List(Of Object), _
+    Optional basePick As Object = Nothing)
+
+    Dim sb As New StringBuilder()
+    sb.AppendLine("{")
+    sb.AppendLine("  ""version"": 1,")
+    sb.AppendLine("  ""ensamble"": " & JsonStr(ensambleNombre) & ",")
+    sb.AppendLine( _
+        "  ""pivot_cm"": [" & _
+        Fmt(pivotCm(6)) & ", " & Fmt(pivotCm(7)) & ", " & Fmt(pivotCm(8)) & "],")
+    sb.AppendLine("  ""top"": " & FacePickToJson(topPick, "  ") & ",")
+    sb.AppendLine("  ""segmentos"": [")
+    Dim i As Integer
+    For i = 0 To segmentos.Count - 1
+        Dim coma As String = If(i < segmentos.Count - 1, ",", "")
+        sb.AppendLine(FacePickToJson(segmentos(i), "    ") & coma)
+    Next
+    sb.AppendLine("  ],")
+    If basePick IsNot Nothing Then
+        sb.AppendLine("  ""base"": " & FacePickToJson(basePick, "  "))
+    Else
+        sb.AppendLine("  ""base"": null")
+    End If
+    sb.AppendLine("}")
+    System.IO.File.WriteAllText(ruta, sb.ToString(), Encoding.UTF8)
+End Sub
+
+Function FacePickToJson(pickObj As Object, indent As String) As String
+    Dim pick As Dictionary(Of String, Object) =
+        CType(pickObj, Dictionary(Of String, Object))
+    Dim normal As Double() = CType(pick("normal"), Double())
+    Dim puntoMm As Double() = CType(pick("punto_mm"), Double())
+    Dim vertices As List(Of Double()) =
+        CType(pick("vertices_mm"), List(Of Double()))
+
+    Dim sb As New StringBuilder()
+    sb.AppendLine("{")
+    sb.AppendLine(indent & "  ""etiqueta"": " & JsonStr(CStr(pick("etiqueta"))) & ",")
+    sb.AppendLine(indent & "  ""occ_name"": " & JsonStr(CStr(pick("occ_name"))) & ",")
+    sb.AppendLine(indent & "  ""normal"": [" & _
+        Fmt(normal(0)) & ", " & Fmt(normal(1)) & ", " & Fmt(normal(2)) & "],")
+    sb.AppendLine(indent & "  ""punto_mm"": [" & _
+        Fmt(puntoMm(0)) & ", " & Fmt(puntoMm(1)) & ", " & Fmt(puntoMm(2)) & "],")
+    sb.AppendLine(indent & "  ""vertices_mm"": [")
+    Dim i As Integer
+    For i = 0 To vertices.Count - 1
+        Dim v As Double() = vertices(i)
+        Dim coma As String = If(i < vertices.Count - 1, ",", "")
+        sb.AppendLine(indent & "    [" & Fmt(v(0)) & ", " & Fmt(v(1)) & ", " & Fmt(v(2)) & "]" & coma)
+    Next
+    sb.AppendLine(indent & "  ]")
+    sb.Append(indent & "}")
+    Return sb.ToString()
+End Function
+
+Function JsonStr(texto As String) As String
+    If texto Is Nothing Then texto = ""
+    texto = texto.Replace("\", "\\").Replace("""", "\""")
+    Return """" & texto & """"
+End Function
+
+Function Fmt(valor As Double) As String
+    Return valor.ToString("G17", System.Globalization.CultureInfo.InvariantCulture)
+End Function
+
+Function CombinedRootOccurrenceRangeBoxCm(ByVal asmDoc As AssemblyDocument) As Double()
+    Dim xmin As Double = Double.MaxValue
+    Dim ymin As Double = Double.MaxValue
+    Dim zmin As Double = Double.MaxValue
+    Dim xmax As Double = Double.MinValue
+    Dim ymax As Double = Double.MinValue
+    Dim zmax As Double = Double.MinValue
+    Dim found As Boolean = False
+
+    For Each occ As ComponentOccurrence In asmDoc.ComponentDefinition.Occurrences
+        Try
+            Dim rb As Box = occ.RangeBox
+            If rb.MinPoint.X < xmin Then xmin = rb.MinPoint.X
+            If rb.MinPoint.Y < ymin Then ymin = rb.MinPoint.Y
+            If rb.MinPoint.Z < zmin Then zmin = rb.MinPoint.Z
+            If rb.MaxPoint.X > xmax Then xmax = rb.MaxPoint.X
+            If rb.MaxPoint.Y > ymax Then ymax = rb.MaxPoint.Y
+            If rb.MaxPoint.Z > zmax Then zmax = rb.MaxPoint.Z
+            found = True
+        Catch
+        End Try
+    Next
+
+    If Not found Then
+        Throw New Exception("No se pudo calcular el bounding box del ensamble.")
+    End If
+
+    Dim vals(8) As Double
+    vals(0) = xmin : vals(1) = ymin : vals(2) = zmin
+    vals(3) = xmax : vals(4) = ymax : vals(5) = zmax
+    vals(6) = (xmin + xmax) / 2.0
+    vals(7) = (ymin + ymax) / 2.0
+    vals(8) = (zmin + zmax) / 2.0
+    Return vals
+End Function
+
+Function FaceVerticesMm( _
+    ByVal f As FaceProxy, _
+    ByVal lenToMm As Double) As List(Of Double())
+
+    Dim pts As New List(Of Double())
+    Try
+        For Each vObj As Object In f.Vertices
+            Try
+                Dim p As Point = vObj.Point
+                pts.Add(Vec(p.X * lenToMm, p.Y * lenToMm, p.Z * lenToMm))
+            Catch
+            End Try
+        Next
+    Catch
+    End Try
+
+    If pts.Count = 0 Then
+        Dim rb As Box = f.RangeBox
+        Dim xs(1) As Double
+        Dim ys(1) As Double
+        Dim zs(1) As Double
+        xs(0) = rb.MinPoint.X * lenToMm : xs(1) = rb.MaxPoint.X * lenToMm
+        ys(0) = rb.MinPoint.Y * lenToMm : ys(1) = rb.MaxPoint.Y * lenToMm
+        zs(0) = rb.MinPoint.Z * lenToMm : zs(1) = rb.MaxPoint.Z * lenToMm
+        Dim ix, iy, iz As Integer
+        For ix = 0 To 1
+            For iy = 0 To 1
+                For iz = 0 To 1
+                    pts.Add(Vec(xs(ix), ys(iy), zs(iz)))
+                Next
+            Next
+        Next
+    End If
+    Return pts
+End Function
+
+Function FacePointMm(ByVal f As FaceProxy, ByVal lenToMm As Double) As Double()
+    Dim p As Point = Nothing
+    Try
+        Dim rb As Box = f.RangeBox
+        p = rb.MidPoint
+    Catch
+        Dim pl As Plane = CType(f.Geometry, Plane)
+        p = pl.RootPoint
+    End Try
+    Return Vec(p.X * lenToMm, p.Y * lenToMm, p.Z * lenToMm)
+End Function
+
+Function FaceNormal(ByVal f As FaceProxy) As Double()
+    If Not TypeOf f.Geometry Is Plane Then
+        Throw New Exception("La cara no es plana.")
+    End If
+    Dim p As Plane = CType(f.Geometry, Plane)
+    Return NormalizeVec(Vec(p.Normal.X, p.Normal.Y, p.Normal.Z))
+End Function
+
+Function ForceNormalAwayFromPivot( _
+    ByVal importedNormal As Double(), _
+    ByVal facePointMm As Double(), _
+    ByVal pivotMm As Double()) As Double()
+
+    Dim outDir As Double() = SubVec(facePointMm, pivotMm)
+    If VecLength(outDir) < 0.000001 Then
+        Return NormalizeVec(importedNormal)
+    End If
+    outDir = NormalizeVec(outDir)
+    Dim n As Double() = NormalizeVec(importedNormal)
+    If DotVec(n, outDir) < 0 Then
+        n = ScaleVec(n, -1.0)
+    End If
+    Return NormalizeVec(n)
+End Function
+
+Function Vec(ByVal x As Double, ByVal y As Double, ByVal z As Double) As Double()
+    Dim v(2) As Double
+    v(0) = x : v(1) = y : v(2) = z
+    Return v
+End Function
+
+Function DotVec(ByVal a As Double(), ByVal b As Double()) As Double
+    Return a(0) * b(0) + a(1) * b(1) + a(2) * b(2)
+End Function
+
+Function VecLength(ByVal a As Double()) As Double
+    Return Math.Sqrt(DotVec(a, a))
+End Function
+
+Function NormalizeVec(ByVal a As Double()) As Double()
+    Dim l As Double = VecLength(a)
+    If l < 0.000000001 Then
+        Throw New Exception("Vector cero.")
+    End If
+    Return Vec(a(0) / l, a(1) / l, a(2) / l)
+End Function
+
+Function ScaleVec(ByVal a As Double(), ByVal s As Double) As Double()
+    Return Vec(a(0) * s, a(1) * s, a(2) * s)
+End Function
+
+Function SubVec(ByVal a As Double(), ByVal b As Double()) As Double()
+    Return Vec(a(0) - b(0), a(1) - b(1), a(2) - b(2))
+End Function
+
+'------------------------------------------------------------
 ' Resolver carpeta Planos (portable entre PCs)
-' Orden: ENV COTAS_ABIGAIL_DIR -> config_planos.txt ->
-'        ExternalRuleDirectories de iLogic
 '------------------------------------------------------------
 Function ResolverPlanosDir(invApp As Inventor.Application) As String
     Try
@@ -196,7 +565,6 @@ Function LeerPlanosDirDesdeConfigCandidatos(invApp As Inventor.Application) As S
                EsCarpetaPlanosValida(valor) Then
                 Return valor
             End If
-            ' Si el config está en Planos\ilogic\, el padre es Planos.
             Dim carpetaCfg As String = System.IO.Path.GetDirectoryName(cfg)
             If Not String.IsNullOrWhiteSpace(carpetaCfg) Then
                 Dim posiblePlanos As String = System.IO.Path.GetDirectoryName(carpetaCfg)

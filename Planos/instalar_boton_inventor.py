@@ -89,6 +89,7 @@ def _imprimir_instrucciones_ribbon():
     print("3. Busca las reglas y agregalas al panel que prefieras:")
     print("   - COTAS_CARAS_TANQUE       (flujo completo: caras + piezas)")
     print("   - COTAS_POR_SUBENSAMBLE    (solo cotas por caras)")
+    print("   - COTAS_POR_SEG            (prueba rapida: UNA cara SEGM/TOP/BASE)")
     print(f"   - {NOMBRE_REGLA}      (solo piezas acotadas)")
     print()
     print("4. Opcional: activa 'Texto' y tamano grande en el boton.")

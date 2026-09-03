@@ -1,22 +1,24 @@
 """
-Flujo de caras del tanque (COTAS_CARAS_TANQUE).
+Flujo de caras del tanque (COTAS_POR_SUBENSAMBLE / COTAS_CARAS_TANQUE).
 
 Igual que COTAS_ILOGIC_ABIGAIL: abre CMD, trabaja por API COM y exporta JPG.
 
-Orientacion (igual criterio que Precesador STEP PQart 2.0/3.0):
-  tapa / altura  -> +Y (arriba en la foto)
-  cara principal -> +Z (FRONT)
-  lateral        -> +X (RIGHT)
-Si el ensamble llega chueco, se leen normales de caras planas y se
-corrige la postura de la camara (el tanque se ve derecho en el JPG).
+Modo preferido (COTAS_POR_SUBENSAMBLE):
+  Seleccion manual Top Cover + SEGM1..4 + BASE (JSON --seleccion).
+  Camara = normal de la cara elegida; up = normal del Top Cover.
+  (0,0) = esquina inferior-izquierda de la pared completa (mitades nesting).
+  Carpetas SEGM1/SEGM2/SEGM3/SEGM4/TOP/BASE.
+  1 JPG por tipo de pieza (mismas piezas agrupadas) con todas las X+Y.
+  Cotas coincidentes llevan etiqueta TYP + puntos azules.
 
-Cotas:
-  (0,0) en la esquina inferior-izquierda del CUERPO de la cara.
-  Cotas lineales H/V desde ese origen hasta cada accesorio del
-  segmento/subensamble mapeado a esa pared (soldadura).
-  Ver DEBER_SER_COTAS_CARAS.md en la raiz del proyecto.
+Modo automatico (compat COTAS_CARAS_TANQUE sin JSON):
+  Orientacion PQart + mapeo por centroide FRONT/BACK/LEFT/RIGHT/TOP.
+  Misma exportacion por grupo de piezas iguales (con TYP en cotas coincidentes).
+
+Ver DEBER_SER_COTAS_CARAS.md en la raiz del proyecto.
 """
 
+import json
 import math
 import os
 import re
@@ -71,7 +73,10 @@ TAM_FLECHA_COTA = 0.23
 # Una foto individual conserva un respiro alrededor de toda la cara, en vez
 # de ampliar la vista hasta cortar el perímetro contrario.
 FACTOR_ENCUADRE_FOTO = 0.88
-MARGEN_DERECHO_FOTO_CM = 0.25
+MARGEN_DERECHO_FOTO_CM = 0.55
+MARGEN_TEXTO_COTA_CM = 0.85
+# A partir de esta cantidad, apilar cotas Y a izquierda Y derecha.
+UMBRAL_COTAS_Y_DOBLE_CARA = 8
 EPS = 0.0001
 TOL_EXTREMO_RATIO = 0.012
 DOMINANCIA_RECTA = 2.0
@@ -79,7 +84,16 @@ DOMINANCIA_RECTA = 2.0
 # comparar 0.30 cm del modelo contra coordenadas de hoja directamente.
 TOLERANCIA_COTA_CM = 0.03
 TOL_COINCIDENCIA_HOJA = 0.001
-PASO_COTA_LEGIBLE = 0.52
+# Nunca comprimir el stack por debajo de esto: si no, los valores se solapan.
+PASO_COTA_LEGIBLE = 0.62
+# Donas TYP: radio único y separación mínima entre marcas.
+RADIO_MARCA_TYP_CM = 0.14
+SEP_MIN_MARCA_TYP_CM = 0.55
+# Grupos muy densos (p. ej. P18 QTY16): partir en láminas legibles.
+MAX_INSTANCIAS_POR_LAMINA = 4
+MAX_COTAS_POR_LAMINA = 14
+# En plano, piezas circulares pequeñas se acotan solo por centro (no envolvente).
+UMBRAL_CIRCULAR_SOLO_CENTRO_CM = 3.5
 # Ignora basura tipo 0.19 cerca del origen (bridas / biseles).
 MIN_DIST_ORIGEN_CM = 0.50
 # Nunca descartar extremos por cantidad: cada pieza debe conservar Xmin/Xmax
@@ -1469,6 +1483,195 @@ def _aplicar_visibilidad_vista_cara(
 
 def _nombre_base_pieza(nombre):
     return str(nombre or "").split(":")[0].strip().upper()
+
+
+def _base_mitad_nesting(nombre):
+    """
+    Base OTC de una mitad partida para nesteo: ``P12_1`` -> ``P12``.
+
+    Solo aplica al par ``_1`` / ``_2`` (una cifra). Los sufijos de cantidad
+    tipo ``_374`` no entran aquí.
+    """
+    nb = _nombre_final_componente(nombre).upper()
+    m = re.match(r"^(.+)_[12]$", nb)
+    return m.group(1) if m else None
+
+
+def _es_partido_nesting(occ):
+    """
+    True si el IAM es solo mitades de nesteo (``X_1`` + ``X_2`` [+ ``X_3``]).
+
+    Ej.: ``62201-1248-P12.iam`` con ``P12_1``/``P12_2``. No es el segmento
+    completo (A01) ni un subensamble de accesorios con muchas piezas.
+    """
+    if occ is None or not _es_ensamble_occurrence(occ):
+        return False
+    try:
+        hojas = occ.Definition.Occurrences.AllLeafOccurrences
+        n = int(hojas.Count)
+    except Exception:
+        return False
+    if n < 2 or n > 4:
+        return False
+    bases = []
+    for i in range(1, n + 1):
+        try:
+            leaf = hojas.Item(i)
+            if leaf.Suppressed:
+                continue
+            nb = str(leaf.Name).split(":")[0].strip().upper()
+        except Exception:
+            return False
+        m = re.match(r"^(.+)_([1-4])$", nb)
+        if not m:
+            return False
+        bases.append(m.group(1))
+    return len(bases) >= 2 and len(set(bases)) == 1
+
+
+def _occurrence_raiz_rama(occ):
+    """Sube hasta la ocurrencia colgada directamente del tanque raíz."""
+    if occ is None:
+        return None
+    actual = occ
+    for _ in range(24):
+        try:
+            padre = actual.ParentOccurrence
+        except Exception:
+            padre = None
+        if padre is None:
+            return actual
+        actual = padre
+    return occ
+
+
+def _pared_nesting_desde_occurrence(occ):
+    """IAM partido de pared más cercano al pick, o None."""
+    actual = occ
+    for _ in range(16):
+        if actual is None:
+            return None
+        if _es_partido_nesting(actual):
+            return actual
+        try:
+            padre = actual.ParentOccurrence
+        except Exception:
+            padre = None
+        if padre is None:
+            break
+        if _es_partido_nesting(padre):
+            return padre
+        actual = padre
+    return None
+
+
+def _resolver_paneles_pared(paneles_segmento, base_pared=None):
+    """
+    Placas de pared a excluir del acotado.
+
+    Paredes partidas (``P12_1`` + ``P12_2``) se tratan como un solo muro.
+    ``base_pared`` (p. ej. ``62201-1248-P12``) evita confundir accesorios
+    partidos (SP-852_1/2) con la placa madre.
+    """
+    if not paneles_segmento:
+        return [], False
+
+    if base_pared:
+        bu = str(base_pared).split(":")[0].strip().upper()
+        excluir = []
+        for item in paneles_segmento:
+            nb = _nombre_final_componente(item[0]).upper()
+            bm = _base_mitad_nesting(nb)
+            if nb == bu or bm == bu or nb.startswith(bu + "_"):
+                excluir.append(item)
+        if excluir:
+            return excluir, len(excluir) >= 2
+
+    # Solo entre las placas de mayor huella: evita SP-852 como "pared".
+    ordenados = sorted(paneles_segmento, key=lambda item: item[2], reverse=True)
+    top = ordenados[:8]
+    mitades = {}
+    for item in top:
+        base = _base_mitad_nesting(item[0])
+        if base:
+            mitades.setdefault(base, []).append(item)
+
+    for _base, items in mitades.items():
+        sufijos = {
+            _nombre_final_componente(nombre).upper()[-1]
+            for nombre, _datos, _huella in items
+        }
+        if "1" in sufijos and "2" in sufijos:
+            return items, True
+
+    return [ordenados[0]], False
+
+
+def _envolvente_union_en_hoja(envolventes):
+    """Unión de envolventes en hoja (esquina IL = min X / min Y global)."""
+    validas = [env for env in envolventes if env]
+    if not validas:
+        return None
+    if len(validas) == 1:
+        return validas[0]
+    minx = min(env["minx"] for env in validas)
+    maxx = max(env["maxx"] for env in validas)
+    miny = min(env["miny"] for env in validas)
+    maxy = max(env["maxy"] for env in validas)
+    union = dict(validas[0])
+    union.update(
+        {
+            "minx": minx,
+            "maxx": maxx,
+            "miny": miny,
+            "maxy": maxy,
+            "dx": maxx - minx,
+            "dy": maxy - miny,
+            "cx": (minx + maxx) * 0.5,
+            "cy": (miny + maxy) * 0.5,
+        }
+    )
+    curvas = []
+    for env in validas:
+        curvas.extend(env.get("curvas") or [])
+    if curvas:
+        union["curvas"] = curvas
+    return union
+
+
+def _clave_tipo_pieza(nombre):
+    """
+    Clave de agrupacion: mismo tipo de pieza aunque cambie el sufijo tras ``_``.
+
+    Ejemplos OTC:
+      62201-1248-P18_405 / _412           -> 62201-1248-P18
+      62201-1248-P17_403                 -> 62201-1248-P17
+      62201-1248-P17_HOLE_404            -> 62201-1248-P17
+      62201-1248-P35_Bottom Flange_372   -> 62201-1248-P35
+      SP-852_1 / SP-852_2                -> SP-852
+      SP-852:1                           -> SP-852
+    """
+    base = _nombre_final_componente(nombre).upper()
+    if not base:
+        return ""
+    # Codigo OTC estable: PROYECTO-FAMILIA-Pxx / Axx (ignora _HOLE, _BOTTOM…).
+    m = re.match(r"^(\d+-\d+-[AP]\d+)", base)
+    if m:
+        return m.group(1)
+    # Quita sufijos de cantidad (_374) y mitades de nesteo (_1/_2).
+    return re.sub(r"_\d+$", "", base)
+
+
+def _paso_stack_cotas(cantidad):
+    """
+    Separacion vertical/horizontal entre cotas apiladas.
+
+    Nunca baja de PASO_COTA_LEGIBLE: comprimir el stack era la causa de
+    valores solapados e ilegibles (p. ej. QTY16 P18).
+    """
+    if cantidad <= 1:
+        return float(PASO_NIVEL_COTA)
+    return float(max(PASO_COTA_LEGIBLE, min(PASO_NIVEL_COTA, PASO_NIVEL_COTA)))
 
 
 def _es_accesorio_por_rol(nombre):
@@ -2944,14 +3147,21 @@ def _agrupar_referencias_typ(
     for grupo in grupos:
         miembros = grupo["miembros"]
         referencia = dict(miembros[0])
-        piezas = {str(miembro["pieza_id"]) for miembro in miembros}
         referencia["miembros"] = miembros
-        referencia["typ"] = len(piezas) > 1
-        # Promediar solo elimina ruido de proyección; el miembro representativo
-        # sigue definiendo la arista a la cual llega la línea de extensión.
-        referencia["valor"] = sum(
-            float(miembro["valor"]) for miembro in miembros
-        ) / len(miembros)
+        # TYP si varias instancias del mismo tipo (base sin _NNN) comparten cota.
+        tipos = {
+            _clave_tipo_pieza(miembro["pieza_id"]) for miembro in miembros
+        }
+        ids = {str(miembro["pieza_id"]) for miembro in miembros}
+        referencia["typ"] = len(ids) > 1 or (
+            len(miembros) > 1 and len(tipos) == 1
+        )
+        # NO promediar: la linea de cota y extension usan el miembro representativo.
+        rep0 = miembros[0]
+        referencia["valor"] = float(rep0["valor"])
+        referencia["dato"] = rep0["dato"]
+        referencia["lado"] = rep0["lado"]
+        referencia["pieza_id"] = rep0["pieza_id"]
         consolidadas.append(referencia)
     return consolidadas
 
@@ -3028,6 +3238,58 @@ def _es_componente_circular(datos, envolvente, nombre_pieza=""):
     return False
 
 
+def _es_pieza_solo_centro(nombre_pieza, datos, envolvente):
+    """
+    Piezas donde el datum de piso es el centro del círculo visible, no la
+    envolvente rectangular (STUD, nipple, RADVLV, bosses circulares chicos).
+    """
+    u = str(nombre_pieza or "").upper()
+    if "RADVLV" in u:
+        return True
+    if re.search(r"\bSTUD\b", u) and "GUN" not in u:
+        return True
+    if "NIPPLE" in u:
+        return True
+    if _es_componente_circular(datos, envolvente, nombre_pieza) and envolvente:
+        max_dim = max(float(envolvente["dx"]), float(envolvente["dy"]))
+        if max_dim <= UMBRAL_CIRCULAR_SOLO_CENTRO_CM:
+            return True
+    return False
+
+
+def _agregar_centro_pieza(
+    posiciones_x,
+    posiciones_y,
+    envolvente,
+    tol_pos,
+    pieza_id,
+    nombre_pieza="",
+    barrenos=None,
+):
+    """Acota X e Y desde (0,0) al centro del círculo principal."""
+    u = str(nombre_pieza or "").upper()
+    dato = None
+    cx = cy = None
+    # Preferir el centro REAL del bore (barrenos) cuando exista.
+    # En piezas como STUD / SF-*, el centro de envolvente puede quedar corrido.
+    if barrenos:
+        dato = max(barrenos, key=lambda c: float(c.get("dx", 0) or 0))
+        cx = float(dato["cx"])
+        cy = float(dato["cy"])
+    elif envolvente is not None:
+        dato = envolvente
+        cx = float(envolvente["cx"])
+        cy = float(envolvente["cy"])
+    if cx is None or cy is None or dato is None:
+        return
+    _agregar_posicion(
+        posiciones_x, cx, dato, tol_pos, "centro", pieza_id
+    )
+    _agregar_posicion(
+        posiciones_y, cy, dato, tol_pos, "centro", pieza_id
+    )
+
+
 def _agregar_inicio_y_fin(
     posiciones_x,
     posiciones_y,
@@ -3039,7 +3301,7 @@ def _agregar_inicio_y_fin(
 ):
     """
     Desde (0,0) se acota el INICIO y el FIN de cada componente:
-    Xmin/Xmax e Ymin/Ymax. No solo una esquina de referencia.
+    Xmin/Xmax e Ymin/Ymax en todos los casos (nunca solo centro).
     """
     izq = _elegir_extrema(datos, "izq", tol_extremo)
     der = _elegir_extrema(datos, "der", tol_extremo)
@@ -3060,6 +3322,56 @@ def _agregar_inicio_y_fin(
     if sup is not None:
         _agregar_posicion(
             posiciones_y, sup["maxy"], sup, tol_pos, "sup", pieza_id, contacto
+        )
+
+
+def _debe_acotar_centro_barreno_adicional(nombre_pieza):
+    """
+    Centros de barreno SOLO como complemento (nunca reemplazan inicio/fin).
+
+    Aplica a bridas con bore principal (L845, SP-*) o piezas *_HOLE.
+    NO aplica a soleras / bottom flange (P35): ahí solo inicio/fin.
+    """
+    u = str(nombre_pieza or "").upper()
+    if any(x in u for x in ("BOTTOM FLANGE", "SOLERA", "BASE DE", "FONDO")):
+        return False
+    if "RADVLV" in u:
+        return False
+    if "HOLE" in u:
+        return True
+    if re.match(r"^SP-\d+", u.split(":")[0].strip()):
+        return True
+    return False
+
+
+def _punto_geometria_acotada(miembro, eje):
+    """Punto en hoja donde la línea de extensión toca la geometría acotada."""
+    dato = miembro.get("dato") or {}
+    lado = str(miembro.get("lado", "")).lower()
+    try:
+        if eje == "X":
+            x = float(miembro["valor"])
+            y = float(dato["cy"])
+            if lado == "inf":
+                y = float(dato["miny"])
+            elif lado == "sup":
+                y = float(dato["maxy"])
+            elif lado == "centro":
+                y = float(dato["cy"])
+            return x, y
+        y = float(miembro["valor"])
+        x = float(dato["cx"])
+        if lado == "izq":
+            x = float(dato["minx"])
+        elif lado == "der":
+            x = float(dato["maxx"])
+        elif lado == "centro":
+            x = float(dato["cx"])
+        return x, y
+    except Exception:
+        return (
+            float(miembro.get("valor", 0)),
+            float(dato.get("cy", dato.get("cx", 0))),
         )
 
 
@@ -3091,13 +3403,16 @@ def _envolvente_occurrence_en_hoja(datos, vista, tg):
         maxy = max(p[1] for p in proyectados)
         if maxx - minx < EPS and maxy - miny < EPS:
             return None
+        # Guardar los 8 vértices 3D para reproyectar correctamente
+        # tras cambio de escala/posición (sin depender de HLR).
+        vertices_3d = [
+            (x, y, z) for x in xs for y in ys for z in zs
+        ]
         dato = dict(datos[0])
         dato.update(
             {
-                # Se conserva el grupo de curvas HLR para refrescar la
-                # posición exacta cuando la vista cambie de escala/posición
-                # durante la exportación individual.
                 "curvas": list(datos),
+                "puntos_modelo": vertices_3d,
                 "minx": minx,
                 "maxx": maxx,
                 "miny": miny,
@@ -3521,18 +3836,40 @@ def _dato_transformado_para_foto(dato, estado, nuevo_x, nuevo_y, factor):
     return nuevo
 
 
-def _preparar_encuadre_estable_cara(plano, hoja, vista, tg, estado):
+def _preparar_encuadre_estable_cara(plano, hoja, vista, tg, estado, grupos=None):
     """
     Un solo reframe por cara, con margen para cotas X e Y.
 
     Evita regenerar HLR al cambiar Scale/Position en cada foto (~55 s/JPG).
+    Si se pasan ``grupos``, reserva el maximo espacio que exija el grupo mas
+    denso (sin ``plano.Update()`` por JPG — causa crash COM/RPC).
     """
-    reserva_izq = 4.80
-    reserva_inf = 4.80
-    margen_der = max(0.70, hoja.Width * 0.025)
+    if grupos:
+        max_x = max(
+            (len(g.get("posiciones_x") or []) for g in grupos), default=0
+        )
+        max_y = max(
+            (len(g.get("posiciones_y") or []) for g in grupos), default=0
+        )
+        res = _calcular_reservas_grupo([0] * max_x, [0] * max_y)
+        reserva_izq = res["reserva_izq"]
+        reserva_inf = res["reserva_inf"]
+        reserva_der = res["reserva_der"]
+        log(
+            f"    Reserva max cara: X={max_x} Y={max_y} "
+            f"izq={reserva_izq:.2f} inf={reserva_inf:.2f} der={reserva_der:.2f}"
+        )
+    else:
+        reserva_izq = 4.80
+        reserva_inf = 4.80
+        reserva_der = 0.70
     margen_sup = max(0.70, hoja.Height * 0.025)
-    ancho_disponible = max(1.0, float(hoja.Width) - reserva_izq - margen_der)
-    alto_disponible = max(1.0, float(hoja.Height) - reserva_inf - margen_sup)
+    ancho_disponible = max(
+        1.0, float(hoja.Width) - reserva_izq - reserva_der
+    )
+    alto_disponible = max(
+        1.0, float(hoja.Height) - reserva_inf - margen_sup
+    )
     factor = min(
         ancho_disponible / max(EPS, estado["width"]),
         alto_disponible / max(EPS, estado["height"]),
@@ -3544,6 +3881,7 @@ def _preparar_encuadre_estable_cara(plano, hoja, vista, tg, estado):
     vista.Position = tg.CreatePoint2d(nuevo_x, nuevo_y)
     try:
         plano.Update()
+        time.sleep(0.25)
     except Exception:
         pass
     log(
@@ -3708,12 +4046,19 @@ def _linea_cota_sketch(sketch, tg, x1, y1, x2, y2, color=None):
         return None
 
 
-def _texto_cota_sketch(sketch, tg, x, y, texto, inv_app):
+def _texto_cota_sketch(sketch, tg, x, y, texto, inv_app, vertical=False):
     try:
         caja = sketch.TextBoxes.AddFitted(
             _punto_sketch_desde_hoja(sketch, tg, x, y), str(texto)
         )
-        aplicar_estilo_texto_cota(caja, texto, inv_app)
+        if vertical:
+            # Inventor respeta el giro por propiedad (usado también en arcos.py).
+            try:
+                caja.Rotation = math.pi / 2
+            except Exception:
+                pass
+        # El estilo no requiere el Angle='90' si ya rotamos por propiedad.
+        aplicar_estilo_texto_cota(caja, texto, inv_app, vertical=False)
         return caja
     except Exception:
         return None
@@ -3737,27 +4082,113 @@ def _circulo_cota_sketch(sketch, tg, x, y, radio, color=None):
 
 def _marcas_typ_en_accesorios(sketch, tg, eje, referencia, color):
     """
-    Marca con puntos azules las aristas/centros de todos los accesorios a los
-    que aplica la única cota TYP.
+    Dona en el punto exacto donde la extension toca cada miembro TYP.
     """
     if not referencia.get("typ"):
         return
+    miembros = list(referencia.get("miembros") or [])
+    if len(miembros) < 2:
+        return
     vistos = set()
-    for miembro in referencia.get("miembros", []):
-        dato = miembro.get("dato")
-        if dato is None:
-            continue
-        if eje == "X":
-            x = float(miembro["valor"])
-            y = float(dato["cy"])
-        else:
-            x = float(dato["cx"])
-            y = float(miembro["valor"])
-        clave = (round(x, 4), round(y, 4))
+    for miembro in miembros[1:]:
+        x, y = _punto_geometria_acotada(miembro, eje)
+        clave = (round(x, 3), round(y, 3))
         if clave in vistos:
             continue
         vistos.add(clave)
-        _circulo_cota_sketch(sketch, tg, x, y, 0.16, color)
+        _circulo_cota_sketch(sketch, tg, x, y, RADIO_MARCA_TYP_CM, color)
+
+
+def _nivel_cota_y(indice, total, base_izq, base_der, paso_y):
+    """Apila cotas Y a izquierda; si hay muchas, reparte a la derecha."""
+    if total <= UMBRAL_COTAS_Y_DOBLE_CARA:
+        return base_izq - indice * paso_y
+    mitad = (total + 1) // 2
+    if indice < mitad:
+        return base_izq - indice * paso_y
+    return base_der + (indice - mitad) * paso_y
+
+
+def _calcular_reservas_grupo(posiciones_x, posiciones_y):
+    """Espacio de hoja necesario para que ninguna cota quede recortada."""
+    paso_x = _paso_stack_cotas(len(posiciones_x))
+    paso_y = _paso_stack_cotas(len(posiciones_y))
+    n_y = len(posiciones_y)
+    mitad = (n_y + 1) // 2 if n_y > UMBRAL_COTAS_Y_DOBLE_CARA else n_y
+    n_der = max(0, n_y - mitad)
+    reserva_inf = (
+        OFFSET_COTA + 1.25 + max(0, len(posiciones_x) - 1) * paso_x
+        + MARGEN_TEXTO_COTA_CM
+    )
+    reserva_izq = (
+        OFFSET_COTA + 1.25 + max(0, mitad - 1) * paso_y + MARGEN_TEXTO_COTA_CM
+    )
+    reserva_der = (
+        OFFSET_COTA + 1.25 + max(0, n_der - 1) * paso_y + MARGEN_TEXTO_COTA_CM
+    )
+    return {
+        "paso_x": paso_x,
+        "paso_y": paso_y,
+        "reserva_inf": max(4.80, reserva_inf),
+        "reserva_izq": max(4.80, reserva_izq),
+        "reserva_der": max(0.70, reserva_der),
+    }
+
+
+def _refrescar_lista_posiciones_export(eje, posiciones, vista, tg):
+    """Relee HLR tras mover escala/posicion de la vista (por grupo)."""
+    salida = []
+    for referencia in posiciones:
+        miembros = _refrescar_miembros_referencia(eje, referencia, vista, tg)
+        if not miembros:
+            continue
+        rep = miembros[0]
+        nueva = dict(referencia)
+        nueva["miembros"] = miembros
+        nueva["dato"] = rep["dato"]
+        nueva["valor"] = rep["valor"]
+        nueva["lado"] = rep["lado"]
+        nueva["pieza_id"] = rep["pieza_id"]
+        salida.append(nueva)
+    return salida
+
+
+def _ajustar_vista_para_grupo(plano, hoja, vista, tg, estado, grupo):
+    """
+    Reservado; NO usar en export (plano.Update por JPG crashea Inventor COM).
+
+    La reserva se calcula una vez en ``_preparar_encuadre_estable_cara(grupos=…)``.
+    """
+    px = grupo.get("posiciones_x") or []
+    py = grupo.get("posiciones_y") or []
+    if not px and not py:
+        return
+    res = _calcular_reservas_grupo(px, py)
+    margen_sup = max(0.70, hoja.Height * 0.025)
+    ancho_disp = max(
+        1.0, float(hoja.Width) - res["reserva_izq"] - res["reserva_der"]
+    )
+    alto_disp = max(
+        1.0, float(hoja.Height) - res["reserva_inf"] - margen_sup
+    )
+    factor = min(
+        ancho_disp / max(EPS, estado["width"]),
+        alto_disp / max(EPS, estado["height"]),
+    ) * FACTOR_ENCUADRE_FOTO
+    factor = max(0.12, min(factor, 4.5))
+    nuevo_x = res["reserva_izq"] + ancho_disp * 0.5
+    nuevo_y = res["reserva_inf"] + alto_disp * 0.5
+    vista.Scale = estado["scale"] * factor
+    vista.Position = tg.CreatePoint2d(nuevo_x, nuevo_y)
+    try:
+        plano.Update()
+    except Exception:
+        pass
+    log(
+        f"    Encuadre grupo QTY{grupo.get('qty')} "
+        f"{str(grupo.get('clave', ''))[:28]}: "
+        f"X={len(px)} Y={len(py)} factor={factor:.3f}"
+    )
 
 
 def _flechas_horizontales(sketch, tg, x1, x2, y, color):
@@ -3826,27 +4257,16 @@ def _dibujar_cotas_hv_desde_origen(
     try:
         base_abajo = float(vista.Top) - float(vista.Height) - OFFSET_COTA
         base_izq = float(vista.Left) - OFFSET_COTA
-        # Encoger el paso si una cara tiene muchas posiciones, para que la
-        # última cota siempre quede dentro de la hoja.
-        paso_x = PASO_NIVEL_COTA
-        paso_y = PASO_NIVEL_COTA
-        if len(posiciones_x) > 1:
-            paso_x = max(0.36, min(
-                PASO_NIVEL_COTA,
-                max(0.36, (base_abajo - 1.10) / (len(posiciones_x) - 1)),
-            ))
-        if len(posiciones_y) > 1:
-            paso_y = max(0.36, min(
-                PASO_NIVEL_COTA,
-                max(0.36, (base_izq - 1.10) / (len(posiciones_y) - 1)),
-            ))
+        base_der = float(vista.Left) + float(vista.Width) + OFFSET_COTA
+        paso_x = _paso_stack_cotas(len(posiciones_x))
+        paso_y = _paso_stack_cotas(len(posiciones_y))
+        n_y = len(posiciones_y)
 
         for indice, pos in enumerate(posiciones_x):
-            nivel = indice
+            rep = (pos.get("miembros") or [pos])[0]
             x = float(pos["valor"])
-            y_dim = base_abajo - nivel * paso_x
-            dato = pos["dato"]
-            y_obj = (float(dato["miny"]) + float(dato["maxy"])) * 0.5
+            y_dim = base_abajo - indice * paso_x
+            x_geo, y_geo = _punto_geometria_acotada(rep, "X")
             valor = _valor_real_desde_hoja(vista, origen_x, x, hoja)
             if not valor:
                 fallos += 1
@@ -3854,15 +4274,16 @@ def _dibujar_cotas_hv_desde_origen(
 
             ok = _linea_cota_sketch(sketch, tg, origen_x, y_dim, x, y_dim, color)
             ok = _linea_cota_sketch(sketch, tg, origen_x, origen_y, origen_x, y_dim, color) and ok
-            ok = _linea_cota_sketch(sketch, tg, x, y_obj, x, y_dim, color) and ok
+            ok = _linea_cota_sketch(sketch, tg, x_geo, y_geo, x_geo, y_dim, color) and ok
             _flechas_horizontales(sketch, tg, origen_x, x, y_dim, color)
             _marcas_typ_en_accesorios(sketch, tg, "X", pos, color)
             texto_valor = f"{valor} TYP" if pos.get("typ") else valor
+            dy_txt = 0.14 if (indice % 2 == 0) else (paso_x * 0.42)
             texto = _texto_cota_sketch(
                 sketch,
                 tg,
                 (origen_x + x) * 0.5,
-                y_dim + 0.12,
+                y_dim + dy_txt,
                 texto_valor,
                 inv_app,
             )
@@ -3872,11 +4293,10 @@ def _dibujar_cotas_hv_desde_origen(
                 fallos += 1
 
         for indice, pos in enumerate(posiciones_y):
-            nivel = indice
+            rep = (pos.get("miembros") or [pos])[0]
             y = float(pos["valor"])
-            x_dim = base_izq - nivel * paso_y
-            dato = pos["dato"]
-            x_obj = (float(dato["minx"]) + float(dato["maxx"])) * 0.5
+            x_dim = _nivel_cota_y(indice, n_y, base_izq, base_der, paso_y)
+            x_geo, y_geo = _punto_geometria_acotada(rep, "Y")
             valor = _valor_real_desde_hoja(vista, origen_y, y, hoja)
             if not valor:
                 fallos += 1
@@ -3884,17 +4304,21 @@ def _dibujar_cotas_hv_desde_origen(
 
             ok = _linea_cota_sketch(sketch, tg, x_dim, origen_y, x_dim, y, color)
             ok = _linea_cota_sketch(sketch, tg, origen_x, origen_y, x_dim, origen_y, color) and ok
-            ok = _linea_cota_sketch(sketch, tg, x_obj, y, x_dim, y, color) and ok
+            ok = _linea_cota_sketch(sketch, tg, x_geo, y_geo, x_dim, y_geo, color) and ok
             _flechas_verticales(sketch, tg, x_dim, origen_y, y, color)
             _marcas_typ_en_accesorios(sketch, tg, "Y", pos, color)
             texto_valor = f"{valor} TYP" if pos.get("typ") else valor
+            dx_txt = 0.14 if (indice % 2 == 0) else (paso_y * 0.42)
+            if indice >= n_y // 2 and n_y > UMBRAL_COTAS_Y_DOBLE_CARA:
+                dx_txt = -(0.14 + len(texto_valor) * 0.08)
             texto = _texto_cota_sketch(
                 sketch,
                 tg,
-                x_dim + 0.12,
+                x_dim + dx_txt,
                 (origen_y + y) * 0.5,
                 texto_valor,
                 inv_app,
+                vertical=True,
             )
             if ok is not None and texto is not None:
                 creadas += 1
@@ -4004,6 +4428,347 @@ def _crear_cota_ordenada_desde_origen(hoja, tg, dato_obj, lado, tipo, texto_xy):
     return True
 
 
+def _origen_desde_vertices_seleccion(vista, tg, vertices_cm):
+    """Proyecta vértices 3D (cm) a hoja y toma min X / min Y (esquina IL)."""
+    if not vertices_cm:
+        return None
+    xs = []
+    ys = []
+    for vert in vertices_cm:
+        try:
+            pt = tg.CreatePoint(float(vert[0]), float(vert[1]), float(vert[2]))
+            p2 = vista.ModelToSheetSpace(pt)
+            xs.append(float(p2.X))
+            ys.append(float(p2.Y))
+        except Exception:
+            continue
+    if not xs or not ys:
+        return None
+    return min(xs), min(ys)
+
+
+def _construir_grupos_por_tipo(
+    posiciones_x,
+    posiciones_y,
+    tolerancia,
+    origen_x,
+    origen_y,
+    vista,
+    hoja,
+):
+    """
+    Agrupa referencias por clave de tipo (mismo nombre o base sin _NNN).
+    Dentro de cada grupo fusiona valores idénticos; si varios extremos
+    coinciden se marcan con puntos azules y etiqueta de texto TYP.
+    """
+    por_clave = {}
+    for eje, lista in (("X", posiciones_x), ("Y", posiciones_y)):
+        for pos in lista:
+            clave = _clave_tipo_pieza(pos.get("pieza_id", ""))
+            if not clave or clave == "SIN_COMPONENTE":
+                continue
+            bucket = por_clave.setdefault(
+                clave, {"x": [], "y": [], "ids": set()}
+            )
+            bucket["ids"].add(str(pos.get("pieza_id")))
+            if eje == "X":
+                bucket["x"].append(pos)
+            else:
+                bucket["y"].append(pos)
+
+    grupos = []
+    for clave in sorted(por_clave.keys()):
+        data = por_clave[clave]
+        px = _agrupar_referencias_typ(
+            data["x"],
+            tolerancia,
+            eje="X",
+            origen=origen_x,
+            vista=vista,
+            hoja=hoja,
+        )
+        py = _agrupar_referencias_typ(
+            data["y"],
+            tolerancia,
+            eje="Y",
+            origen=origen_y,
+            vista=vista,
+            hoja=hoja,
+        )
+        grupos.append(
+            {
+                "clave": clave,
+                "qty": len(data["ids"]),
+                "posiciones_x": px,
+                "posiciones_y": py,
+            }
+        )
+    return grupos
+
+
+def _ids_en_grupo(grupo):
+    ids = set()
+    for pos in (grupo.get("posiciones_x") or []) + (
+        grupo.get("posiciones_y") or []
+    ):
+        for m in pos.get("miembros") or [pos]:
+            pid = str(m.get("pieza_id") or "")
+            if pid:
+                ids.add(pid)
+    return ids
+
+
+def _centroide_instancia_en_grupo(grupo, pieza_id):
+    xs, ys = [], []
+    pid = str(pieza_id)
+    for pos in (grupo.get("posiciones_x") or []) + (
+        grupo.get("posiciones_y") or []
+    ):
+        for m in pos.get("miembros") or [pos]:
+            if str(m.get("pieza_id")) != pid:
+                continue
+            d = m.get("dato") or {}
+            try:
+                xs.append(float(d.get("cx", m.get("valor", 0))))
+                ys.append(float(d.get("cy", m.get("valor", 0))))
+            except (TypeError, ValueError):
+                pass
+    if not xs:
+        return (0.0, 0.0)
+    return (sum(xs) / len(xs), sum(ys) / len(ys))
+
+
+def _extraer_posiciones_crudas_grupo(grupo, eje):
+    clave = "posiciones_x" if eje == "X" else "posiciones_y"
+    crudas = []
+    vistos = set()
+    for pos in grupo.get(clave) or []:
+        for m in pos.get("miembros") or [pos]:
+            k = (
+                eje,
+                str(m.get("pieza_id")),
+                str(m.get("lado")),
+                round(float(m["valor"]), 4),
+            )
+            if k in vistos:
+                continue
+            vistos.add(k)
+            crudas.append(dict(m))
+    return crudas
+
+
+def _instancias_ordenadas_grupo(grupo):
+    """Orden de lectura en piso: abajo→arriba, izquierda→derecha."""
+    ids = list(_ids_en_grupo(grupo))
+    return sorted(
+        ids,
+        key=lambda pid: _centroide_instancia_en_grupo(grupo, pid),
+    )
+
+
+def _tam_chunk_lamina(grupo):
+    qty = len(_ids_en_grupo(grupo)) or int(grupo.get("qty") or 1)
+    n_cotas = len(grupo.get("posiciones_x") or []) + len(
+        grupo.get("posiciones_y") or []
+    )
+    if qty <= MAX_INSTANCIAS_POR_LAMINA and n_cotas <= MAX_COTAS_POR_LAMINA:
+        return qty
+    cotas_por_inst = max(1, n_cotas // max(qty, 1))
+    por_cotas = max(1, MAX_COTAS_POR_LAMINA // cotas_por_inst)
+    return max(1, min(MAX_INSTANCIAS_POR_LAMINA, por_cotas))
+
+
+def _subgrupo_desde_ids(
+    grupo, ids_ok, tolerancia, origen_x, origen_y, vista, hoja
+):
+    ids_ok = {str(i) for i in ids_ok}
+    xs = [
+        p
+        for p in _extraer_posiciones_crudas_grupo(grupo, "X")
+        if str(p.get("pieza_id")) in ids_ok
+    ]
+    ys = [
+        p
+        for p in _extraer_posiciones_crudas_grupo(grupo, "Y")
+        if str(p.get("pieza_id")) in ids_ok
+    ]
+    px = _agrupar_referencias_typ(
+        xs, tolerancia, eje="X", origen=origen_x, vista=vista, hoja=hoja
+    )
+    py = _agrupar_referencias_typ(
+        ys, tolerancia, eje="Y", origen=origen_y, vista=vista, hoja=hoja
+    )
+    sub = dict(grupo)
+    sub["posiciones_x"] = px
+    sub["posiciones_y"] = py
+    sub["qty"] = len(ids_ok)
+    return sub
+
+
+def _partir_grupos_en_laminas(
+    grupos, tolerancia, origen_x, origen_y, vista, hoja
+):
+    """
+    Divide grupos densos en láminas con continuidad espacial (misma pieza,
+    instancias consecutivas en Y/X) para conservar fidelidad en piso.
+    """
+    resultado = []
+    for grupo in grupos:
+        ids_ord = _instancias_ordenadas_grupo(grupo)
+        qty_total = len(ids_ord) or int(grupo.get("qty") or 1)
+        chunk = _tam_chunk_lamina(grupo)
+        if chunk >= qty_total:
+            g = dict(grupo)
+            g["qty_total"] = qty_total
+            g["lamina"] = 1
+            g["laminas_total"] = 1
+            resultado.append(g)
+            continue
+        laminas_total = (qty_total + chunk - 1) // chunk
+        for i in range(0, qty_total, chunk):
+            ids_chunk = set(ids_ord[i : i + chunk])
+            sub = _subgrupo_desde_ids(
+                grupo,
+                ids_chunk,
+                tolerancia,
+                origen_x,
+                origen_y,
+                vista,
+                hoja,
+            )
+            sub["qty_total"] = qty_total
+            sub["lamina"] = i // chunk + 1
+            sub["laminas_total"] = laminas_total
+            resultado.append(sub)
+    return resultado
+
+
+def _centros_barrenos_en_hoja(datos, vista, tg, envolvente=None):
+    """
+    Centros en hoja de barrenos (aristas Circle del sólido de la pieza).
+
+    Se proyectan al plano de la vista para acotar X/Y desde (0,0) del segmento.
+    Ignora círculos del tamaño de la pieza (borde exterior de un boss redondo).
+    """
+    if not datos:
+        return []
+    try:
+        ocurrencia = datos[0]["curve"].ModelGeometry.ContainingOccurrence
+    except Exception:
+        return []
+
+    try:
+        max_dx = float(envolvente["dx"]) if envolvente else max(
+            abs(float(d["dx"])) for d in datos
+        )
+        max_dy = float(envolvente["dy"]) if envolvente else max(
+            abs(float(d["dy"])) for d in datos
+        )
+    except Exception:
+        max_dx = max_dy = 10.0
+    lim_hoja = 0.48 * max(max_dx, max_dy, EPS)
+    try:
+        escala = max(EPS, abs(float(vista.Scale)))
+    except Exception:
+        escala = 1.0
+
+    centros = []
+    vistos = set()
+    try:
+        cuerpos = ocurrencia.Definition.Document.ComponentDefinition.SurfaceBodies
+        for i in range(1, int(cuerpos.Count) + 1):
+            cuerpo = cuerpos.Item(i)
+            for j in range(1, int(cuerpo.Edges.Count) + 1):
+                try:
+                    edge = cuerpo.Edges.Item(j)
+                    geom = edge.Geometry
+                    if geom is None:
+                        continue
+                    if "CIRCLE" not in str(type(geom)).upper():
+                        continue
+                    radio = float(getattr(geom, "Radius", 0) or 0)
+                    if radio <= 0:
+                        continue
+                    radio_hoja = radio * escala
+                    if radio_hoja > lim_hoja or radio_hoja < 0.05:
+                        continue
+                    c_local = geom.Center
+                    px = float(c_local.X)
+                    py = float(c_local.Y)
+                    pz = float(c_local.Z)
+                    m = ocurrencia.Transformation
+                    wx = (
+                        m.Cell(1, 1) * px
+                        + m.Cell(1, 2) * py
+                        + m.Cell(1, 3) * pz
+                        + m.Cell(1, 4)
+                    )
+                    wy = (
+                        m.Cell(2, 1) * px
+                        + m.Cell(2, 2) * py
+                        + m.Cell(2, 3) * pz
+                        + m.Cell(2, 4)
+                    )
+                    wz = (
+                        m.Cell(3, 1) * px
+                        + m.Cell(3, 2) * py
+                        + m.Cell(3, 3) * pz
+                        + m.Cell(3, 4)
+                    )
+                    p2 = vista.ModelToSheetSpace(tg.CreatePoint(wx, wy, wz))
+                    cx = float(p2.X)
+                    cy = float(p2.Y)
+                    clave = (round(cx, 3), round(cy, 3))
+                    if clave in vistos:
+                        continue
+                    vistos.add(clave)
+                    dato = dict(datos[0])
+                    dato.update(
+                        {
+                            "minx": cx - radio_hoja,
+                            "maxx": cx + radio_hoja,
+                            "miny": cy - radio_hoja,
+                            "maxy": cy + radio_hoja,
+                            "dx": 2 * radio_hoja,
+                            "dy": 2 * radio_hoja,
+                            "cx": cx,
+                            "cy": cy,
+                            "barreno": True,
+                            # Coordenadas 3D para reproyectar tras cambio
+                            # de escala (sin esto, _envolvente_visible_refrescada
+                            # devuelve la envolvente de toda la pieza).
+                            "puntos_modelo": [
+                                (wx - radio, wy - radio, wz),
+                                (wx + radio, wy + radio, wz),
+                            ],
+                        }
+                    )
+                    centros.append(dato)
+                except Exception:
+                    continue
+    except Exception:
+        pass
+
+    if not centros:
+        for info in datos:
+            dx = abs(float(info["dx"]))
+            dy = abs(float(info["dy"]))
+            if max(dx, dy) < 0.08 or max(dx, dy) > lim_hoja:
+                continue
+            if abs(dx - dy) > 0.22 * max(dx, dy):
+                continue
+            cx = float(info["cx"])
+            cy = float(info["cy"])
+            clave = (round(cx, 3), round(cy, 3))
+            if clave in vistos:
+                continue
+            vistos.add(clave)
+            dato = dict(info)
+            dato["barreno"] = True
+            centros.append(dato)
+    return centros
+
+
 def _acotar_vista(
     hoja,
     vista,
@@ -4016,10 +4781,12 @@ def _acotar_vista(
     catalogo=None,
     nombre_seg="",
     analizar_solo_segmento=False,
+    origen_vertices_cm=None,
+    base_pared=None,
 ):
     """
     Cotas H/V desde (0,0) a cada pieza independiente sobre la pared física.
-    El segmento mapeado es contexto; la selección definitiva es geométrica.
+    Agrupa piezas iguales para exportar 1 JPG por tipo (X+Y juntos).
     """
     if catalogo is None:
         catalogo = set()
@@ -4074,40 +4841,81 @@ def _acotar_vista(
             continue
         grupos_en_cara.append((nombre, nombre_pieza, datos))
 
-    # Se excluye solo la placa madre. Para identificarla se priorizan las
-    # ocurrencias del segmento mapeado y, entre ellas, la mayor huella. Esto
-    # evita confundir un CBOX/bracket grande con la pared; las piezas fuera
-    # del subensamble también se mantienen y se acotan si viven en la cara.
+    # Placa(s) madre del segmento: una sola placa o pared partida (_1/_2).
+    # El (0,0) es siempre la esquina inferior-izquierda de la pared completa,
+    # no de la mitad tocada en el pick manual.
     paneles_segmento = [
         (nombre, datos, _huella_grupo_en_vista(datos, vista)[2])
         for nombre, nombre_pieza, datos in grupos_en_cara
         if _nombre_en_catalogo(nombre_pieza, catalogo)
     ]
-    paneles = paneles_segmento or [
-        (nombre, datos, _huella_grupo_en_vista(datos, vista)[2])
-        for nombre, _nombre_pieza, datos in grupos_en_cara
-    ]
-    nombre_panel = max(paneles, key=lambda item: item[2])[0] if paneles else None
-    if nombre_panel:
-        log(f"    Placa madre excluida: {_nombre_final_componente(nombre_panel)}")
+    if not paneles_segmento:
+        paneles_segmento = [
+            (nombre, datos, _huella_grupo_en_vista(datos, vista)[2])
+            for nombre, _nombre_pieza, datos in grupos_en_cara
+        ]
+
+    paneles_pared, es_pared_partida = _resolver_paneles_pared(
+        paneles_segmento, base_pared=base_pared
+    )
+    nombres_panel = {nombre for nombre, _datos, _huella in paneles_pared}
+    if paneles_pared:
+        for nombre, _datos, _huella in paneles_pared:
+            log(
+                f"    Placa madre excluida: "
+                f"{_nombre_final_componente(nombre)}"
+            )
+        if es_pared_partida:
+            log(
+                f"    Pared partida nesting: {len(paneles_pared)} mitades "
+                "como un solo muro"
+            )
     else:
         log("    AVISO: no se identificó placa madre; se incluirán todas las piezas.")
 
-    datos_panel = next(
-        (datos for nombre, _nombre_pieza, datos in grupos_en_cara if nombre == nombre_panel),
-        [],
+    envolventes_pared = [
+        _envolvente_occurrence_en_hoja(datos, vista, tg)
+        for _nombre, datos, _huella in paneles_pared
+    ]
+    envolvente_panel = _envolvente_union_en_hoja(envolventes_pared)
+    nombre_panel = (
+        max(paneles_pared, key=lambda item: item[2])[0] if paneles_pared else None
     )
-    envolvente_panel = _envolvente_occurrence_en_hoja(datos_panel, vista, tg)
+    datos_panel = next(
+        (
+            datos
+            for nombre, _nombre_pieza, datos in grupos_en_cara
+            if nombre == nombre_panel
+        ),
+        paneles_pared[0][1] if paneles_pared else [],
+    )
+
+    origen_forzado = None
     if envolvente_panel is not None:
-        # Datum de piso: esquina inferior-izquierda de la placa madre del
-        # segmento, no de la base exterior ni de las soleras.
         origen_x = float(envolvente_panel["minx"])
         origen_y = float(envolvente_panel["miny"])
-        log(
-            f"    Origen (0,0) placa segmento: X={origen_x:.3f} "
-            f"Y={origen_y:.3f}"
+        origen_forzado = (origen_x, origen_y)
+        if es_pared_partida:
+            log(
+                f"    Origen (0,0) pared completa (partida): X={origen_x:.3f} "
+                f"Y={origen_y:.3f}"
+            )
+        else:
+            log(
+                f"    Origen (0,0) placa segmento: X={origen_x:.3f} "
+                f"Y={origen_y:.3f}"
+            )
+    elif origen_vertices_cm:
+        origen_forzado = _origen_desde_vertices_seleccion(
+            vista, tg, origen_vertices_cm
         )
-    else:
+        if origen_forzado is not None:
+            origen_x, origen_y = origen_forzado
+            log(
+                f"    Origen (0,0) cara seleccionada: X={origen_x:.3f} "
+                f"Y={origen_y:.3f}"
+            )
+    if origen_forzado is None:
         ref_izq = _elegir_muro_datum(todas, "izq", vista)
         ref_inf = _elegir_muro_datum(todas, "inf", vista)
         if ref_izq is None or ref_inf is None:
@@ -4118,7 +4926,7 @@ def _acotar_vista(
         log("    AVISO: datum de respaldo por muro; placa madre no proyectable.")
 
     for nombre, nombre_pieza, datos in grupos_en_cara:
-        if nombre == nombre_panel:
+        if nombre in nombres_panel:
             continue
         piezas_superficie += 1
         nombres_ok.append(nombre_pieza[:40])
@@ -4128,83 +4936,120 @@ def _acotar_vista(
         datos_extremos = [envolvente] if envolvente is not None else datos
         if envolvente is not None:
             envolventes_3d += 1
-        if _es_componente_circular(datos, envolvente, nombre_pieza):
-            _agregar_posicion(
+        barrenos = _centros_barrenos_en_hoja(datos, vista, tg, envolvente)
+        if _es_pieza_solo_centro(nombre_pieza, datos, envolvente):
+            _agregar_centro_pieza(
                 posiciones_x,
-                envolvente["cx"],
-                envolvente,
-                tol_pos,
-                "centro",
-                nombre,
-            )
-            _agregar_posicion(
                 posiciones_y,
-                envolvente["cy"],
                 envolvente,
                 tol_pos,
-                "centro",
                 nombre,
+                nombre_pieza=nombre_pieza,
+                barrenos=barrenos,
+            )
+            log(
+                f"    Centro circular {nombre_pieza[:36]}"
             )
         else:
             _agregar_inicio_y_fin(
-                posiciones_x, posiciones_y, datos_extremos, tol, tol_pos, nombre
+                posiciones_x,
+                posiciones_y,
+                datos_extremos,
+                tol,
+                tol_pos,
+                nombre,
             )
-            # Además de la envolvente exterior, un lifting lug necesita las
-            # referencias del tramo que realmente toca/suelda sobre la placa.
-            contacto_lug = (
-                _cara_contacto_lug_en_hoja(
-                    nombre, nombre_panel, datos, vista, tg
-                )
-                if es_lug
-                else None
-            )
-            if contacto_lug is not None:
-                if contacto_lug["eje_contacto"] == "Y":
-                    _agregar_posicion(
-                        posiciones_y,
-                        contacto_lug["miny"],
-                        contacto_lug,
-                        tol_pos,
-                        "inf",
-                        nombre,
-                        contacto=True,
-                    )
-                    _agregar_posicion(
-                        posiciones_y,
-                        contacto_lug["maxy"],
-                        contacto_lug,
-                        tol_pos,
-                        "sup",
-                        nombre,
-                        contacto=True,
-                    )
-                else:
+            # Centros de barreno SOLO como complemento (SP-*, *_HOLE).
+            if barrenos and _debe_acotar_centro_barreno_adicional(nombre_pieza):
+                u = str(nombre_pieza).upper()
+                if re.match(r"^SP-\d+", u.split(":")[0].strip()):
+                    barrenos = [
+                        max(
+                            barrenos,
+                            key=lambda c: float(c.get("dx", 0) or 0),
+                        )
+                    ]
+                for barreno in barrenos:
                     _agregar_posicion(
                         posiciones_x,
-                        contacto_lug["minx"],
-                        contacto_lug,
+                        barreno["cx"],
+                        barreno,
                         tol_pos,
-                        "izq",
+                        "centro",
                         nombre,
-                        contacto=True,
                     )
                     _agregar_posicion(
-                        posiciones_x,
-                        contacto_lug["maxx"],
-                        contacto_lug,
+                        posiciones_y,
+                        barreno["cy"],
+                        barreno,
                         tol_pos,
-                        "der",
+                        "centro",
                         nombre,
-                        contacto=True,
                     )
                 log(
-                    "    Lug con cara de contacto a placa: "
-                    f"{contacto_lug['eje_contacto']} "
-                    f"{contacto_lug['dx']:.2f} x {contacto_lug['dy']:.2f} "
-                    f"cm hoja, área={contacto_lug['area_contacto']:.2f} cm²"
+                    f"    Centro barreno {nombre_pieza[:36]}: "
+                    f"{len(barrenos)} ref"
                 )
-            elif es_lug:
-                log("    AVISO: no se detectó línea de contacto del lifting lug.")
+            elif barrenos:
+                log(
+                    f"    Barrenos ignorados (solo envolvente): "
+                    f"{nombre_pieza[:36]}"
+                )
+        # Lifting lug: además de envolvente, cara de contacto con placa.
+        contacto_lug = (
+            _cara_contacto_lug_en_hoja(
+                nombre, nombre_panel, datos, vista, tg
+            )
+            if es_lug
+            else None
+        )
+        if contacto_lug is not None:
+            if contacto_lug["eje_contacto"] == "Y":
+                _agregar_posicion(
+                    posiciones_y,
+                    contacto_lug["miny"],
+                    contacto_lug,
+                    tol_pos,
+                    "inf",
+                    nombre,
+                    contacto=True,
+                )
+                _agregar_posicion(
+                    posiciones_y,
+                    contacto_lug["maxy"],
+                    contacto_lug,
+                    tol_pos,
+                    "sup",
+                    nombre,
+                    contacto=True,
+                )
+            else:
+                _agregar_posicion(
+                    posiciones_x,
+                    contacto_lug["minx"],
+                    contacto_lug,
+                    tol_pos,
+                    "izq",
+                    nombre,
+                    contacto=True,
+                )
+                _agregar_posicion(
+                    posiciones_x,
+                    contacto_lug["maxx"],
+                    contacto_lug,
+                    tol_pos,
+                    "der",
+                    nombre,
+                    contacto=True,
+                )
+            log(
+                "    Lug con cara de contacto a placa: "
+                f"{contacto_lug['eje_contacto']} "
+                f"{contacto_lug['dx']:.2f} x {contacto_lug['dy']:.2f} "
+                f"cm hoja, área={contacto_lug['area_contacto']:.2f} cm²"
+            )
+        elif es_lug:
+            log("    AVISO: no se detectó línea de contacto del lifting lug.")
 
     posiciones_x = [
         p for p in posiciones_x
@@ -4214,21 +5059,23 @@ def _acotar_vista(
         p for p in posiciones_y
         if abs(p["valor"] - origen_y) >= min_dist_origen_hoja
     ]
-    # La referencia TYP se decide contra la misma silueta HLR que se usará
-    # para dibujar cada foto, no contra su RangeBox tridimensional.
+    # Releer silueta HLR antes de consolidar por tipo de pieza.
     envolvente_panel_typ = _envolvente_visible_refrescada(
         envolvente_panel, vista, tg
     )
     origen_x_typ = (
         float(envolvente_panel_typ["minx"])
-        if envolvente_panel_typ is not None
+        if envolvente_panel_typ is not None and origen_forzado is None
         else origen_x
     )
     origen_y_typ = (
         float(envolvente_panel_typ["miny"])
-        if envolvente_panel_typ is not None
+        if envolvente_panel_typ is not None and origen_forzado is None
         else origen_y
     )
+    if origen_forzado is None:
+        origen_x = origen_x_typ
+        origen_y = origen_y_typ
     posiciones_x = _refrescar_posiciones_para_typ(
         "X", posiciones_x, vista, tg
     )
@@ -4241,43 +5088,57 @@ def _acotar_vista(
         TOL_COINCIDENCIA_HOJA,
         TOLERANCIA_COTA_CM * escala_hoja,
     )
-    posiciones_x = _agrupar_referencias_typ(
+    grupos_export = _construir_grupos_por_tipo(
         posiciones_x,
-        tolerancia_typ,
-        eje="X",
-        origen=origen_x_typ,
-        vista=vista,
-        hoja=hoja,
-    )
-    posiciones_y = _agrupar_referencias_typ(
         posiciones_y,
         tolerancia_typ,
-        eje="Y",
-        origen=origen_y_typ,
-        vista=vista,
-        hoja=hoja,
+        origen_x,
+        origen_y,
+        vista,
+        hoja,
     )
-    referencias_typ = sum(
-        1 for posicion in posiciones_x + posiciones_y if posicion["typ"]
+    n_grupos_tipo = len(grupos_export)
+    grupos_export = _partir_grupos_en_laminas(
+        grupos_export,
+        tolerancia_typ,
+        origen_x,
+        origen_y,
+        vista,
+        hoja,
+    )
+    total_refs = sum(
+        len(g["posiciones_x"]) + len(g["posiciones_y"]) for g in grupos_export
     )
 
     log(
         f"    Piezas de superficie={piezas_superficie} | "
         f"envolventes 3D={envolventes_3d} sin ocurrencia={sin_componente} "
         f"otra cara={fuera_de_cara} | "
-        f"cotas X={len(posiciones_x)} Y={len(posiciones_y)} TYP={referencias_typ}"
+        f"grupos={n_grupos_tipo} laminas={len(grupos_export)} refs={total_refs}"
     )
     if nombres_ok:
         log(f"    Piezas: {', '.join(nombres_ok[:16])}")
+    for g in grupos_export[:16]:
+        lam = ""
+        if int(g.get("laminas_total") or 1) > 1:
+            lam = f" p{g['lamina']}of{g['laminas_total']}"
+        log(
+            f"      tipo {g['clave']}{lam}: QTY={g['qty']} "
+            f"X={len(g['posiciones_x'])} Y={len(g['posiciones_y'])}"
+        )
 
     _limpiar_bolitas(hoja, vista)
 
     return {
         "origen_x": origen_x,
         "origen_y": origen_y,
-        "dato_panel": envolvente_panel or {"curvas": list(datos_panel)},
-        "posiciones_x": posiciones_x,
-        "posiciones_y": posiciones_y,
+        "dato_panel": envolvente_panel or {"curvas": list(datos_panel)},        "grupos": grupos_export,
+        "posiciones_x": [
+            p for g in grupos_export for p in g["posiciones_x"]
+        ],
+        "posiciones_y": [
+            p for g in grupos_export for p in g["posiciones_y"]
+        ],
         "piezas_superficie": piezas_superficie,
     }
 
@@ -4472,6 +5333,728 @@ def _adoptar_huerfanas_por_proximidad(
         log("  Adopción por proximidad: no había huérfanas por adoptar.")
 
 
+def _parse_ruta_seleccion(argv):
+    for i, arg in enumerate(argv):
+        if arg == "--seleccion" and i + 1 < len(argv):
+            return argv[i + 1].strip().strip('"')
+        if arg.startswith("--seleccion="):
+            return arg.split("=", 1)[1].strip().strip('"')
+    return None
+
+
+def _cargar_seleccion_caras(ruta):
+    # utf-8-sig: iLogic WriteAllText(..., Encoding.UTF8) escribe BOM.
+    with open(ruta, "r", encoding="utf-8-sig") as archivo:
+        data = json.load(archivo)
+    if not isinstance(data, dict):
+        raise ValueError("seleccion_caras.json inválido")
+    if "top" not in data:
+        raise ValueError("JSON debe incluir 'top'")
+
+    solo = str(data.get("solo") or "").strip().upper()
+    validas = {"SEGM1", "SEGM2", "SEGM3", "SEGM4", "TOP", "BASE"}
+    if solo:
+        if solo not in validas:
+            raise ValueError(f"solo inválido: {solo}")
+        data["solo"] = solo
+        if solo.startswith("SEGM"):
+            segs = list(data.get("segmentos") or [])
+            if not segs and data.get("cara"):
+                segs = [data["cara"]]
+            if not segs:
+                raise ValueError(f"JSON --solo {solo} requiere el pick del segmento")
+            # Normalizar etiqueta del único segmento.
+            segs[0] = dict(segs[0])
+            segs[0]["etiqueta"] = solo
+            data["segmentos"] = segs[:1]
+        elif solo == "BASE":
+            if not data.get("base"):
+                if data.get("cara"):
+                    data["base"] = data["cara"]
+                else:
+                    raise ValueError("JSON --solo BASE requiere el pick de base")
+            data["segmentos"] = list(data.get("segmentos") or [])
+        else:  # TOP
+            data["segmentos"] = list(data.get("segmentos") or [])
+        return data
+
+    if "segmentos" not in data:
+        raise ValueError("JSON debe incluir 'segmentos'")
+    if len(data.get("segmentos") or []) != 4:
+        raise ValueError("Se requieren exactamente 4 segmentos en la selección")
+    return data
+
+
+def _parse_solo(argv):
+    for i, arg in enumerate(argv):
+        if arg == "--solo" and i + 1 < len(argv):
+            return argv[i + 1].strip().strip('"').upper()
+        if arg.startswith("--solo="):
+            return arg.split("=", 1)[1].strip().strip('"').upper()
+    return None
+
+
+def _mm_a_cm_punto(pt):
+    return (float(pt[0]) / 10.0, float(pt[1]) / 10.0, float(pt[2]) / 10.0)
+
+
+def _buscar_occurrence_por_nombre(ensamble, occ_name):
+    objetivo = str(occ_name or "").strip().upper()
+    if not objetivo:
+        return None
+    objetivo_base = objetivo.split(":")[0].strip()
+
+    def _match(occ):
+        try:
+            nombre = str(occ.Name).strip().upper()
+        except Exception:
+            return False
+        if nombre == objetivo or nombre.split(":")[0] == objetivo_base:
+            return True
+        return False
+
+    try:
+        for i in range(1, ensamble.ComponentDefinition.Occurrences.Count + 1):
+            occ = ensamble.ComponentDefinition.Occurrences.Item(i)
+            if _match(occ):
+                return occ
+    except Exception:
+        pass
+    try:
+        hojas = ensamble.ComponentDefinition.Occurrences.AllLeafOccurrences
+        for i in range(1, hojas.Count + 1):
+            occ = hojas.Item(i)
+            if _match(occ):
+                return occ
+    except Exception:
+        pass
+    return None
+
+
+def _parse_codigo_otc(nombre):
+    """
+    Parsea ``62201-1248-A03_180`` → (proyecto, familia, 'A'|'P', numero).
+
+    Convención OTC global (11 OPs en Z:\\...\\ORDENES DE PRODUCCION):
+      *-*46-A01 = tanque          (plano *-*46.00)
+      *-*47-A0N = TOP COVER       (plano *-*47.xx; a veces A01..A07)
+      *-*48-A02 = BASE
+      *-*48-A03..A06 = paredes / SEGM
+      *-*48-A01 = casco multi-cara (NO es una cara)
+      *-*48-A07+ = subarmados de pared (no contenedor de cara)
+    Rol = ultimos 2 digitos de familia (1246→46, 1247→47, 1248→48).
+    Ver PATRONES_OTC_GLOBAL.md.
+    """
+    base = str(nombre or "").split(":")[0].strip().upper()
+    m = re.match(r"^(\d+)-(\d+)-([AP])(\d+)", base)
+    if not m:
+        return None
+    return {
+        "proyecto": m.group(1),
+        "familia": m.group(2),
+        "tipo": m.group(3),
+        "numero": int(m.group(4)),
+        "base": base,
+    }
+
+
+def _familia_otc_rol(familia):
+    """Ultimos dígitos de familia: 46=tanque, 47=tapa, 48=casco/paredes."""
+    digitos = re.sub(r"\D", "", str(familia or ""))
+    if len(digitos) >= 2:
+        return digitos[-2:]
+    return digitos
+
+
+def _es_contenedor_cara_otc(nombre, etiqueta=""):
+    """
+    True si el IAM es el contenedor de UNA cara OTC (no el tanque ni el shell).
+
+    | Etiqueta | IAM típico        |
+    |----------|-------------------|
+    | TOP      | *-1247-A01        |
+    | BASE     | *-1248-A02        |
+    | SEGM*    | *-1248-A03..A06   |
+    """
+    info = _parse_codigo_otc(nombre)
+    if info is None or info["tipo"] != "A":
+        return False
+    rol = _familia_otc_rol(info["familia"])
+    anum = info["numero"]
+    etiqueta_u = str(etiqueta or "").upper()
+
+    if etiqueta_u == "TOP":
+        return rol == "47"
+    if etiqueta_u == "BASE":
+        return rol == "48" and anum == 2
+    if etiqueta_u.startswith("SEGM"):
+        return rol == "48" and anum in (3, 4, 5, 6)
+
+    # Sin etiqueta: cualquier cara válida OTC.
+    if rol == "47":
+        return True
+    if rol == "48" and anum in (2, 3, 4, 5, 6):
+        return True
+    return False
+
+
+def _es_shell_o_tanque_otc(nombre):
+    """A01 de familia 46 (tanque) o 48 (casco multi-cara): no usar como SEGM."""
+    info = _parse_codigo_otc(nombre)
+    if info is None or info["tipo"] != "A":
+        return False
+    if info["numero"] != 1:
+        return False
+    rol = _familia_otc_rol(info["familia"])
+    return rol in ("46", "48")
+
+
+def _es_contenedor_multi_cara(occ):
+    """
+    True si el IAM agrupa varias caras del tanque (p. ej. A01 con A02..A06).
+
+    Subir hasta ahí metía BASE, SP-852 de laterales y las 4 paredes en SEGM1.
+    """
+    if occ is None or not _es_ensamble_occurrence(occ):
+        return False
+    try:
+        if _es_shell_o_tanque_otc(str(occ.Name)):
+            return True
+    except Exception:
+        pass
+    hijos = _subocurrencias_contextuales(occ)
+    grandes = 0
+    caras_otc = 0
+    for hijo in hijos:
+        try:
+            if hijo.Suppressed:
+                continue
+        except Exception:
+            pass
+        try:
+            if _es_contenedor_cara_otc(str(hijo.Name)):
+                caras_otc += 1
+                if caras_otc >= 2:
+                    return True
+        except Exception:
+            pass
+        n = (
+            _cantidad_hojas_occurrence(hijo)
+            if _es_ensamble_occurrence(hijo)
+            else 1
+        )
+        if n >= 15:
+            grandes += 1
+            if grandes >= 2:
+                return True
+    paredes = _listar_paredes_nesting_bajo(occ, profundidad_max=4)
+    bases = set()
+    for pared in paredes:
+        try:
+            bases.add(str(pared.Name).split(":")[0].strip().upper())
+        except Exception:
+            continue
+    return len(bases) >= 2
+
+
+def _listar_paredes_nesting_bajo(occ, profundidad_max=4, profundidad=0):
+    """IAMs partido-nesting (posible placa de pared) bajo una ocurrencia."""
+    halladas = []
+    if occ is None or profundidad > profundidad_max:
+        return halladas
+    if _es_partido_nesting(occ):
+        halladas.append(occ)
+        return halladas
+    for hijo in _subocurrencias_contextuales(occ):
+        halladas.extend(
+            _listar_paredes_nesting_bajo(
+                hijo, profundidad_max, profundidad + 1
+            )
+        )
+    return halladas
+
+
+def _contenedor_desde_occurrence(occ, etiqueta=""):
+    """
+    Contenedor del pick para catálogo/visibilidad.
+
+    Prioridad OTC (estructura real de piso):
+      pick → subir hasta ``*-1248-A03..A06`` (SEGM), ``*-1248-A02`` (BASE)
+      o ``*-1247-A*`` (TOP). Nunca quedarse en ``*-1248-A01`` ni ``*-1246-A01``.
+
+    Fallback: heurística multi-cara (detenerse antes del shell).
+    """
+    if occ is None:
+        return None
+    etiqueta_u = str(etiqueta or "").upper()
+
+    # 1) Camino preferido: IAM de cara OTC en la cadena de padres.
+    actual = occ
+    for _ in range(24):
+        try:
+            nombre = str(actual.Name)
+        except Exception:
+            nombre = ""
+        if (
+            _es_ensamble_occurrence(actual)
+            and _es_contenedor_cara_otc(nombre, etiqueta_u)
+            and not _es_shell_o_tanque_otc(nombre)
+        ):
+            return actual
+        try:
+            padre = actual.ParentOccurrence
+        except Exception:
+            padre = None
+        if padre is None:
+            break
+        actual = padre
+
+    # 2) TOP genérico (familias sin código OTC estricto).
+    if etiqueta_u == "TOP":
+        if _es_ensamble_occurrence(occ) and not _es_partido_nesting(occ):
+            if _cantidad_hojas_occurrence(occ) >= 2:
+                return occ
+        actual = occ
+        elegido = occ
+        for _ in range(16):
+            try:
+                padre = actual.ParentOccurrence
+            except Exception:
+                padre = None
+            if padre is None:
+                break
+            elegido = padre
+            if _es_shell_o_tanque_otc(str(getattr(padre, "Name", ""))):
+                return elegido if elegido is not padre else actual
+            if (
+                _es_ensamble_occurrence(padre)
+                and not _es_partido_nesting(padre)
+                and _cantidad_hojas_occurrence(padre) >= 2
+            ):
+                return padre
+            actual = padre
+        return elegido
+
+    # 3) Fallback SEGM/BASE: subir pasando nesteo; parar ante multi-cara.
+    pared = _pared_nesting_desde_occurrence(occ)
+    actual = pared if pared is not None else occ
+    elegido = actual
+    for _ in range(16):
+        try:
+            padre = actual.ParentOccurrence
+        except Exception:
+            padre = None
+        if padre is None:
+            break
+        if _es_contenedor_multi_cara(padre) or _es_shell_o_tanque_otc(
+            str(getattr(padre, "Name", ""))
+        ):
+            return elegido
+        elegido = padre
+        actual = padre
+    return elegido
+
+
+def _segmento_desde_pick(ensamble, pick, etiqueta_fallback=""):
+    etiqueta = str(pick.get("etiqueta") or etiqueta_fallback or "").upper()
+    occ = _buscar_occurrence_por_nombre(ensamble, pick.get("occ_name"))
+    contenedor = (
+        _contenedor_desde_occurrence(occ, etiqueta) if occ is not None else None
+    )
+    pared_nesting = (
+        _pared_nesting_desde_occurrence(occ) if occ is not None else None
+    )
+    if contenedor is None:
+        try:
+            punto = _mm_a_cm_punto(pick["punto_mm"])
+            mejor = None
+            mejor_dist = None
+            for i in range(1, ensamble.ComponentDefinition.Occurrences.Count + 1):
+                cand = ensamble.ComponentDefinition.Occurrences.Item(i)
+                centro = _centroide_occurrence(cand)
+                if centro is None:
+                    continue
+                dist = (
+                    (centro[0] - punto[0]) ** 2
+                    + (centro[1] - punto[1]) ** 2
+                    + (centro[2] - punto[2]) ** 2
+                )
+                if mejor_dist is None or dist < mejor_dist:
+                    mejor_dist = dist
+                    mejor = cand
+            contenedor = mejor
+            occ = mejor
+        except Exception:
+            pass
+
+    if etiqueta == "TOP" and contenedor is not None:
+        contenedor = _preferir_contenedor_tapa(ensamble, contenedor)
+
+    # Si solo resolvimos la placa partida, enriquecer con hermanos de la misma
+    # cara bajo el padre (segunda capa sin top cover), sin subir al multi-cara.
+    piezas = _piezas_desde_occurrence(contenedor) if contenedor is not None else set()
+    if (
+        contenedor is not None
+        and pared_nesting is not None
+        and _es_partido_nesting(contenedor)
+        and etiqueta.startswith("SEGM")
+    ):
+        try:
+            padre = contenedor.ParentOccurrence
+        except Exception:
+            padre = None
+        if padre is not None and not _es_contenedor_multi_cara(padre):
+            piezas.update(_piezas_desde_occurrence(padre))
+            contenedor = padre
+
+    ensamble_seg = ensamble
+    try:
+        if contenedor is not None and _es_ensamble_occurrence(contenedor):
+            ensamble_seg = _como_ensamble(contenedor.Definition.Document)
+    except Exception:
+        ensamble_seg = ensamble
+
+    paredes_base = None
+    if pared_nesting is not None:
+        paredes_base = str(pared_nesting.Name).split(":")[0].strip()
+    elif occ is not None:
+        bm = _base_mitad_nesting(str(occ.Name))
+        paredes_base = bm or str(occ.Name).split(":")[0].strip()
+
+    vertices_cm = [
+        _mm_a_cm_punto(v) for v in (pick.get("vertices_mm") or [])
+    ]
+    normal = tuple(float(x) for x in (pick.get("normal") or (0, 0, 1)))
+    normal = _norm(normal)
+    nombre = etiqueta or (
+        str(contenedor.Name).split(":")[0] if contenedor is not None else "?"
+    )
+    return {
+        "nombre": nombre,
+        "piezas": piezas,
+        "occurrence": contenedor if contenedor is not None else occ,
+        "pared_occurrence": pared_nesting,
+        "pared_base": paredes_base,
+        "ensamble_segmento": ensamble_seg,
+        "centroide": _centroide_occurrence(contenedor or occ),
+        "normal": normal,
+        "vertices_cm": vertices_cm,
+        "punto_cm": _mm_a_cm_punto(pick["punto_mm"]) if pick.get("punto_mm") else None,
+        "origen_deteccion": "seleccion_manual",
+    }
+
+
+def _preferir_contenedor_tapa(ensamble, contenedor):
+    """Si el pick de TOP es una placa, subir al subensamble de tapa si existe."""
+    if contenedor is None:
+        return None
+    if _es_ensamble_occurrence(contenedor) and _cantidad_hojas_occurrence(contenedor) >= 2:
+        return contenedor
+    raiz = _occurrence_raiz(contenedor)
+    if raiz is not None and _es_nombre_tapa(str(raiz.Name)):
+        return raiz
+    # Buscar hermano/raíz con nombre de tapa cerca del contenedor.
+    try:
+        for i in range(1, ensamble.ComponentDefinition.Occurrences.Count + 1):
+            cand = ensamble.ComponentDefinition.Occurrences.Item(i)
+            if not _es_nombre_tapa(str(cand.Name)):
+                continue
+            if _es_ensamble_occurrence(cand) or _cantidad_hojas_occurrence(cand) >= 1:
+                return cand
+    except Exception:
+        pass
+    return raiz if raiz is not None else contenedor
+
+
+def construir_mapa_piezas_desde_seleccion(ensamble, seleccion):
+    """
+    Construye ``{SEGM1..4|TOP|BASE: set(nombres)}`` a partir del JSON de picks.
+    También actualiza ``LAST_PIEZAS_POR_CARA``.
+    """
+    mapa = {}
+    top_seg = _segmento_desde_pick(ensamble, seleccion["top"], "TOP")
+    mapa["TOP"] = set(top_seg.get("piezas") or set())
+    for i, pick in enumerate(seleccion.get("segmentos") or [], start=1):
+        etiqueta = str(pick.get("etiqueta") or f"SEGM{i}").upper()
+        if not etiqueta.startswith("SEGM"):
+            etiqueta = f"SEGM{i}"
+        seg = _segmento_desde_pick(ensamble, pick, etiqueta)
+        mapa[etiqueta] = set(seg.get("piezas") or set())
+        log(
+            f"  Mapa {etiqueta}: {len(mapa[etiqueta])} nombres "
+            f"(occ={pick.get('occ_name', '')})"
+        )
+    if seleccion.get("base"):
+        base_seg = _segmento_desde_pick(ensamble, seleccion["base"], "BASE")
+        mapa["BASE"] = set(base_seg.get("piezas") or set())
+        log(
+            f"  Mapa BASE: {len(mapa['BASE'])} nombres "
+            f"(occ={seleccion['base'].get('occ_name', '')})"
+        )
+    log(f"  Mapa TOP: {len(mapa['TOP'])} nombres")
+    LAST_PIEZAS_POR_CARA.clear()
+    for cara, piezas in mapa.items():
+        LAST_PIEZAS_POR_CARA[cara] = set(piezas)
+    return mapa
+
+
+def _crear_caras_desde_seleccion(inv_app, plano, ensamble, seleccion):
+    """
+    Vistas SEGM1..4 + TOP + BASE a partir de la selección manual (JSON iLogic).
+    Con ``seleccion['solo']`` solo procesa esa cara (pruebas rápidas).
+    """
+    tg = inv_app.TransientGeometry
+    to = inv_app.TransientObjects
+    _eliminar_hojas_piezas_residuales(plano)
+    hoja_base = _elegir_hoja_base(plano)
+    _eliminar_hojas_anteriores(plano)
+
+    bbox_tanque = _bbox_ensamble(ensamble)
+    solo = str(seleccion.get("solo") or "").strip().upper()
+    if solo:
+        log(f"Modo prueba rápida: solo cara {solo}")
+
+    top_seg = _segmento_desde_pick(ensamble, seleccion["top"], "TOP")
+    cover = top_seg["normal"]
+    if _dot(cover, cover) < 0.5:
+        raise RuntimeError("Normal del TOP COVER inválida en la selección.")
+
+    mapa = {}
+    for i, pick in enumerate(seleccion.get("segmentos") or [], start=1):
+        etiqueta = str(pick.get("etiqueta") or f"SEGM{i}").upper()
+        if not etiqueta.startswith("SEGM"):
+            etiqueta = f"SEGM{i}"
+        mapa[etiqueta] = _segmento_desde_pick(ensamble, pick, etiqueta)
+        log(
+            f"  {etiqueta} <- {mapa[etiqueta].get('occurrence') and str(mapa[etiqueta]['occurrence'].Name).split(':')[0]} "
+            f"(occ={pick.get('occ_name', '')}, "
+            f"piezas={len(mapa[etiqueta]['piezas'])}, "
+            f"pared={mapa[etiqueta].get('pared_base') or '-'})"
+        )
+
+    mapa["TOP"] = top_seg
+    log(
+        f"  TOP <- {top_seg.get('occurrence') and str(top_seg['occurrence'].Name).split(':')[0]} "
+        f"(occ={seleccion['top'].get('occ_name', '')}, "
+        f"piezas={len(top_seg['piezas'])})"
+    )
+
+    if seleccion.get("base"):
+        base_seg = _segmento_desde_pick(ensamble, seleccion["base"], "BASE")
+        mapa["BASE"] = base_seg
+        log(
+            f"  BASE <- {base_seg.get('occurrence') and str(base_seg['occurrence'].Name).split(':')[0]} "
+            f"(occ={seleccion['base'].get('occ_name', '')}, "
+            f"piezas={len(base_seg['piezas'])})"
+        )
+
+    LAST_PIEZAS_POR_CARA.clear()
+    for etiqueta, seg in mapa.items():
+        LAST_PIEZAS_POR_CARA[etiqueta] = set(seg.get("piezas", set()))
+
+    # Up de paredes = tapa; para TOP el "arriba de foto" = normal SEGM1 (o la SEGM del solo).
+    up_pared = cover
+    if "SEGM1" in mapa:
+        face_ref = mapa["SEGM1"]["normal"]
+    else:
+        face_ref = None
+        for key in ("SEGM2", "SEGM3", "SEGM4"):
+            if key in mapa:
+                face_ref = mapa[key]["normal"]
+                break
+        if face_ref is None:
+            face_ref = _norm(_cross(cover, (1.0, 0.0, 0.0)))
+            if _dot(face_ref, face_ref) < 0.5:
+                face_ref = _norm(_cross(cover, (0.0, 0.0, 1.0)))
+    right_ref = _norm(_cross(cover, face_ref))
+    if _dot(right_ref, right_ref) < 0.5:
+        right_ref = _norm(_cross(face_ref, cover))
+
+    orden = ["SEGM1", "SEGM2", "SEGM3", "SEGM4", "TOP", "BASE"]
+    if solo:
+        if solo not in orden:
+            raise RuntimeError(f"Cara --solo no reconocida: {solo}")
+        orden = [solo]
+    rutas_segmentos = {
+        _ruta_occurrence(seg["occurrence"])
+        for etiqueta, seg in mapa.items()
+        if etiqueta.startswith("SEGM") and seg.get("occurrence") is not None
+    }
+    rutas_excluidas = set(rutas_segmentos)
+    for etiqueta in ("TOP", "BASE"):
+        seg = mapa.get(etiqueta)
+        if seg and seg.get("occurrence") is not None:
+            rutas_excluidas.add(_ruta_occurrence(seg["occurrence"]))
+
+    creadas = []
+    planes_cotas = {}
+    for nombre in orden:
+        seg = mapa.get(nombre)
+        if seg is None or seg.get("occurrence") is None:
+            if nombre == "BASE":
+                log("  BASE omitido: sin selección / sin ocurrencia")
+            else:
+                log(f"  {nombre} omitido: sin ocurrencia resuelta")
+            continue
+
+        nombre_hoja = PREFIJO_HOJA + nombre
+        log(f"Paso cara {nombre} (camara por seleccion manual)...")
+        catalogo = set(seg.get("piezas") or set())
+        nombre_seg = (
+            str(seg["occurrence"].Name).split(":")[0]
+            if seg.get("occurrence") is not None
+            else (seg.get("nombre") or nombre)
+        )
+        ocurrencia_segmento = seg["occurrence"]
+        ensamble_segmento = seg.get("ensamble_segmento") or ensamble
+        normal = seg["normal"]
+        vertices_cm = seg.get("vertices_cm") or []
+        base_pared = seg.get("pared_base")
+
+        if nombre == "TOP":
+            eye_dir = _tg_vec(tg, normal)
+            up_hint = _tg_vec(tg, face_ref)
+            cara_filtro = "TOP"
+            face_filtro = face_ref
+            right_filtro = right_ref
+        elif nombre == "BASE":
+            eye_dir = _tg_vec(tg, normal)
+            up_hint = _tg_vec(tg, face_ref)
+            cara_filtro = "TOP"  # plano horizontal: mismo filtro físico
+            face_filtro = face_ref
+            right_filtro = right_ref
+        else:
+            eye_dir = _tg_vec(tg, normal)
+            up_hint = _tg_vec(tg, up_pared)
+            cara_filtro = "FRONT"
+            face_filtro = normal
+            right_filtro = _norm(_cross(up_pared, normal))
+            if _dot(right_filtro, right_filtro) < 0.5:
+                right_filtro = right_ref
+
+        try:
+            hoja = _crear_hoja(plano, hoja_base, nombre_hoja)
+            hoja.Activate()
+            centro = tg.CreatePoint2d(hoja.Width * 0.58, hoja.Height * 0.55)
+            # Si el IAM del segmento ya trae las capas (A01, etc.), NO meter
+            # extras de raíz: ahí entraba la BASE y otras ramas ajenas.
+            n_hojas_seg = _cantidad_hojas_occurrence(ocurrencia_segmento)
+            extras_raiz = []
+            if n_hojas_seg < 8:
+                extras_raiz = _ocurrencias_raiz_en_cara(
+                    ensamble,
+                    ocurrencia_segmento,
+                    cara_filtro,
+                    face_filtro,
+                    right_filtro,
+                    bbox_tanque,
+                    rutas_segmentos=rutas_excluidas,
+                    cover=cover,
+                )
+                # Nunca mezclar piezas de otra cara ya mapeada.
+                filtrados = []
+                for occ_extra in extras_raiz:
+                    ruta_ex = _ruta_occurrence(occ_extra)
+                    if any(
+                        _ruta_es_descendiente(ruta_ex, ruta_otra)
+                        for ruta_otra in rutas_excluidas
+                        if ruta_otra != _ruta_occurrence(ocurrencia_segmento)
+                    ):
+                        continue
+                    filtrados.append(occ_extra)
+                extras_raiz = filtrados
+                for occ_extra in extras_raiz:
+                    catalogo.update(_piezas_desde_occurrence(occ_extra))
+            else:
+                log(
+                    f"    Catálogo del segmento/IAM: {n_hojas_seg} hojas "
+                    "(sin extras de raíz; evita mezclar BASE/otras caras)"
+                )
+            LAST_PIEZAS_POR_CARA[nombre] = set(catalogo)
+            if extras_raiz:
+                log(
+                    "    Accesorios externos incluidos: "
+                    + ", ".join(str(occ.Name) for occ in extras_raiz[:12])
+                )
+            cam = _crear_camara(
+                ensamble,
+                tg,
+                to,
+                bbox_tanque,
+                eye_dir,
+                up_hint,
+            )
+            log(f"    Fuente de vista: tanque + {ensamble_segmento.DisplayName}")
+            vista = hoja.DrawingViews.AddBaseView(
+                ensamble,
+                centro,
+                1.0,
+                K_ARBITRARY,
+                ESTILO_HLR,
+                "",
+                cam,
+            )
+            vista.Name = "TANQUE_" + nombre
+            plano.Update()
+            visibles = _aplicar_visibilidad_vista_cara(
+                vista,
+                ensamble,
+                ocurrencia_segmento,
+                extras_raiz,
+            )
+            log(f"    Vista aislada: {visibles} ocurrencias visibles")
+            plano.Update()
+            _enderezar_vista_en_hoja(vista)
+            plano.Update()
+            _ajustar_vista(vista, hoja, tg)
+            plano.Update()
+            _limpiar_bolitas(hoja, vista)
+
+            plan_cotas = _acotar_vista(
+                hoja,
+                vista,
+                tg,
+                inv_app,
+                cara_filtro,
+                face_filtro,
+                right_filtro,
+                bbox_tanque,
+                catalogo,
+                nombre_seg,
+                analizar_solo_segmento=True,
+                origen_vertices_cm=vertices_cm,
+                base_pared=base_pared,
+            )
+            if plan_cotas is None:
+                raise RuntimeError("No se pudieron preparar las referencias de la cara.")
+            componentes = plan_cotas["piezas_superficie"]
+            n_grupos = len(plan_cotas.get("grupos") or [])
+            _limpiar_bolitas(hoja, vista)
+            try:
+                if vista.HasOriginIndicator:
+                    vista.OriginIndicator.Visible = False
+            except Exception:
+                pass
+            plano.Update()
+            log(
+                f"  OK {nombre_hoja}: vista lista "
+                f"({componentes} piezas, {n_grupos} grupos)"
+            )
+            creadas.append(hoja)
+            planes_cotas[nombre] = {
+                "hoja": hoja,
+                "vista": vista,
+                **plan_cotas,
+            }
+            _actualizar_inventor(inv_app)
+            time.sleep(0.25)
+        except Exception as error:
+            log(f"  ERROR en {nombre}: {error}")
+            log(traceback.format_exc())
+
+    return creadas, planes_cotas
+
+
 def _crear_caras(inv_app, plano, ensamble):
     tg = inv_app.TransientGeometry
     to = inv_app.TransientObjects
@@ -4649,6 +6232,7 @@ def _crear_caras(inv_app, plano, ensamble):
             if plan_cotas is None:
                 raise RuntimeError("No se pudieron preparar las referencias de la cara.")
             componentes = plan_cotas["piezas_superficie"]
+            n_grupos = len(plan_cotas.get("grupos") or [])
             cotas = len(plan_cotas["posiciones_x"]) + len(plan_cotas["posiciones_y"])
             _limpiar_bolitas(hoja, vista)
             try:
@@ -4665,7 +6249,7 @@ def _crear_caras(inv_app, plano, ensamble):
                 pass
             log(
                 f"  OK {nombre_hoja}: vista lista "
-                f"({componentes} piezas, {cotas} referencias)"
+                f"({componentes} piezas, {n_grupos} grupos, {cotas} refs)"
             )
             creadas.append(hoja)
             planes_cotas[nombre] = {
@@ -4930,17 +6514,98 @@ def _etiqueta_referencia(eje, referencia):
 
 
 def _nombre_archivo_referencia(indice, eje, referencia):
+    """Compat legado; el export de producción usa `_nombre_archivo_grupo`."""
     pieza = _nombre_final_componente(referencia.get("pieza_id", "PIEZA"))
     pieza = _limpiar_nombre_archivo(pieza)[:70] or "PIEZA"
-    sufijo_typ = "_TYP" if referencia.get("typ") else ""
     return (
-        f"{indice:03d}_{_etiqueta_referencia(eje, referencia)}"
-        f"{sufijo_typ}_{pieza}.jpg"
+        f"{indice:03d}_{_etiqueta_referencia(eje, referencia)}_{pieza}.jpg"
     )
 
 
+def _bbox_foto_grupo(vista, posiciones_x, posiciones_y, origen_x, origen_y):
+    """Caja de recorte para una foto con todas las cotas X+Y de un grupo."""
+    minx = float(vista.Left)
+    maxx = minx + float(vista.Width)
+    maxy = float(vista.Top)
+    miny = maxy - float(vista.Height)
+
+    paso_x = _paso_stack_cotas(len(posiciones_x))
+    paso_y = _paso_stack_cotas(len(posiciones_y))
+    n_y = len(posiciones_y)
+    res = _calcular_reservas_grupo(posiciones_x, posiciones_y)
+
+    base_abajo = miny - OFFSET_COTA
+    base_izq = minx - OFFSET_COTA
+    base_der = maxx + OFFSET_COTA
+    puntos = [(origen_x, origen_y)]
+
+    for indice, referencia in enumerate(posiciones_x):
+        rep = (referencia.get("miembros") or [referencia])[0]
+        x = float(referencia["valor"])
+        y_dim = base_abajo - indice * paso_x
+        x_geo, y_geo = _punto_geometria_acotada(rep, "X")
+        dy_txt = 0.14 if (indice % 2 == 0) else (paso_x * 0.42)
+        puntos.extend([
+            (origen_x, y_dim),
+            (x, y_dim),
+            (x_geo, y_geo),
+            ((origen_x + x) * 0.5, y_dim + dy_txt + 0.45),
+        ])
+        for miembro in (referencia.get("miembros") or [])[1:]:
+            mx, my = _punto_geometria_acotada(miembro, "X")
+            puntos.append((mx, my))
+
+    for indice, referencia in enumerate(posiciones_y):
+        rep = (referencia.get("miembros") or [referencia])[0]
+        y = float(referencia["valor"])
+        x_dim = _nivel_cota_y(indice, n_y, base_izq, base_der, paso_y)
+        x_geo, y_geo = _punto_geometria_acotada(rep, "Y")
+        dx_txt = 0.14 if (indice % 2 == 0) else (paso_y * 0.42)
+        if indice >= n_y // 2 and n_y > UMBRAL_COTAS_Y_DOBLE_CARA:
+            dx_txt = -(0.14 + 1.2)
+        puntos.extend([
+            (x_dim, origen_y),
+            (x_dim, y),
+            (x_geo, y_geo),
+            (x_dim + dx_txt, (origen_y + y) * 0.5),
+        ])
+        for miembro in (referencia.get("miembros") or [])[1:]:
+            mx, my = _punto_geometria_acotada(miembro, "Y")
+            puntos.append((mx, my))
+
+    for x, y in puntos:
+        minx = min(minx, float(x))
+        maxx = max(maxx, float(x))
+        miny = min(miny, float(y))
+        maxy = max(maxy, float(y))
+
+    pad_izq = res["reserva_izq"] * 0.15 + MARGEN_TEXTO_COTA_CM
+    pad_der = res["reserva_der"] * 0.15 + MARGEN_DERECHO_FOTO_CM
+    pad_inf = res["reserva_inf"] * 0.12 + MARGEN_TEXTO_COTA_CM
+    return [
+        minx - pad_izq,
+        maxx + pad_der,
+        miny - pad_inf,
+        maxy + 0.45,
+    ]
+
+
+def _nombre_archivo_grupo(indice, grupo):
+    pieza = _limpiar_nombre_archivo(grupo.get("clave", "PIEZA"))[:70] or "PIEZA"
+    qty = int(grupo.get("qty") or 1)
+    qty_total = int(grupo.get("qty_total") or qty)
+    lamina = int(grupo.get("lamina") or 1)
+    laminas_total = int(grupo.get("laminas_total") or 1)
+    if laminas_total > 1:
+        return (
+            f"{indice:03d}_p{lamina}of{laminas_total}_"
+            f"QTY{qty}of{qty_total}_{pieza}.jpg"
+        )
+    return f"{indice:03d}_QTY{qty}_{pieza}.jpg"
+
+
 def _limpiar_exportaciones_cara(carpeta):
-    """La carpeta es exclusiva de fotos por referencia generadas por esta regla."""
+    """La carpeta es exclusiva de fotos por grupo generadas por esta regla."""
     os.makedirs(carpeta, exist_ok=True)
     for nombre in os.listdir(carpeta):
         if not nombre.lower().endswith(".jpg"):
@@ -4953,7 +6618,7 @@ def _limpiar_exportaciones_cara(carpeta):
 
 def _exportar_caras_jpg(inv_app, plano, ensamble, planes_cotas):
     if not planes_cotas:
-        log("ERROR: No hay referencias de cotas para exportar.")
+        log("ERROR: No hay grupos de cotas para exportar.")
         return 0, 0, ""
     if not str(plano.FullFileName or ""):
         log("ERROR: Guarda el machote antes de exportar.")
@@ -4967,24 +6632,28 @@ def _exportar_caras_jpg(inv_app, plano, ensamble, planes_cotas):
     esperadas = 0
     tg = inv_app.TransientGeometry
 
-    log("Exportando una fotografía JPG por referencia dimensional...")
-    log("  Modo: encuadre estable por cara (sin reframe HLR por foto)")
+    log("Exportando una fotografía JPG por tipo de pieza (X+Y juntos)...")
+    log("  Modo: encuadre estable por cara (1 Update; sin reframe por JPG)")
     log(f"  Carpeta: {carpeta_raiz}")
 
     for cara, plan in planes_cotas.items():
         hoja = plan["hoja"]
         vista = plan["vista"]
-        referencias = [
-            ("X", referencia) for referencia in plan["posiciones_x"]
-        ] + [
-            ("Y", referencia) for referencia in plan["posiciones_y"]
-        ]
-        referencias.sort(key=lambda item: (item[0], item[1]["valor"]))
-        esperadas += len(referencias)
+        grupos = list(plan.get("grupos") or [])
+        if not grupos and (plan.get("posiciones_x") or plan.get("posiciones_y")):
+            grupos = [
+                {
+                    "clave": "TODAS",
+                    "qty": 1,
+                    "posiciones_x": list(plan.get("posiciones_x") or []),
+                    "posiciones_y": list(plan.get("posiciones_y") or []),
+                }
+            ]
+        esperadas += len(grupos)
         carpeta_cara = os.path.join(carpeta_raiz, cara)
         _limpiar_exportaciones_cara(carpeta_cara)
         estado = _estado_base_vista(vista)
-        log(f"  {cara}: {len(referencias)} fotos individuales")
+        log(f"  {cara}: {len(grupos)} fotos por tipo")
         inicio_cara = time.perf_counter()
 
         try:
@@ -4993,58 +6662,92 @@ def _exportar_caras_jpg(inv_app, plano, ensamble, planes_cotas):
             pass
         _borrar_cotas_hoja(hoja)
         _borrar_sketches_cotas(hoja)
-        _preparar_encuadre_estable_cara(plano, hoja, vista, tg, estado)
+        _preparar_encuadre_estable_cara(plano, hoja, vista, tg, estado, grupos)
+
+        origen_x = float(plan["origen_x"])
+        origen_y = float(plan["origen_y"])
         try:
-            referencias_foto, origen_x, origen_y = _refrescar_referencias_exportacion(
-                referencias, plan["dato_panel"], vista, tg
+            # Refrescar origen (0,0) desde la placa madre con la nueva escala.
+            envolvente_panel = _envolvente_visible_refrescada(
+                plan["dato_panel"], vista, tg
+            )
+            if envolvente_panel is not None:
+                origen_x = float(envolvente_panel["minx"])
+                origen_y = float(envolvente_panel["miny"])
+
+            # Refrescar CADA posición de CADA grupo directamente (no vía mapa
+            # indirecto, que falla cuando _agrupar_referencias_typ elige un
+            # representativo diferente en los subgrupos de láminas).
+            refs_ok = 0
+            refs_fail = 0
+            for grupo in grupos:
+                for eje, lista in (
+                    ("X", grupo["posiciones_x"]),
+                    ("Y", grupo["posiciones_y"]),
+                ):
+                    origen = origen_x if eje == "X" else origen_y
+                    for ref in lista:
+                        # Refrescar el representativo.
+                        env = _envolvente_visible_refrescada(
+                            ref.get("dato"), vista, tg
+                        )
+                        if env is None:
+                            refs_fail += 1
+                            continue
+                        ref["dato"] = env
+                        ref["valor"] = _valor_referencia_desde_envolvente(
+                            eje, ref["lado"], env
+                        )
+                        # Refrescar cada miembro TYP también.
+                        for m in ref.get("miembros") or []:
+                            menv = _envolvente_visible_refrescada(
+                                m.get("dato"), vista, tg
+                            )
+                            if menv is not None:
+                                m["dato"] = menv
+                                m["valor"] = _valor_referencia_desde_envolvente(
+                                    eje, m["lado"], menv
+                                )
+                        refs_ok += 1
+            log(
+                f"  Refresco post-encuadre {cara}: "
+                f"origen=({origen_x:.3f},{origen_y:.3f}) "
+                f"refs={refs_ok} fallos={refs_fail}"
             )
         except Exception as error:
-            log(f"  ERROR encuadre/releída {cara}: {error}")
-            try:
-                vista.Scale = estado["scale"]
-                vista.Position = tg.CreatePoint2d(estado["x"], estado["y"])
-                plano.Update()
-            except Exception:
-                pass
-            continue
+            log(f"  AVISO releída {cara}: {error}")
 
-        for indice, (eje, referencia_foto) in enumerate(referencias_foto, start=1):
+        for indice, grupo in enumerate(grupos, start=1):
             temporal = os.path.join(carpeta_cara, f"_tmp_{indice:03d}.jpg")
             salida = os.path.join(
                 carpeta_cara,
-                _nombre_archivo_referencia(indice, eje, referencia_foto),
+                _nombre_archivo_grupo(indice, grupo),
             )
             try:
                 _borrar_sketches_cotas(hoja)
-                if eje == "X":
-                    creadas, fallos = _dibujar_cotas_hv_desde_origen(
-                        hoja,
-                        vista,
-                        tg,
-                        inv_app,
-                        [referencia_foto],
-                        [],
-                        origen_x,
-                        origen_y,
-                    )
-                else:
-                    creadas, fallos = _dibujar_cotas_hv_desde_origen(
-                        hoja,
-                        vista,
-                        tg,
-                        inv_app,
-                        [],
-                        [referencia_foto],
-                        origen_x,
-                        origen_y,
-                    )
-                if creadas != 1 or fallos:
-                    raise RuntimeError("No se pudo dibujar la única cota de la foto.")
-
-                bbox_foto = _bbox_foto_referencia(
+                creadas, fallos = _dibujar_cotas_hv_desde_origen(
+                    hoja,
                     vista,
-                    eje,
-                    referencia_foto,
+                    tg,
+                    inv_app,
+                    grupo.get("posiciones_x") or [],
+                    grupo.get("posiciones_y") or [],
+                    origen_x,
+                    origen_y,
+                )
+                esperadas_grupo = len(grupo.get("posiciones_x") or []) + len(
+                    grupo.get("posiciones_y") or []
+                )
+                if creadas < 1:
+                    raise RuntimeError(
+                        f"Cotas incompletas del grupo "
+                        f"(ok={creadas}/{esperadas_grupo}, fallos={fallos})."
+                    )
+
+                bbox_foto = _bbox_foto_grupo(
+                    vista,
+                    grupo.get("posiciones_x") or [],
+                    grupo.get("posiciones_y") or [],
                     origen_x,
                     origen_y,
                 )
@@ -5054,6 +6757,7 @@ def _exportar_caras_jpg(inv_app, plano, ensamble, planes_cotas):
                     ALTO_EXPORTACION,
                     white,
                 )
+                time.sleep(0.15)
                 _recortar_jpg_caras(
                     hoja,
                     temporal,
@@ -5062,16 +6766,16 @@ def _exportar_caras_jpg(inv_app, plano, ensamble, planes_cotas):
                     bbox_forzada=bbox_foto,
                 )
                 exportadas += 1
-                if indice == 1 or indice % 25 == 0:
+                if indice == 1 or indice % 10 == 0:
                     elapsed = max(0.001, time.perf_counter() - inicio_cara)
                     log(
-                        f"    {cara} progreso {indice}/{len(referencias_foto)} "
+                        f"    {cara} progreso {indice}/{len(grupos)} "
                         f"({exportadas} ok, {elapsed / indice:.2f} s/foto)"
                     )
             except Exception as error:
                 log(
                     f"  ERROR {cara} #{indice} "
-                    f"{_etiqueta_referencia(eje, referencia_foto)}: {error}"
+                    f"QTY{grupo.get('qty')}_{grupo.get('clave')}: {error}"
                 )
                 try:
                     if os.path.isfile(temporal):
@@ -5080,9 +6784,7 @@ def _exportar_caras_jpg(inv_app, plano, ensamble, planes_cotas):
                     pass
             finally:
                 _borrar_sketches_cotas(hoja)
-                # Respiro periódico: cada 40 fotos damos a Inventor tiempo
-                # para procesar su cola COM y evitar saturación (RPC crash).
-                if indice % 40 == 0:
+                if indice % 10 == 0:
                     try:
                         _actualizar_inventor(inv_app)
                     except Exception:
@@ -5098,14 +6800,14 @@ def _exportar_caras_jpg(inv_app, plano, ensamble, planes_cotas):
         elapsed_cara = max(0.001, time.perf_counter() - inicio_cara)
         log(
             f"  {cara} export terminado en {elapsed_cara:.1f}s "
-            f"({elapsed_cara / max(1, len(referencias_foto)):.2f} s/foto)"
+            f"({elapsed_cara / max(1, len(grupos)):.2f} s/foto)"
         )
 
     log(f"JPG exportados: {exportadas}/{esperadas}")
     return exportadas, esperadas, carpeta_raiz
 
 
-def ejecutar(gestionar_com=True):
+def ejecutar(gestionar_com=True, ruta_seleccion=None):
     if gestionar_com:
         pythoncom.CoInitialize()
 
@@ -5157,14 +6859,39 @@ def ejecutar(gestionar_com=True):
             pass
 
         log("Paso 1/2: Vistas de paredes + referencias reales desde (0,0)...")
-        creadas, planes_cotas = _crear_caras(inv_app, plano, ensamble)
+        modo_seleccion = False
+        solo_cara = None
+        if ruta_seleccion:
+            if not os.path.isfile(ruta_seleccion):
+                log(f"ERROR: No existe el JSON de selección: {ruta_seleccion}")
+                return False
+            log(f"Selección manual: {ruta_seleccion}")
+            seleccion = _cargar_seleccion_caras(ruta_seleccion)
+            solo_cli = _parse_solo(sys.argv[1:])
+            if solo_cli and not seleccion.get("solo"):
+                seleccion["solo"] = solo_cli
+            solo_cara = str(seleccion.get("solo") or "").upper() or None
+            if solo_cara:
+                log(f"Modo COTAS_POR_SEG: únicamente {solo_cara}")
+            creadas, planes_cotas = _crear_caras_desde_seleccion(
+                inv_app, plano, ensamble, seleccion
+            )
+            modo_seleccion = True
+        else:
+            log("Sin --seleccion: mapeo automático PQart (compat).")
+            creadas, planes_cotas = _crear_caras(inv_app, plano, ensamble)
 
-        # 4 paredes son obligatorias; TOP se suma como 5ta cara opcional.
-        # Aceptamos 4 (sin tapa detectada) o 5 (con tapa) como estados válidos.
-        if len(creadas) not in (4, 5):
+        if solo_cara:
+            if len(creadas) != 1:
+                log(
+                    f"ERROR: Modo solo {solo_cara}: se crearon {len(creadas)} "
+                    "hojas; se esperaba 1."
+                )
+                return False
+        elif len(creadas) not in (4, 5, 6):
             log(
-                f"ERROR: Se crearon {len(creadas)} hojas; se esperaban 4 "
-                f"(4 paredes) o 5 (4 paredes + tapa)."
+                f"ERROR: Se crearon {len(creadas)} hojas; se esperaban 4–6 "
+                f"(paredes ± TOP ± BASE)."
             )
             for i in range(1, plano.Sheets.Count + 1):
                 try:
@@ -5184,7 +6911,7 @@ def ejecutar(gestionar_com=True):
         except Exception as err:
             log(f"  AVISO al persistir mapa piezas/cara: {err}")
 
-        log("Paso 2/2: Exportando una fotografía por referencia...")
+        log("Paso 2/2: Exportando una fotografía por tipo de pieza...")
         exportadas, esperadas, carpeta = _exportar_caras_jpg(
             inv_app, plano, ensamble, planes_cotas
         )
@@ -5193,8 +6920,13 @@ def ejecutar(gestionar_com=True):
 
         log("")
         log("PROCESO COMPLETO:")
-        log(f"  1) {len(creadas)} caras del tanque (4 paredes + tapa si aplica)")
-        log("  2) Una cota desde (0,0) por JPG")
+        if solo_cara:
+            log(f"  1) Cara única {solo_cara} (COTAS_POR_SEG)")
+        elif modo_seleccion:
+            log("  1) Caras SEGM1..4 + TOP + BASE por selección manual")
+        else:
+            log(f"  1) {len(creadas)} caras del tanque (mapeo automático)")
+        log("  2) 1 JPG por tipo de pieza con cotas X+Y desde (0,0)")
         log(f"  3) {exportadas} JPG en: {carpeta}")
         log("  4) Machote limpiado para reutilizar")
         return True
@@ -5224,4 +6956,15 @@ def ejecutar(gestionar_com=True):
 
 
 if __name__ == "__main__":
-    sys.exit(0 if ejecutar() else 1)
+    ruta = _parse_ruta_seleccion(sys.argv[1:])
+    if not ruta:
+        # Invocado directo (COTAS_POR_SUBENSAMBLE): la selección es obligatoria.
+        # generador_tanque_completo importa ejecutar() sin argv y usa compat.
+        print(
+            "ERROR: Falta --seleccion <seleccion_caras.json>\n"
+            "Usa COTAS_POR_SUBENSAMBLE (6 caras) o COTAS_POR_SEG "
+            "(una cara: --solo SEGM1|…|TOP|BASE).",
+            flush=True,
+        )
+        sys.exit(1)
+    sys.exit(0 if ejecutar(ruta_seleccion=ruta) else 1)

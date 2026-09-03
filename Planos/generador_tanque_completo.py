@@ -32,7 +32,19 @@ from inventor_com import conectar_inventor
 
 
 CARPETA_PIEZAS_ACOTADAS = "PIEZAS_ACOTADAS"
-SUBCARPETAS_CARA_PIEZAS = ("FRONT", "BACK", "LEFT", "RIGHT", "TOP")
+SUBCARPETAS_CARA_PIEZAS = (
+    "SEGM1",
+    "SEGM2",
+    "SEGM3",
+    "SEGM4",
+    "TOP",
+    "BASE",
+    # Compat mapeo automático PQart (sin selección manual).
+    "FRONT",
+    "BACK",
+    "LEFT",
+    "RIGHT",
+)
 SUBCARPETA_OTROS_PIEZAS = "OTROS"
 
 # --- Clasificación por proceso (iProperty escrita por el iLogic Colorimetria).

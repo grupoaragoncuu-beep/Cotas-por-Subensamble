@@ -334,10 +334,10 @@ def crear_vistas_lote(
             
             tiene_guia_frente, v_guia_frente = obtener_vector_guia_frente(frente_face, v_frente, tg)
 
-            # Orientación LADO desde sólido doblado (chapa con flat pattern).
+            # Orientación LADO desde sólido doblado (perfil L/U en piso).
             lado_cx, lado_cy, lado_cz = cx, cy, cz
             lado_eye, lado_up = v_lado, v_frente
-            if use_flat_pattern:
+            if is_sm:
                 ori = _orientacion_lado_doblado(part_doc, tg, to, v_frente)
                 if ori:
                     lado_eye = ori["v_lado"]
@@ -403,7 +403,7 @@ def crear_vistas_lote(
                             px,
                             py,
                             cam,
-                            use_flat_pattern_view=use_flat_pattern,
+                            use_flat_pattern_view=False,
                         )
                 except Exception as ex1:
                     try:
@@ -454,56 +454,64 @@ def crear_vistas_lote(
 
 
 def preparar_geometria(part_doc, is_sm, to):
+    """
+    Prepara caras/cuerpo para orientar vistas.
+
+    Siempre usa el modelo DOBLADO (como en piso / soldadura).
+    Nunca llama Unfold ni mide sobre FlatPattern.
+    """
     use_flat_pattern = False
     cuerpo_medicion = None
     caras_a_medir = to.CreateObjectCollection()
-    
+
     try:
+        _asegurar_modelo_doblado(part_doc, is_sm)
+
+        cdef = part_doc.ComponentDefinition
         if is_sm:
             try:
-                sm_def = win32com.client.CastTo(part_doc.ComponentDefinition, "SheetMetalComponentDefinition")
-            except:
-                sm_def = part_doc.ComponentDefinition
-            
-            if sm_def is None: return None
-            
-            if not sm_def.HasFlatPattern:
-                try:
-                    sm_def.Unfold()
-                except:
-                    pass
-                    
-            if sm_def.HasFlatPattern:
-                use_flat_pattern = True
-                try:
-                    cuerpo_medicion = sm_def.FlatPattern.SurfaceBodies.Item(1)
-                except:
-                    try:
-                        cuerpo_medicion = sm_def.FlatPattern.Body
-                    except:
-                        pass
-                if cuerpo_medicion is not None:
-                    for i in range(1, cuerpo_medicion.Faces.Count + 1):
-                        caras_a_medir.Add(cuerpo_medicion.Faces.Item(i))
-                        
-            if caras_a_medir.Count == 0:
-                for i in range(1, sm_def.SurfaceBodies.Count + 1):
-                    body = sm_def.SurfaceBodies.Item(i)
-                    if cuerpo_medicion is None: cuerpo_medicion = body
-                    for j in range(1, body.Faces.Count + 1):
-                        caras_a_medir.Add(body.Faces.Item(j))
-        else:
-            for i in range(1, part_doc.ComponentDefinition.SurfaceBodies.Count + 1):
-                body = part_doc.ComponentDefinition.SurfaceBodies.Item(i)
-                if cuerpo_medicion is None: cuerpo_medicion = body
-                for j in range(1, body.Faces.Count + 1):
-                    caras_a_medir.Add(body.Faces.Item(j))
-                    
+                cdef = win32com.client.CastTo(
+                    part_doc.ComponentDefinition, "SheetMetalComponentDefinition"
+                )
+            except Exception:
+                cdef = part_doc.ComponentDefinition
+
+        if cdef is None:
+            return None
+
+        for i in range(1, cdef.SurfaceBodies.Count + 1):
+            body = cdef.SurfaceBodies.Item(i)
+            if cuerpo_medicion is None:
+                cuerpo_medicion = body
+            for j in range(1, body.Faces.Count + 1):
+                caras_a_medir.Add(body.Faces.Item(j))
+
         if caras_a_medir.Count > 0:
             return (use_flat_pattern, caras_a_medir, cuerpo_medicion)
         return None
-    except:
+    except Exception:
         return None
+
+
+def _asegurar_modelo_doblado(part_doc, is_sm):
+    """Sale de Flat Pattern edit si una corrida previa dejó la chapa desplegada."""
+    if not is_sm:
+        return
+    try:
+        sm_def = win32com.client.CastTo(
+            part_doc.ComponentDefinition, "SheetMetalComponentDefinition"
+        )
+    except Exception:
+        return
+    try:
+        if not sm_def.HasFlatPattern:
+            return
+        try:
+            sm_def.FlatPattern.Exit()
+        except Exception:
+            pass
+    except Exception:
+        pass
 
 
 def _caras_y_cuerpo_doblado(part_doc, to):
@@ -621,9 +629,16 @@ def _orientacion_lado_doblado(part_doc, tg, to, v_frente_fallback):
 
 
 def _crear_vista_base(new_sheet, part_doc, tg, to, px, py, cam, use_flat_pattern_view):
+    """
+    Crea vista base. Las cotas de piso/soldadura siempre usan el modelo
+    doblado: SheetMetalFoldedModel=True (nunca flat pattern).
+    """
     options = to.CreateNameValueMap()
-    if use_flat_pattern_view:
-        options.Add("SheetMetalFoldedModel", False)
+    # Ignorar use_flat_pattern_view: nunca desplegar chapa en este flujo.
+    try:
+        options.Add("SheetMetalFoldedModel", True)
+    except Exception:
+        pass
     return new_sheet.DrawingViews.AddBaseView(
         part_doc,
         tg.CreatePoint2d(px, py),
