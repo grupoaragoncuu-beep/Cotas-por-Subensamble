@@ -335,9 +335,15 @@ def crear_vistas_lote(
             tiene_guia_frente, v_guia_frente = obtener_vector_guia_frente(frente_face, v_frente, tg)
 
             # Orientación LADO desde sólido doblado (perfil L/U en piso).
+            # También para JACKING PADS aunque no sean Sheet Metal: si no,
+            # LADO mira la cara plana y nunca se ve la escuadra (THK 0.375).
             lado_cx, lado_cy, lado_cz = cx, cy, cz
             lado_eye, lado_up = v_lado, v_frente
-            if is_sm:
+            nombre_u = str(part_name or "").upper()
+            forzar_perfil_l = is_sm or (
+                "JACKING" in nombre_u and "PAD" in nombre_u and "SOLERA" not in nombre_u
+            )
+            if forzar_perfil_l:
                 ori = _orientacion_lado_doblado(part_doc, tg, to, v_frente)
                 if ori:
                     lado_eye = ori["v_lado"]

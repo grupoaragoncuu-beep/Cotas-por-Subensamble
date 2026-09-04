@@ -904,12 +904,31 @@ def _hoja_tiene_cota_asociativa(hoja):
         return False
 
 
+def _hoja_tiene_nota_thk(hoja):
+    """True si hay GeneralNote con texto THK=... (fallback de modelo)."""
+    try:
+        notes = hoja.DrawingNotes.GeneralNotes
+        for i in range(1, int(notes.Count) + 1):
+            try:
+                txt = str(notes.Item(i).Text or "").upper()
+            except Exception:
+                continue
+            if "THK" in txt and any(ch.isdigit() for ch in txt):
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def _hoja_exportable(hoja, nombre_hoja):
     """
     Gate anti-JPG vacío / solo-nota.
 
     Exige geometría 2D en la vista y al menos una cota asociativa para
     hojas de cotas (LARGO/ANCHO/THK/ALTO/PATA/DIÁMETRO*).
+
+    Excepción: hojas ``_THK`` pueden exportarse con nota ``THK = …``
+    cuando el espesor solo existe en el modelo (Parking / Tierra cara).
     """
     nombre_up = str(nombre_hoja).upper()
     try:
@@ -942,6 +961,8 @@ def _hoja_exportable(hoja, nombre_hoja):
         )
     )
     if es_cota and not _hoja_tiene_cota_asociativa(hoja):
+        if "_THK" in nombre_up and _hoja_tiene_nota_thk(hoja):
+            return True, ""
         return False, "sin GeneralDimension (posible solo-nota)"
     return True, ""
 

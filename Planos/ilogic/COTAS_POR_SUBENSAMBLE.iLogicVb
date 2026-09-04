@@ -9,7 +9,10 @@
 ' 2) Guarda seleccion_caras.json con normales, origen y ocurrencias.
 ' 3) Lanza generador_caras_tanque.py --seleccion <json>
 '
-' Salida: COTAS_POR_REFERENCIA/SEGM1..4/TOP/BASE con 1 JPG por tipo de pieza.
+' Salida: COTAS_POR_REFERENCIA/SEGM1..4/TOP/BASE
+'   - 1 JPG por cota (Xmin/Ymin de inicio; Xcentro/Ycentro en barrenos)
+'   - Piezas no circulares: solo cotas de INICIO (no Xmax/Ymax)
+'   - Circulares/barrenos: 2 capturas (X e Y al inicio de la circunferencia)
 '
 ' Rutas: NO hardcodear C:\Proyectos\...  Usar COTAS_ABIGAIL_DIR /
 ' config_planos.txt / ExternalRuleDirectories (instalador).

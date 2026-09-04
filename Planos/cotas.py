@@ -15,14 +15,29 @@ TOL_EXTREMO_RATIO = 0.01
 DOMINANCIA_RECTA = 2.5
 OFFSET_COTA = 1.5
 
-FACTOR_VALIDACION_MIN = 0.85
-FACTOR_VALIDACION_MAX = 1.15
+FACTOR_VALIDACION_MIN = 0.97
+FACTOR_VALIDACION_MAX = 1.05
 # Portable: Planos/.runtime/ (antes C:\Temp\...)
 RUTA_HOJAS_DIAMETRO = ruta_hojas_diametro()
 
+# PointIntentEnum (Inventor) — cuadrantes de círculo/arco.
+# CreateGeometryIntent(arco) o Point2d en arco → CENTRO (bug Jacking Pad).
+_CIRCULAR_POINT_INTENT = {
+    "izq": "kCircularLeftPointIntent",
+    "der": "kCircularRightPointIntent",
+    "sup": "kCircularTopPointIntent",
+    "inf": "kCircularBottomPointIntent",
+}
+_CIRCULAR_POINT_INTENT_FALLBACK = {
+    "izq": 57862,
+    "der": 57863,
+    "sup": 57864,
+    "inf": 57865,
+}
 
-# Log detallado opt-in para diagnosticar por qué una hoja termina sin cota.
-_COTAS_LOG = os.environ.get("COTAS_LOG", "").strip().lower() in ("1", "true", "yes", "on")
+_COTAS_LOG = os.environ.get("COTAS_LOG", "").strip().lower() in (
+    "1", "true", "yes", "on"
+)
 
 
 def _dbg(msg):
@@ -31,6 +46,13 @@ def _dbg(msg):
             print(f"[COTAS_LOG] {msg}")
         except Exception:
             pass
+
+
+def _point_intent_enum(nombre):
+    try:
+        return getattr(win32com.client.constants, nombre)
+    except Exception:
+        return _CIRCULAR_POINT_INTENT_FALLBACK.get(nombre)
 
 
 def _base_hoja(nombre):
@@ -183,14 +205,20 @@ def _guardar_hojas_para_diametro(hojas):
     except Exception as e:
         print(f"⚠️ No se pudo guardar la lista de hojas para diámetro: {e}")
 
-def _puntos_clave_curva(curva):
+def _puntos_clave_curva(curva, solo_extremos=False):
     """
-    Obtiene Start/Mid/End si existen, para crear intents más seguros.
+    Start/End (y Mid solo si no es arco).
+
+    En curvas circulares Inventor a veces expone MidPoint = centro; usarlo
+    en AddLinear ancla la cota al centro (Solera Jacking Pad).
     """
     puntos = []
     usados = set()
+    attrs = ("StartPoint", "EndPoint") if solo_extremos else (
+        "StartPoint", "MidPoint", "EndPoint"
+    )
 
-    for attr in ("StartPoint", "MidPoint", "EndPoint"):
+    for attr in attrs:
         try:
             p = getattr(curva, attr)
             if p:
@@ -200,20 +228,76 @@ def _puntos_clave_curva(curva):
                 if key not in usados:
                     usados.add(key)
                     puntos.append((x, y, p))
-        except:
+        except Exception:
             pass
 
     return puntos
 
 
-def _crear_intent_seguro(hoja, dato, lado):
+def _intent_cuadrante_circular(hoja, dato, lado):
+    """GeometryIntent en cuadrante L/R/T/B del arco (no centro)."""
+    nombre = _CIRCULAR_POINT_INTENT.get(lado)
+    if not nombre:
+        return None
+    codigo = _point_intent_enum(nombre)
+    if codigo is None:
+        return None
+    try:
+        return hoja.CreateGeometryIntent(dato["curve"], codigo)
+    except Exception:
+        return None
+
+
+def _intent_recta_en_extremo(hoja, tg, datos, lado, tol):
     """
-    Primero intenta crear intent sobre un punto real de la curva.
-    Si no puede, usa la curva completa.
+    Ancla en una RECTA cercana al extremo global (evita arcos).
+    """
+    minx, maxx, miny, maxy = _bbox_global(datos)
+    rectas = [d for d in datos if not _es_curva_redondeada(d)]
+    if not rectas:
+        return None
+
+    if lado == "izq":
+        cands = [d for d in rectas if abs(d["minx"] - minx) <= tol * 4]
+        if not cands:
+            cands = sorted(rectas, key=lambda d: d["minx"])[:3]
+        dato = min(cands, key=lambda d: d["minx"])
+        return _crear_intent_seguro(hoja, dato, "izq", tg=tg, forzar_lineal=True)
+    if lado == "der":
+        cands = [d for d in rectas if abs(d["maxx"] - maxx) <= tol * 4]
+        if not cands:
+            cands = sorted(rectas, key=lambda d: -d["maxx"])[:3]
+        dato = max(cands, key=lambda d: d["maxx"])
+        return _crear_intent_seguro(hoja, dato, "der", tg=tg, forzar_lineal=True)
+    if lado == "inf":
+        cands = [d for d in rectas if abs(d["miny"] - miny) <= tol * 4]
+        if not cands:
+            cands = sorted(rectas, key=lambda d: d["miny"])[:3]
+        dato = min(cands, key=lambda d: d["miny"])
+        return _crear_intent_seguro(hoja, dato, "inf", tg=tg, forzar_lineal=True)
+    cands = [d for d in rectas if abs(d["maxy"] - maxy) <= tol * 4]
+    if not cands:
+        cands = sorted(rectas, key=lambda d: -d["maxy"])[:3]
+    dato = max(cands, key=lambda d: d["maxy"])
+    return _crear_intent_seguro(hoja, dato, "sup", tg=tg, forzar_lineal=True)
+
+
+def _crear_intent_seguro(hoja, dato, lado, tg=None, forzar_lineal=False):
+    """
+    GeometryIntent para cotas LINEALES.
+
+    En arcos: usar cuadrante circular o recta vecina — NUNCA
+    CreateGeometryIntent(arco) ni MidPoint (caen al centro).
     """
     curva = dato["curve"]
-    puntos = _puntos_clave_curva(curva)
 
+    if _es_curva_redondeada(dato) and not forzar_lineal:
+        intent = _intent_cuadrante_circular(hoja, dato, lado)
+        if intent is not None:
+            return intent
+        return None
+
+    puntos = _puntos_clave_curva(curva, solo_extremos=True)
     if puntos:
         try:
             if lado == "izq":
@@ -222,16 +306,32 @@ def _crear_intent_seguro(hoja, dato, lado):
                 p = max(puntos, key=lambda t: t[0])[2]
             elif lado == "inf":
                 p = min(puntos, key=lambda t: t[1])[2]
-            else:  # sup
+            else:
                 p = max(puntos, key=lambda t: t[1])[2]
-
             return hoja.CreateGeometryIntent(curva, p)
-        except:
+        except Exception:
             pass
 
+    if tg is not None and not _es_curva_redondeada(dato):
+        if lado == "izq":
+            x, y = dato["minx"], (dato["miny"] + dato["maxy"]) * 0.5
+        elif lado == "der":
+            x, y = dato["maxx"], (dato["miny"] + dato["maxy"]) * 0.5
+        elif lado == "inf":
+            x, y = (dato["minx"] + dato["maxx"]) * 0.5, dato["miny"]
+        else:
+            x, y = (dato["minx"] + dato["maxx"]) * 0.5, dato["maxy"]
+        try:
+            pt = tg.CreatePoint2d(x, y)
+            return hoja.CreateGeometryIntent(curva, pt)
+        except Exception:
+            pass
+
+    if _es_curva_redondeada(dato):
+        return None
     try:
         return hoja.CreateGeometryIntent(curva)
-    except:
+    except Exception:
         return None
 
 
@@ -262,7 +362,7 @@ def _elegir_curva_extrema(datos, lado, tol):
         base = rectos if rectos else candidatos
         if not base:
             return None
-        return max(base, key=lambda d: (d["dy"], d["dx"]))
+        return min(base, key=lambda d: (d["minx"], -d["dy"]))
 
     elif lado == "der":
         objetivo = maxx
@@ -271,7 +371,7 @@ def _elegir_curva_extrema(datos, lado, tol):
         base = rectos if rectos else candidatos
         if not base:
             return None
-        return max(base, key=lambda d: (d["dy"], d["dx"]))
+        return max(base, key=lambda d: (d["maxx"], d["dy"]))
 
     elif lado == "inf":
         objetivo = miny
@@ -280,7 +380,7 @@ def _elegir_curva_extrema(datos, lado, tol):
         base = rectos if rectos else candidatos
         if not base:
             return None
-        return max(base, key=lambda d: (d["dx"], d["dy"]))
+        return min(base, key=lambda d: (d["miny"], -d["dx"]))
 
     elif lado == "sup":
         objetivo = maxy
@@ -289,7 +389,7 @@ def _elegir_curva_extrema(datos, lado, tol):
         base = rectos if rectos else candidatos
         if not base:
             return None
-        return max(base, key=lambda d: (d["dx"], d["dy"]))
+        return max(base, key=lambda d: (d["maxy"], d["dx"]))
 
     return None
 
@@ -300,12 +400,24 @@ def _es_curva_redondeada(d):
     """
     try:
         return d["dx"] > 0.20 and d["dy"] > 0.20
-    except:
+    except Exception:
         return False
 
 # =========================================================
 # MÉTODO MEJORADO
 # =========================================================
+def _silueta_punta_redondeada(datos):
+    """True si el extremo izquierdo es un arco/redondeo (Jacking Pad, etc.)."""
+    if not datos:
+        return False
+    minx, maxx, miny, maxy = _bbox_global(datos)
+    tol = max(0.03, (maxx - minx) * 0.08)
+    for d in datos:
+        if _es_curva_redondeada(d) and abs(float(d["minx"]) - minx) <= tol:
+            return True
+    return False
+
+
 def _crear_cota_horizontal_mejorada(hoja, vista, tg, datos, nombre_hoja):
     minx, maxx, miny, maxy = _bbox_global(datos)
     ancho_sheet = maxx - minx
@@ -321,8 +433,30 @@ def _crear_cota_horizontal_mejorada(hoja, vista, tg, datos, nombre_hoja):
     if not curva_izq or not curva_der:
         return False
 
-    int_izq = _crear_intent_seguro(hoja, curva_izq, "izq")
-    int_der = _crear_intent_seguro(hoja, curva_der, "der")
+    # Punta redondeada (Jacking Pad): SIEMPRE cuadrante izq o recta de
+    # respaldo. Nunca CreateGeometryIntent(arco) ni Point2d suelto en arco
+    # (caen al centro → LARGO 1.33 en vez de 1.64).
+    if _es_curva_redondeada(curva_izq):
+        int_izq = _intent_cuadrante_circular(hoja, curva_izq, "izq")
+        if int_izq is None:
+            int_izq = _intent_recta_en_extremo(hoja, tg, datos, "izq", tol)
+        if int_izq is None:
+            return False
+    else:
+        int_izq = _crear_intent_seguro(hoja, curva_izq, "izq", tg=tg)
+        if int_izq is None:
+            int_izq = _intent_recta_en_extremo(hoja, tg, datos, "izq", tol)
+
+    if _es_curva_redondeada(curva_der):
+        int_der = _intent_cuadrante_circular(hoja, curva_der, "der")
+        if int_der is None:
+            int_der = _intent_recta_en_extremo(hoja, tg, datos, "der", tol)
+        if int_der is None:
+            return False
+    else:
+        int_der = _crear_intent_seguro(hoja, curva_der, "der", tg=tg)
+        if int_der is None:
+            int_der = _intent_recta_en_extremo(hoja, tg, datos, "der", tol)
 
     if not int_izq or not int_der:
         return False
@@ -339,7 +473,7 @@ def _crear_cota_horizontal_mejorada(hoja, vista, tg, datos, nombre_hoja):
         esperado = _esperado_modelo(vista, ancho_sheet)
         return _validar_dimension(dim, esperado, nombre_hoja, "horizontal")
 
-    except:
+    except Exception:
         return False
 
 
@@ -358,14 +492,21 @@ def _crear_cota_vertical_mejorada(hoja, vista, tg, datos, nombre_hoja):
     if not curva_inf or not curva_sup:
         return False
 
-    # Si arriba o abajo manda un arco/redondeo,
-    # mejor dejar esta hoja para lineal_especial/arcos.py
-    # y que la cota salga visual, no agarrada al centro/tangencia.
-    if _es_curva_redondeada(curva_inf) or _es_curva_redondeada(curva_sup):
-        return False
+    # Extremos con arco/redondeo: cuadrante o recta vecina (mismo criterio
+    # que horizontal). Antes se abortaba y fallaba ANCHO en soleras/punta.
+    if _es_curva_redondeada(curva_inf):
+        int_inf = _intent_cuadrante_circular(hoja, curva_inf, "inf")
+        if int_inf is None:
+            int_inf = _intent_recta_en_extremo(hoja, tg, datos, "inf", tol)
+    else:
+        int_inf = _crear_intent_seguro(hoja, curva_inf, "inf", tg=tg)
 
-    int_inf = _crear_intent_seguro(hoja, curva_inf, "inf")
-    int_sup = _crear_intent_seguro(hoja, curva_sup, "sup")
+    if _es_curva_redondeada(curva_sup):
+        int_sup = _intent_cuadrante_circular(hoja, curva_sup, "sup")
+        if int_sup is None:
+            int_sup = _intent_recta_en_extremo(hoja, tg, datos, "sup", tol)
+    else:
+        int_sup = _crear_intent_seguro(hoja, curva_sup, "sup", tg=tg)
 
     if not int_inf or not int_sup:
         return False
@@ -382,7 +523,54 @@ def _crear_cota_vertical_mejorada(hoja, vista, tg, datos, nombre_hoja):
         esperado = _esperado_modelo(vista, alto_sheet)
         return _validar_dimension(dim, esperado, nombre_hoja, "vertical")
 
-    except:
+    except Exception:
+        return False
+
+
+def _crear_cota_vertical_solo_rectas(hoja, vista, tg, datos, nombre_hoja):
+    """
+    ANCHO en punta redondeada (Jacking Pad): solo rectas en borde
+    superior/inferior — evita arcos de la punta que invalidan el span.
+    """
+    minx, maxx, miny, maxy = _bbox_global(datos)
+    alto_sheet = maxy - miny
+    if alto_sheet < EPS_GEOM:
+        return False
+
+    tol = max(0.02, max(vista.Width, vista.Height) * TOL_EXTREMO_RATIO)
+    rectas = [d for d in datos if not _es_curva_redondeada(d)]
+    if not rectas:
+        return False
+
+    tops = [d for d in rectas if d["maxy"] >= maxy - tol]
+    bots = [d for d in rectas if d["miny"] <= miny + tol]
+    if not tops or not bots:
+        return False
+
+    curva_sup = max(tops, key=lambda d: (d["dx"], d["dy"]))
+    curva_inf = max(bots, key=lambda d: (d["dx"], d["dy"]))
+    if curva_sup.get("curve") is curva_inf.get("curve"):
+        return False
+
+    int_sup = _crear_intent_seguro(hoja, curva_sup, "sup", tg=tg)
+    int_inf = _crear_intent_seguro(hoja, curva_inf, "inf", tg=tg)
+    if not int_sup or not int_inf:
+        int_sup = _intent_recta_en_extremo(hoja, tg, datos, "sup", tol)
+        int_inf = _intent_recta_en_extremo(hoja, tg, datos, "inf", tol)
+    if not int_sup or not int_inf:
+        return False
+
+    try:
+        pt_texto = _clampear_punto_hoja(
+            hoja, tg, minx - OFFSET_COTA, (miny + maxy) / 2.0
+        )
+        dim = hoja.DrawingDimensions.GeneralDimensions.AddLinear(
+            pt_texto, int_inf, int_sup, kVerticalDimensionType
+        )
+        aplicar_estilo_cota(dim, hoja=hoja)
+        esperado = _esperado_modelo(vista, alto_sheet)
+        return _validar_dimension(dim, esperado, nombre_hoja, "vertical_rectas")
+    except Exception:
         return False
 
 
@@ -585,26 +773,62 @@ def acotar_planos(nombres_permitidos=None, reset_diametro=True):
         cota_ok = False
         _dbg(f"  {nombre_hoja}: {len(datos)} curvas válidas")
 
+        # LARGO (FRENTE_1) = eje MAYOR; ANCHO (FRENTE_2) = eje menor.
+        # Excepción: punta redondeada (Jacking Pad) → LARGO = tip→base (H)
+        # como ANCHO ya hacía bien; nunca dejar que caiga a intent de centro.
+        minx_b, maxx_b, miny_b, maxy_b = _bbox_global(datos)
+        punta = _silueta_punta_redondeada(datos)
+        if punta:
+            eje_mayor_horizontal = True
+        else:
+            eje_mayor_horizontal = (maxx_b - minx_b) >= (maxy_b - miny_b)
+
         if "_FRENTE_1" in nombre_hoja:
             try:
-                cota_ok = _crear_cota_horizontal_mejorada(hoja, vista, tg, datos, nombre_hoja)
+                if eje_mayor_horizontal:
+                    cota_ok = _crear_cota_horizontal_mejorada(
+                        hoja, vista, tg, datos, nombre_hoja
+                    )
+                else:
+                    cota_ok = _crear_cota_vertical_mejorada(
+                        hoja, vista, tg, datos, nombre_hoja
+                    )
             except Exception as e:
                 contadores["excepciones"] += 1
-                _dbg(f"  excepción en _crear_cota_horizontal_mejorada: {e}")
+                _dbg(f"  excepción en cota mayor FRENTE_1: {e}")
+
+            # Rescate tip→base si el eje mayor falló (evita arcos→centro).
+            if not cota_ok and not eje_mayor_horizontal:
+                try:
+                    cota_ok = _crear_cota_horizontal_mejorada(
+                        hoja, vista, tg, datos, nombre_hoja
+                    )
+                except Exception:
+                    pass
 
             if cota_ok:
                 contadores["frente1_ok"] += 1
                 hojas_frente_ok.append(nombre_completo)
             else:
-                print(f"↩️ {nombre_hoja}: intentando rescate legacy horizontal...")
-                try:
-                    cota_ok = _crear_cota_horizontal_legacy(hoja, vista, tg, datos, nombre_hoja)
-                except Exception as e:
-                    contadores["excepciones"] += 1
-                    _dbg(f"  excepción en _crear_cota_horizontal_legacy: {e}")
-                if cota_ok:
-                    contadores["frente1_legacy"] += 1
-                    hojas_frente_ok.append(nombre_completo)
+                # En punta redondeada NO usar legacy (CreateGeometryIntent
+                # sobre arco → centro). Mejor lineal_especial / arcos visual.
+                if not punta:
+                    print(f"↩️ {nombre_hoja}: intentando rescate legacy (eje mayor)...")
+                    try:
+                        if eje_mayor_horizontal:
+                            cota_ok = _crear_cota_horizontal_legacy(
+                                hoja, vista, tg, datos, nombre_hoja
+                            )
+                        else:
+                            cota_ok = _crear_cota_vertical_legacy(
+                                hoja, vista, tg, datos, nombre_hoja
+                            )
+                    except Exception as e:
+                        contadores["excepciones"] += 1
+                        _dbg(f"  excepción en legacy FRENTE_1: {e}")
+                    if cota_ok:
+                        contadores["frente1_legacy"] += 1
+                        hojas_frente_ok.append(nombre_completo)
 
             if not cota_ok:
                 print(f"🧩 {nombre_hoja}: pasa a lineal_especial.py")
@@ -613,22 +837,54 @@ def acotar_planos(nombres_permitidos=None, reset_diametro=True):
 
         elif "_FRENTE_2" in nombre_hoja:
             try:
-                cota_ok = _crear_cota_vertical_mejorada(hoja, vista, tg, datos, nombre_hoja)
+                if eje_mayor_horizontal:
+                    cota_ok = _crear_cota_vertical_mejorada(
+                        hoja, vista, tg, datos, nombre_hoja
+                    )
+                else:
+                    cota_ok = _crear_cota_horizontal_mejorada(
+                        hoja, vista, tg, datos, nombre_hoja
+                    )
             except Exception as e:
                 contadores["excepciones"] += 1
-                _dbg(f"  excepción en _crear_cota_vertical_mejorada: {e}")
+                _dbg(f"  excepción en cota menor FRENTE_2: {e}")
 
             if cota_ok:
                 contadores["frente2_ok"] += 1
             else:
-                print(f"↩️ {nombre_hoja}: intentando rescate legacy vertical...")
+                # Jacking Pad / punta: legacy SÍ para ANCHO (eje menor con
+                # rectas H). Antes `if not punta` bloqueaba FRENTE_2 y
+                # solo quedaban LARGO+THK (faltaba ANCHO_44).
+                print(f"↩️ {nombre_hoja}: intentando rescate legacy (eje menor)...")
                 try:
-                    cota_ok = _crear_cota_vertical_legacy(hoja, vista, tg, datos, nombre_hoja)
+                    if eje_mayor_horizontal:
+                        cota_ok = _crear_cota_vertical_legacy(
+                            hoja, vista, tg, datos, nombre_hoja
+                        )
+                    else:
+                        cota_ok = _crear_cota_horizontal_legacy(
+                            hoja, vista, tg, datos, nombre_hoja
+                        )
                 except Exception as e:
                     contadores["excepciones"] += 1
-                    _dbg(f"  excepción en _crear_cota_vertical_legacy: {e}")
+                    _dbg(f"  excepción en legacy FRENTE_2: {e}")
                 if cota_ok:
                     contadores["frente2_legacy"] += 1
+
+            # Rescate final punta: forzar intents solo en rectas de borde.
+            if not cota_ok and punta:
+                try:
+                    cota_ok = _crear_cota_vertical_solo_rectas(
+                        hoja, vista, tg, datos, nombre_hoja
+                    )
+                    if cota_ok:
+                        contadores["frente2_ok"] += 1
+                        print(
+                            f"✅ {nombre_hoja}: ANCHO por rectas de borde "
+                            f"(punta redondeada)"
+                        )
+                except Exception as e:
+                    _dbg(f"  excepción rescate rectas FRENTE_2: {e}")
 
             if not cota_ok:
                 print(f"🧩 {nombre_hoja}: pasa a lineal_especial.py")

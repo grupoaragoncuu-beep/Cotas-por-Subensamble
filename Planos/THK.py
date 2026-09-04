@@ -326,9 +326,28 @@ def _elegir_curva_extrema_thk(datos, lado, tol):
 
 
 def _intent_en_extremo(hoja, tg, dato, lado):
-    """GeometryIntent anclado al punto extremo real de la curva."""
+    """
+    GeometryIntent anclado al punto extremo real de la curva.
+
+    Importante: en filetes/arcos parciales (p. ej. PIPE FLANE 0.375) el
+    ``kCircularTopPointIntent`` apunta al cuadrante del círculo completo,
+    que queda FUERA de la silueta → cota flotante y valor inflado (0.75
+    en vez de ~0.50). Por eso Start/End del arco van PRIMERO; el cuadrante
+    circular solo se usa como respaldo cuando Start/End no bastan.
+    """
     curva = dato["curve"]
-    puntos = _puntos_clave_curva_thk(curva)
+
+    # 1) Start/End — MidPoint en círculos puede ser el centro.
+    puntos = []
+    for attr in ("StartPoint", "EndPoint"):
+        try:
+            p = getattr(curva, attr)
+            if p is None:
+                continue
+            puntos.append((float(p.X), float(p.Y), p))
+        except Exception:
+            continue
+
     if puntos:
         try:
             if lado == "izq":
@@ -342,7 +361,8 @@ def _intent_en_extremo(hoja, tg, dato, lado):
             return hoja.CreateGeometryIntent(curva, p)
         except Exception:
             pass
-    # Fallback: Point2d en la esquina del bbox de la curva.
+
+    # 2) Punto 2D en el extremo del bbox de la curva (seguro en filetes).
     if lado == "izq":
         x, y = dato["minx"], (dato["miny"] + dato["maxy"]) * 0.5
     elif lado == "der":
@@ -354,6 +374,30 @@ def _intent_en_extremo(hoja, tg, dato, lado):
     intent = _crear_intent_punto2d(hoja, tg, curva, x, y)
     if intent is not None:
         return intent
+
+    # 3) Cuadrante circular solo si dx≈dy (círculo casi completo).
+    if abs(dato.get("dx", 0) - dato.get("dy", 0)) <= max(
+        dato.get("dx", 0), dato.get("dy", 0)
+    ) * 0.25 and min(dato.get("dx", 0), dato.get("dy", 0)) > 0.15:
+        nombres = {
+            "izq": "kCircularLeftPointIntent",
+            "der": "kCircularRightPointIntent",
+            "sup": "kCircularTopPointIntent",
+            "inf": "kCircularBottomPointIntent",
+        }
+        fallback = {"izq": 57862, "der": 57863, "sup": 57864, "inf": 57865}
+        try:
+            codigo = getattr(
+                win32com.client.constants, nombres[lado], fallback[lado]
+            )
+        except Exception:
+            codigo = fallback.get(lado)
+        if codigo is not None:
+            try:
+                return hoja.CreateGeometryIntent(curva, codigo)
+            except Exception:
+                pass
+
     try:
         return hoja.CreateGeometryIntent(curva)
     except Exception:
@@ -729,6 +773,24 @@ def _forzar_cota_thk_desde_modelo(hoja, tg, vista, nombre_hoja):
 
     try:
         gn = hoja.DrawingNotes.GeneralNotes.AddFitted(pt, texto)
+        # Misma legibilidad que las cotas (+25% fuente vía cota_estilo).
+        try:
+            from cota_estilo import COTA_FONT_SIZE_CM, COTA_BOLD, COTA_NAVY_RGB
+            bold = "True" if COTA_BOLD else "False"
+            gn.FormattedText = (
+                f"<StyleOverride FontSize='{COTA_FONT_SIZE_CM}' Bold='{bold}'>"
+                f"{texto}</StyleOverride>"
+            )
+            app_nota = None
+            try:
+                app_nota = conectar_inventor()
+            except Exception:
+                app_nota = None
+            if app_nota is not None:
+                r, g, b = COTA_NAVY_RGB
+                gn.Color = app_nota.TransientObjects.CreateColor(r, g, b)
+        except Exception:
+            pass
     except Exception as exc:
         print(
             f"⚠️ {nombre_hoja}: no se pudo crear nota THK forzada ({exc})."
@@ -1247,6 +1309,15 @@ def _buscar_candidatos_lineales(datos):
             if gap <= EPS:
                 continue
 
+            # Caras deben ser más largas que el "espesor": evita medir la
+            # pata recta de un U de barra (HV Parking) entre tope corto y
+            # tangente de radio.
+            cara = min(a["dy"], b["dy"])
+            # Cara de espesor debe ser claramente más larga que el gap.
+            # 1.25x no bastó (pata U HV Parking ~cara≈gap).
+            if cara < max(0.4, gap * 3.0):
+                continue
+
             candidatos.append({
                 "tipo": "horizontal",
                 "gap_sheet": gap,
@@ -1274,6 +1345,10 @@ def _buscar_candidatos_lineales(datos):
             gap = abs(ya - yb)
 
             if gap <= EPS:
+                continue
+
+            cara = min(a["dx"], b["dx"])
+            if cara < max(0.4, gap * 3.0):
                 continue
 
             candidatos.append({
@@ -1402,6 +1477,100 @@ def _envolvente_espesor(datos):
     }
 
 
+def _es_altura_hasta_radio(gap_sheet, overall_sheet):
+    """
+    True si el gap es casi la envolvente pero corto (pata U hasta el fillet).
+
+    Caso HV Parking: medía 0.73 in en vez del alto exterior 0.875 in.
+    """
+    if gap_sheet is None or overall_sheet is None:
+        return False
+    if float(overall_sheet) <= EPS:
+        return False
+    ratio = float(gap_sheet) / float(overall_sheet)
+    return 0.72 <= ratio < 0.97
+
+
+def _nombre_parece_parking_u(nombre_hoja):
+    u = str(nombre_hoja or "").upper()
+    return "PARKING" in u
+
+
+def _nombre_parece_brida(nombre_hoja):
+    u = str(nombre_hoja or "").upper()
+    return any(x in u for x in ("FLANGE", "FLANE", "BRIDA", "WELDNECK"))
+
+
+def _nombre_parece_tierra(nombre_hoja):
+    u = str(nombre_hoja or "").upper()
+    return "TIERRA" in u or "GROUND" in u
+
+
+def _nombre_parece_nipple(nombre_hoja):
+    u = str(nombre_hoja or "").upper()
+    return "NIPPLE" in u
+
+
+def _nombre_parece_jacking_escuadra(nombre_hoja):
+    """Pieza L (jacking pads.ipt): THK debe ser la escuadra, no la cara plana."""
+    u = str(nombre_hoja or "").upper()
+    if "SOLERA" in u:
+        return False
+    return "JACKING" in u and "PAD" in u
+
+
+def _nombre_parece_solera_jacking(nombre_hoja):
+    """Solera Jacking Pad: necesita LARGO (eje mayor) además del THK de canto."""
+    u = str(nombre_hoja or "").upper()
+    return "SOLERA" in u and "JACKING" in u
+
+
+def _resolver_parking_stands(hoja, vista, tg, datos, nombre_hoja):
+    """
+    HV Parking (U de barra/chapa):
+
+    En la hoja LADO se acota patas → base (alto exterior de la silueta)
+    para verificar bend deduction — NO el espesor de pared ni la pata
+    hasta el radio (0.73).
+
+    El THK real (Thickness de sheet metal / canto de barra) se resuelve
+    aparte en una hoja extra.
+    """
+    if not datos:
+        return False, None
+    minx, maxx, miny, maxy = _bbox_global(datos)
+    w_env = maxx - minx
+    h_env = maxy - miny
+    if max(w_env, h_env) <= EPS:
+        return False, None
+    # Canal ancho: el alto (patas→base) es el lado menor del bbox.
+    orient = "V" if h_env <= w_env else "H"
+    span = h_env if orient == "V" else w_env
+    print(
+        f"↩️ {nombre_hoja}: Parking — patas→base "
+        f"({orient}, ≈ {_esperado_modelo(vista, span) / IN_TO_CM:.3f} in)"
+    )
+    ok = _acotar_lado_bbox(
+        hoja, vista, tg, datos, nombre_hoja, orient, "patas-base"
+    )
+    if not ok:
+        return False, None
+    valor_cm = _esperado_modelo(vista, span)
+    snap = _snap_o_medido(valor_cm)
+    print(
+        f"✅ {nombre_hoja}: patas→base = {snap['valor_in']:.4f} in "
+        f"(bend deduction; no es THK de chapa)"
+    )
+    thk_chapa_cm = _espesor_chapa_desde_vista(vista)
+    return True, {
+        "gap_sheet": span,
+        "valor_cm": valor_cm,
+        "valor_in": snap["valor_in"],
+        "es_patas_base": True,
+        "thk_chapa_cm": thk_chapa_cm,
+    }
+
+
 def _resolver_prismatico(hoja, vista, tg, datos, nombre_hoja):
     """
     Returns (ok: bool, meta: dict|None).
@@ -1412,6 +1581,11 @@ def _resolver_prismatico(hoja, vista, tg, datos, nombre_hoja):
             f"⚠️ {nombre_hoja}: vista parece cara plana (con agujero); "
             f"se intentará THK igualmente priorizando espesor de chapa."
         )
+
+    # Parking SIEMPRE: aunque la vista parezca "cara plana" (U de frente).
+    # Antes se saltaba y caía a nota-only → JPG omitido (sin ALTO/THK).
+    if _nombre_parece_parking_u(nombre_hoja):
+        return _resolver_parking_stands(hoja, vista, tg, datos, nombre_hoja)
 
     envolvente = _envolvente_espesor(datos)
     overall_sheet = envolvente["gap_sheet"] if envolvente else None
@@ -1441,7 +1615,42 @@ def _resolver_prismatico(hoja, vista, tg, datos, nombre_hoja):
         f"curvas={len(datos)} candidatos_lineales={len(candidatos) if candidatos else 0}"
     )
     if not candidatos:
-        if envolvente and not _es_vista_cara_plana(datos):
+        # Barra redonda / alambre en U: sin pares de "caras" largas; intentar Ø.
+        # TIERRA/GROUND: Ø de la cara NO es THK (bug 3.14 flotante).
+        circs = _buscar_circulos(datos)
+        if circs and not _nombre_parece_tierra(nombre_hoja):
+            outer = max(circs, key=lambda c: c.get("radius") or c["dx"] * 0.5)
+            diam_sheet = (
+                float(outer["radius"]) * 2.0
+                if outer.get("radius")
+                else float(outer["dx"])
+            )
+            if 0.05 < _esperado_modelo(vista, diam_sheet) / IN_TO_CM < 3.0:
+                print(
+                    f"↩️ {nombre_hoja}: sin pares de cara; rescate Ø barra "
+                    f"≈ {_esperado_modelo(vista, diam_sheet) / IN_TO_CM:.3f} in"
+                )
+                try:
+                    ok_c, meta_c = _resolver_circular_solid(
+                        hoja, vista, tg, outer, nombre_hoja
+                    )
+                    if ok_c:
+                        return ok_c, meta_c
+                except Exception as exc_c:
+                    _dbg(f"{nombre_hoja}: rescate Ø falló ({exc_c})")
+
+        # Envolvente solo si parece canto aplanado (espesor << largo).
+        if (
+            envolvente
+            and not _es_vista_cara_plana(datos)
+            and (
+                es_canto_aplanado
+                or (
+                    overall_cm is not None
+                    and overall_cm <= 1.25 * IN_TO_CM
+                )
+            )
+        ):
             print(f"↩️ {nombre_hoja}: sin pares lineales, rescate por envolvente.")
             candidatos = [envolvente]
         else:
@@ -1487,6 +1696,15 @@ def _resolver_prismatico(hoja, vista, tg, datos, nombre_hoja):
             _dbg(
                 f"  descarta cand val={valor_cm / IN_TO_CM:.3f}in <35% de envolvente "
                 f"{overall_cm / IN_TO_CM:.3f}in (resalte)"
+            )
+            continue
+        # Pata U hasta el radio (0.73 vs alto 0.875): no es THK.
+        overall_eje = h_env if c.get("tipo") == "vertical" else w_env
+        if _es_altura_hasta_radio(c.get("gap_sheet"), overall_eje):
+            _dbg(
+                f"  descarta cand val={valor_cm / IN_TO_CM:.3f}in "
+                f"(altura hasta radio; silueta≈"
+                f"{_esperado_modelo(vista, overall_eje) / IN_TO_CM:.3f} in)"
             )
             continue
         c = dict(c)
@@ -1626,7 +1844,71 @@ def _resolver_prismatico(hoja, vista, tg, datos, nombre_hoja):
                 return False, None
 
     try:
-        _dibujar_cota_prismatica(hoja, tg, mejor)
+        # Bridas / canto aplanado: silueta exterior con validación de span.
+        # Evita el bug de filete (PIPE FLANE 0.375: intent circular → 0.75
+        # flotante) frente a PIPE FLANGE 0.250 (tope plano, OK).
+        overall_eje = h_env if mejor.get("tipo") == "vertical" else w_env
+        forzar_silueta = (
+            _es_altura_hasta_radio(mejor.get("gap_sheet"), overall_eje)
+            or _nombre_parece_brida(nombre_hoja)
+            or (
+                es_canto_aplanado
+                and overall_cm
+                and abs(mejor["valor_cm"] - overall_cm)
+                <= max(TOL_CM * 4, overall_cm * 0.12)
+            )
+        )
+        if forzar_silueta:
+            orient = "V" if mejor.get("tipo") == "vertical" else "H"
+            if _es_altura_hasta_radio(mejor.get("gap_sheet"), overall_eje):
+                print(
+                    f"↩️ {nombre_hoja}: candidato hasta radio "
+                    f"({mejor['valor_cm'] / IN_TO_CM:.3f} in); "
+                    f"silueta exterior"
+                )
+            elif _nombre_parece_brida(nombre_hoja):
+                print(
+                    f"↩️ {nombre_hoja}: brida — THK por silueta exterior "
+                    f"(evita filete→cuadrante)"
+                )
+            if _acotar_lado_bbox(
+                hoja, vista, tg, datos, nombre_hoja, orient, "THK"
+            ):
+                valor_cm = _esperado_modelo(vista, overall_eje)
+                snap = _snap_o_medido(valor_cm)
+                print(
+                    f"✅ {nombre_hoja}: THK prismático = {snap['valor_in']:.4f} in "
+                    f"(silueta exterior)"
+                )
+                return True, {
+                    "gap_sheet": overall_eje,
+                    "valor_cm": valor_cm,
+                    "valor_in": snap["valor_in"],
+                }
+
+        dim = _dibujar_cota_prismatica(hoja, tg, mejor)
+        # Guardarraíl: si ModelValue no coincide con el gap elegido (filete
+        # mal anclado), borrar y forzar silueta.
+        if dim is not None and not _validar_span_cota(
+            dim, mejor["gap_sheet"], vista, nombre_hoja, "THK"
+        ):
+            orient = "V" if mejor.get("tipo") == "vertical" else "H"
+            if _acotar_lado_bbox(
+                hoja, vista, tg, datos, nombre_hoja, orient, "THK"
+            ):
+                valor_cm = _esperado_modelo(vista, mejor["gap_sheet"])
+                snap = _snap_o_medido(valor_cm)
+                print(
+                    f"✅ {nombre_hoja}: THK prismático = {snap['valor_in']:.4f} in "
+                    f"(rescate silueta tras span inválido)"
+                )
+                return True, {
+                    "gap_sheet": mejor["gap_sheet"],
+                    "valor_cm": valor_cm,
+                    "valor_in": snap["valor_in"],
+                }
+            return False, None
+
         origen = "envolvente" if (
             es_canto_aplanado
             and overall_cm
@@ -1795,7 +2077,9 @@ def _pares_borde_silueta(datos, orientacion, tol):
     return a, b, "der", "izq", (maxx - minx)
 
 
-def _acotar_lado_bbox(hoja, vista, tg, datos, nombre_hoja, orientacion, etiqueta):
+def _acotar_lado_bbox(
+    hoja, vista, tg, datos, nombre_hoja, orientacion, etiqueta, ratio_min=0.97
+):
     """
     Dibuja UNA cota lineal (vertical u horizontal) sobre la silueta exterior.
 
@@ -1803,6 +2087,9 @@ def _acotar_lado_bbox(hoja, vista, tg, datos, nombre_hoja, orientacion, etiqueta
     del doblez). Elige bordes reales (recto horizontal arriba/abajo o
     vertical izq/der) y fija GeometryIntent en el punto extremo.
     Valida ModelValue ≈ span de silueta; si queda corto, reintenta.
+
+    ``ratio_min``: cobertura mínima bordes/silueta. Bajar a ~0.80 en U
+    con filetes (Parking) donde la tangencia recorta el span.
     """
     if not datos:
         return False
@@ -1828,6 +2115,7 @@ def _acotar_lado_bbox(hoja, vista, tg, datos, nombre_hoja, orientacion, etiqueta
 
     span = h if orientacion == "V" else w
     tol = max(0.03, max(w, h) * 0.02)
+    ratio_ok = float(ratio_min) if ratio_min else 0.97
 
     def _pt_para_orient(a, b, dx_off, dy_off):
         if orientacion == "V":
@@ -1868,7 +2156,7 @@ def _acotar_lado_bbox(hoja, vista, tg, datos, nombre_hoja, orientacion, etiqueta
                 raise RuntimeError("sin pares de borde para silueta exterior")
 
             span_bordes = _span_bordes_seleccionados(a, b, orientacion)
-            if span > EPS and span_bordes / span < 0.97:
+            if span > EPS and span_bordes / span < ratio_ok:
                 raise RuntimeError(
                     f"bordes no cubren silueta "
                     f"({span_bordes:.3f}/{span:.3f})"
@@ -2060,6 +2348,553 @@ def _nombre_hoja_largo_pata(nombre_lado):
     return _nombre_hoja_variante(nombre_lado, "_LARGO_PATA")
 
 
+def _acotar_thk_asociativa_forzada(hoja, vista, tg, datos, nombre_hoja, thk_cm):
+    """
+    Cota asociativa (AddLinear) cuyo valor ≈ thk_cm.
+
+    Orden:
+    1) Par lineal cercano al Thickness de chapa/barra.
+    2) Eje de silueta (H/V) cuyo span coincide con thk_cm.
+    3) Eje menor de la silueta (canto típico).
+    4) Envolvente menor (Parking U con filetes: ratio relajado).
+
+    Prefiere GeneralDimension; si nada cuadra, el caller puede poner nota.
+    """
+    if not datos or thk_cm is None or thk_cm <= EPS:
+        return False
+
+    # Parking U: filetes recortan el span de bordes rectos → ratio más laxo.
+    ratio_sil = 0.80 if _nombre_parece_parking_u(nombre_hoja) else 0.97
+
+    if _acotar_espesor_cercano_chapa(
+        hoja, vista, tg, datos, nombre_hoja, thk_cm
+    ):
+        return True
+
+    minx, maxx, miny, maxy = _bbox_global(datos)
+    w = maxx - minx
+    h = maxy - miny
+    if max(w, h) <= EPS:
+        return False
+
+    tol = max(TOL_CM * 4, abs(thk_cm) * 0.25)
+    ejes = []
+    if h > EPS:
+        ejes.append(("V", h, abs(_esperado_modelo(vista, h) - thk_cm)))
+    if w > EPS:
+        ejes.append(("H", w, abs(_esperado_modelo(vista, w) - thk_cm)))
+    ejes.sort(key=lambda t: t[2])
+
+    for orient, span, delta in ejes:
+        if delta > tol:
+            continue
+        if _acotar_lado_bbox(
+            hoja,
+            vista,
+            tg,
+            datos,
+            nombre_hoja,
+            orient,
+            "THK",
+            ratio_min=ratio_sil,
+        ):
+            print(
+                f"↩️ {nombre_hoja}: THK asociativa por silueta {orient} "
+                f"≈ {_esperado_modelo(vista, span) / IN_TO_CM:.4f} in"
+            )
+            return True
+
+    # Último intento silueta: lado menor del bbox (canto).
+    orient = "V" if h <= w else "H"
+    if _acotar_lado_bbox(
+        hoja,
+        vista,
+        tg,
+        datos,
+        nombre_hoja,
+        orient,
+        "THK",
+        ratio_min=ratio_sil,
+    ):
+        span = h if orient == "V" else w
+        print(
+            f"↩️ {nombre_hoja}: THK asociativa eje menor {orient} "
+            f"≈ {_esperado_modelo(vista, span) / IN_TO_CM:.4f} in"
+        )
+        return True
+
+    # Envolvente menor (min/max de curvas): acepta si ModelValue ≈ thk.
+    envolvente = _envolvente_espesor(datos)
+    if envolvente is not None:
+        gap_cm = _esperado_modelo(vista, envolvente["gap_sheet"])
+        if abs(gap_cm - thk_cm) <= max(TOL_CM * 4, abs(thk_cm) * 0.30):
+            try:
+                dim = _dibujar_cota_prismatica(hoja, tg, envolvente)
+                if dim is not None and _validar_span_cota(
+                    dim,
+                    envolvente["gap_sheet"],
+                    vista,
+                    nombre_hoja,
+                    "THK envolvente",
+                ):
+                    print(
+                        f"↩️ {nombre_hoja}: THK por envolvente "
+                        f"≈ {gap_cm / IN_TO_CM:.4f} in"
+                    )
+                    return True
+            except Exception:
+                pass
+    return False
+
+
+def _finalizar_parking_patas_base(plano, hoja_lado, tg, vista, meta, nombre_lado):
+    """
+    Tras acotar patas→base en LADO (Parking):
+    1) Renombra esa hoja a ``_ALTO`` (bend deduction).
+    2) Crea ``_THK`` con cota asociativa real (no leyenda tipográfica).
+    """
+    creadas = set()
+    try:
+        nombre_alto = _nombre_hoja_alto(nombre_lado)
+        if str(hoja_lado.Name).upper() != nombre_alto.upper():
+            hoja_lado.Name = nombre_alto
+        creadas.add(str(hoja_lado.Name))
+        print(f"  {nombre_lado}: hoja patas→base renombrada a {hoja_lado.Name}")
+    except Exception as exc:
+        print(f"⚠️ {nombre_lado}: no se pudo renombrar LADO→ALTO ({exc})")
+
+    thk_cm = (meta or {}).get("thk_chapa_cm")
+    if thk_cm is None or thk_cm <= EPS:
+        thk_cm = _espesor_chapa_desde_vista(vista)
+    if thk_cm is None or thk_cm <= EPS:
+        thk_cm = _espesor_desde_bbox_3d(vista)
+    if thk_cm is None or thk_cm <= EPS:
+        print(f"⚠️ {nombre_lado}: sin espesor de chapa/barra para hoja THK")
+        return creadas
+
+    nombre_thk = _nombre_hoja_variante(nombre_lado, "_THK")
+    try:
+        for i in range(1, plano.Sheets.Count + 1):
+            if str(plano.Sheets.Item(i).Name).upper() == nombre_thk.upper():
+                print(f"  {nombre_lado}: ya existe {nombre_thk}, no se duplica")
+                creadas.add(nombre_thk)
+                return creadas
+        hoja_thk = hoja_lado.CopyTo(plano)
+        hoja_thk.Name = nombre_thk
+        try:
+            dims = hoja_thk.DrawingDimensions.GeneralDimensions
+            for i in range(dims.Count, 0, -1):
+                dims.Item(i).Delete()
+        except Exception:
+            pass
+        try:
+            vista_thk = hoja_thk.DrawingViews.Item(1)
+        except Exception:
+            vista_thk = vista
+
+        ok_geom = False
+        datos_thk = None
+        try:
+            datos_thk = _obtener_curvas_validas(vista_thk)
+        except Exception:
+            datos_thk = None
+
+        if datos_thk:
+            ok_geom = _acotar_thk_asociativa_forzada(
+                hoja_thk, vista_thk, tg, datos_thk, nombre_thk, thk_cm
+            )
+
+        if ok_geom:
+            creadas.add(nombre_thk)
+            print(
+                f"✅ {nombre_thk}: THK = "
+                f"{thk_cm / IN_TO_CM:.4f} in (cota asociativa)"
+            )
+        else:
+            # Último recurso tipográfico (solo si no hay geometría usable).
+            ok_nota, _ = _forzar_cota_thk_desde_modelo(
+                hoja_thk, tg, vista_thk, nombre_thk
+            )
+            if ok_nota:
+                creadas.add(nombre_thk)
+                print(
+                    f"⚠️ {nombre_thk}: AddLinear no viable (U/filetes); "
+                    f"se conserva nota THK = {thk_cm / IN_TO_CM:.4f} in"
+                )
+            else:
+                try:
+                    hoja_thk.Delete()
+                except Exception:
+                    pass
+    except Exception as exc:
+        print(f"⚠️ {nombre_lado}: no se pudo crear hoja THK Parking ({exc})")
+    return creadas
+
+
+def _acotar_espesor_cercano_chapa(hoja, vista, tg, datos, nombre_hoja, thk_cm):
+    """Dibuja cota lineal del candidato más cercano al Thickness de chapa."""
+    if not datos or thk_cm is None or thk_cm <= EPS:
+        return False
+    candidatos = _buscar_candidatos_lineales(datos)
+    if not candidatos:
+        return False
+    tol = max(TOL_CM * 3, abs(thk_cm) * 0.35)
+    cercanos = []
+    for c in candidatos:
+        valor_cm = _esperado_modelo(vista, c["gap_sheet"])
+        if abs(valor_cm - thk_cm) <= tol:
+            c2 = dict(c)
+            c2["valor_cm"] = valor_cm
+            cercanos.append(c2)
+    if not cercanos:
+        return False
+    mejor = min(cercanos, key=lambda x: abs(x["valor_cm"] - thk_cm))
+    try:
+        dim = _dibujar_cota_prismatica(hoja, tg, mejor)
+        if dim is None:
+            return False
+        if not _validar_span_cota(
+            dim, mejor["gap_sheet"], vista, nombre_hoja, "THK pared"
+        ):
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def _finalizar_largo_desde_vista_thk(
+    plano, hoja_lado, tg, vista, datos, thk_sheet, nombre_lado
+):
+    """
+    Solera Jacking Pad: hoja extra con el LARGO real (= arista más larga 3D).
+
+    La cámara del THK suele mostrar el canto: ahí el eje "mayor" de la
+    silueta es el ancho de cara (~2.50 in), NO el largo de base (~3.536 in).
+    Por eso se ancla al mayor del bbox 3D y se prueban cámaras hasta que
+    la silueta proyecte ese valor.
+    """
+    creadas = set()
+    if not _nombre_parece_solera_jacking(nombre_lado):
+        return creadas
+    if not datos:
+        return creadas
+
+    # Objetivo 3D: arista más larga (excluye espesor y el ancho medio).
+    target_cm = None
+    dims3d = _dimensiones_bbox_3d(vista)
+    if dims3d:
+        orden = sorted(d for d in dims3d if d is not None and d > EPS)
+        if orden:
+            target_cm = orden[-1]
+            print(
+                f"  {nombre_lado}: LARGO objetivo 3D = "
+                f"{target_cm / IN_TO_CM:.4f} in "
+                f"(bbox {[round(d / IN_TO_CM, 3) for d in orden]} in)"
+            )
+
+    minx, maxx, miny, maxy = _bbox_global(datos)
+    w = maxx - minx
+    h = maxy - miny
+    if max(w, h) <= EPS and target_cm is None:
+        return creadas
+
+    nombre_largo = _nombre_hoja_largo_pata(nombre_lado)
+    try:
+        for i in range(1, plano.Sheets.Count + 1):
+            if str(plano.Sheets.Item(i).Name).upper() == nombre_largo.upper():
+                creadas.add(nombre_largo)
+                return creadas
+    except Exception:
+        pass
+
+    inv_app = None
+    try:
+        inv_app = conectar_inventor()
+    except Exception:
+        inv_app = None
+
+    camaras_alt = []
+    if vista is not None and inv_app is not None:
+        try:
+            part_doc = vista.ReferencedDocumentDescriptor.ReferencedDocument
+            to = inv_app.TransientObjects
+            camaras_alt = list(_camaras_transversales(part_doc, tg, to) or [])
+        except Exception:
+            camaras_alt = []
+
+    # Tolerancia: silueta mayor ≈ target 3D (acepta ~8% o 0.15 in).
+    def _coincide_largo(datos_n, vista_n):
+        if not datos_n:
+            return False, None, None, None
+        aminx, amaxx, aminy, amaxy = _bbox_global(datos_n)
+        aw = amaxx - aminx
+        ah = amaxy - aminy
+        if max(aw, ah) <= EPS:
+            return False, None, None, None
+        orient = "H" if aw >= ah else "V"
+        span = max(aw, ah)
+        menor = min(aw, ah)
+        mayor_cm = _esperado_modelo(vista_n, span)
+        # Descartar franja de canto (mayor ≈ THK).
+        if thk_sheet is not None and thk_sheet > EPS:
+            if mayor_cm < thk_sheet * 2.2:
+                return False, None, None, None
+        if target_cm is not None and target_cm > EPS:
+            tol = max(0.15 * IN_TO_CM, abs(target_cm) * 0.08)
+            if abs(mayor_cm - target_cm) > tol:
+                # También aceptar si el MENOR proyecta el largo (raro).
+                menor_cm = _esperado_modelo(vista_n, menor)
+                if abs(menor_cm - target_cm) <= tol:
+                    orient = "V" if orient == "H" else "H"
+                    span = menor
+                    mayor_cm = menor_cm
+                else:
+                    return False, orient, span, mayor_cm
+        elif span < menor * 1.5:
+            return False, None, None, None
+        return True, orient, span, mayor_cm
+
+    # Vista actual primero; luego transversales (cara triangular / base).
+    intentos = [None] + camaras_alt
+    mejor_fallback = None  # (delta, cam, hoja, vista, datos, orient, span)
+
+    for cam in intentos:
+        hoja_n, vista_n = _clonar_hoja_lado_para_cota(
+            plano, hoja_lado, tg, nombre_largo, inv_app, camara_alt=cam
+        )
+        if hoja_n is None:
+            continue
+        try:
+            datos_n = _obtener_curvas_validas(vista_n)
+        except Exception:
+            datos_n = None
+        if not datos_n:
+            try:
+                hoja_n.Delete()
+            except Exception:
+                pass
+            continue
+
+        ok_sil, orient, span, mayor_cm = _coincide_largo(datos_n, vista_n)
+
+        # Guardar el candidato más cercano al target por si ninguno pasa tol.
+        if target_cm is not None:
+            aminx, amaxx, aminy, amaxy = _bbox_global(datos_n)
+            aw = amaxx - aminx
+            ah = amaxy - aminy
+            deltas_eje = []
+            if aw > EPS:
+                deltas_eje.append(abs(_esperado_modelo(vista_n, aw) - target_cm))
+            if ah > EPS:
+                deltas_eje.append(abs(_esperado_modelo(vista_n, ah) - target_cm))
+            delta = min(deltas_eje) if deltas_eje else None
+            if delta is not None and (
+                mejor_fallback is None or delta < mejor_fallback[0]
+            ):
+                if mejor_fallback is not None:
+                    try:
+                        mejor_fallback[2].Delete()
+                    except Exception:
+                        pass
+                mejor_fallback = (
+                    delta, cam, hoja_n, vista_n, datos_n, orient, span
+                )
+                if not ok_sil:
+                    continue
+            elif not ok_sil:
+                try:
+                    hoja_n.Delete()
+                except Exception:
+                    pass
+                continue
+        elif not ok_sil:
+            try:
+                hoja_n.Delete()
+            except Exception:
+                pass
+            continue
+
+        # Coincide: acotar y listo.
+        try:
+            dims = hoja_n.DrawingDimensions.GeneralDimensions
+            for i in range(dims.Count, 0, -1):
+                dims.Item(i).Delete()
+        except Exception:
+            pass
+
+        if _acotar_lado_bbox(
+            hoja_n, vista_n, tg, datos_n, nombre_largo, orient, "LARGO solera"
+        ):
+            # Si había un fallback distinto, borrarlo.
+            if mejor_fallback is not None and mejor_fallback[2] is not hoja_n:
+                try:
+                    mejor_fallback[2].Delete()
+                except Exception:
+                    pass
+            creadas.add(nombre_largo)
+            print(
+                f"📐 {nombre_lado}: creada {nombre_largo} "
+                f"(largo≈{mayor_cm / IN_TO_CM:.4f} in, {orient})"
+            )
+            return creadas
+
+        try:
+            hoja_n.Delete()
+        except Exception:
+            pass
+        if mejor_fallback is not None and mejor_fallback[2] is hoja_n:
+            mejor_fallback = None
+
+    # Fallback: mejor aproximación al largo 3D (aunque fuera de tol estricta).
+    if mejor_fallback is not None:
+        delta, _cam, hoja_n, vista_n, datos_n, orient, span = mejor_fallback
+        # No re-acotar el ancho de cara (~2.50) si sigue lejos del largo 3D.
+        if target_cm is not None and target_cm > EPS:
+            tol_fb = max(0.25 * IN_TO_CM, abs(target_cm) * 0.15)
+            if delta > tol_fb:
+                print(
+                    f"⚠️ {nombre_lado}: ninguna vista proyecta el largo 3D "
+                    f"(mejor delta={delta / IN_TO_CM:.3f} in); "
+                    f"no se crea LARGO"
+                )
+                try:
+                    hoja_n.Delete()
+                except Exception:
+                    pass
+                return creadas
+        if orient is None:
+            aminx, amaxx, aminy, amaxy = _bbox_global(datos_n)
+            aw = amaxx - aminx
+            ah = amaxy - aminy
+            orient = "H" if aw >= ah else "V"
+        try:
+            dims = hoja_n.DrawingDimensions.GeneralDimensions
+            for i in range(dims.Count, 0, -1):
+                dims.Item(i).Delete()
+        except Exception:
+            pass
+        # Preferir eje cuyo span modelo esté más cerca del target.
+        if target_cm is not None and datos_n:
+            aminx, amaxx, aminy, amaxy = _bbox_global(datos_n)
+            aw = amaxx - aminx
+            ah = amaxy - aminy
+            cand = []
+            if aw > EPS:
+                cand.append(("H", aw, abs(_esperado_modelo(vista_n, aw) - target_cm)))
+            if ah > EPS:
+                cand.append(("V", ah, abs(_esperado_modelo(vista_n, ah) - target_cm)))
+            if cand:
+                cand.sort(key=lambda t: t[2])
+                orient = cand[0][0]
+        if _acotar_lado_bbox(
+            hoja_n, vista_n, tg, datos_n, nombre_largo, orient, "LARGO solera"
+        ):
+            creadas.add(nombre_largo)
+            print(
+                f"📐 {nombre_lado}: creada {nombre_largo} "
+                f"(mejor cámara vs largo 3D, {orient})"
+            )
+            return creadas
+        try:
+            hoja_n.Delete()
+        except Exception:
+            pass
+
+    print(f"⚠️ {nombre_lado}: no se pudo crear LARGO solera (~3D max)")
+    return creadas
+
+
+def _finalizar_nipple_alto(plano, hoja_lado, tg, vista, datos, meta, nombre_lado):
+    """
+    PIPE HALF NIPPLE: FRENTE suele ser Ø; falta la longitud axial como ``_ALTO``.
+
+    Si LADO ya muestra el perfil (rectángulo alargado), acota el eje mayor.
+    Si LADO es cara circular, prueba cámaras transversales.
+    """
+    creadas = set()
+    if not _nombre_parece_nipple(nombre_lado):
+        return creadas
+
+    nombre_alto = _nombre_hoja_alto(nombre_lado)
+    try:
+        for i in range(1, plano.Sheets.Count + 1):
+            if str(plano.Sheets.Item(i).Name).upper() == nombre_alto.upper():
+                creadas.add(nombre_alto)
+                return creadas
+    except Exception:
+        pass
+
+    inv_app = None
+    try:
+        inv_app = conectar_inventor()
+    except Exception:
+        inv_app = None
+
+    thk_sheet = (meta or {}).get("gap_sheet")
+    camaras_alt = []
+    if vista is not None and inv_app is not None:
+        try:
+            part_doc = vista.ReferencedDocumentDescriptor.ReferencedDocument
+            to = inv_app.TransientObjects
+            camaras_alt = _camaras_transversales(part_doc, tg, to)
+        except Exception:
+            camaras_alt = []
+
+    def _silueta_alargada(datos_n):
+        if not datos_n:
+            return False, None, None
+        minx, maxx, miny, maxy = _bbox_global(datos_n)
+        w = maxx - minx
+        h = maxy - miny
+        if max(w, h) <= EPS:
+            return False, None, None
+        aspect = max(w, h) / max(min(w, h), EPS)
+        if aspect < 1.25:
+            return False, None, None
+        orient = "V" if h >= w else "H"
+        return True, orient, max(w, h)
+
+    # Primero la vista LADO actual; luego cámaras alt.
+    intentos = [None] + list(camaras_alt)
+    for cam in intentos:
+        hoja_n, vista_n = _clonar_hoja_lado_para_cota(
+            plano, hoja_lado, tg, nombre_alto, inv_app, camara_alt=cam
+        )
+        if hoja_n is None:
+            continue
+        try:
+            datos_n = _obtener_curvas_validas(vista_n)
+        except Exception:
+            datos_n = None
+        ok_sil, orient, _span = _silueta_alargada(datos_n)
+        if not ok_sil:
+            try:
+                hoja_n.Delete()
+            except Exception:
+                pass
+            continue
+        # Quitar cotas copiadas (Ø/THK) antes de poner ALTO.
+        try:
+            dims = hoja_n.DrawingDimensions.GeneralDimensions
+            for i in range(dims.Count, 0, -1):
+                dims.Item(i).Delete()
+        except Exception:
+            pass
+        if _acotar_lado_bbox(
+            hoja_n, vista_n, tg, datos_n, nombre_alto, orient, "ALTO nipple"
+        ):
+            creadas.add(nombre_alto)
+            print(f"📐 {nombre_lado}: creada hoja {nombre_alto} (longitud nipple)")
+            return creadas
+        try:
+            hoja_n.Delete()
+        except Exception:
+            pass
+
+    print(f"⚠️ {nombre_lado}: no se pudo crear ALTO de longitud (nipple)")
+    return creadas
+
+
 def _nombre_hoja_variante(nombre_lado, sufijo_final):
     """Reemplaza ``_LADO``/``_THK`` por ``sufijo_final`` conservando el resto."""
     base = str(nombre_lado)
@@ -2117,6 +2952,103 @@ def _debe_generar_alto(datos, thk_sheet, vista=None):
     minx, maxx, miny, maxy = _bbox_global(datos)
     mayor = max(maxx - minx, maxy - miny)
     return mayor >= thk_sheet * 4.0
+
+
+def _parece_silueta_franja_canto(datos):
+    """True si la vista es una tira larga (cara de espesor), no escuadra L."""
+    if not datos:
+        return True
+    minx, maxx, miny, maxy = _bbox_global(datos)
+    w = maxx - minx
+    h = maxy - miny
+    menor = min(w, h)
+    mayor = max(w, h)
+    if menor <= EPS:
+        return True
+    return (mayor / menor) >= 5.0
+
+
+def _reorientar_lado_a_escuadra(plano, hoja_lado, tg, inv_app, nombre_lado):
+    """
+    Jacking pads: si LADO quedó de cara (rectángulo), recrea la vista con
+    cámara de escuadra L (eje de doblez / transversales).
+
+    Sustituye la hoja LADO in-place (misma nombre) y devuelve
+    ``(hoja, vista, datos)`` o ``(None, None, None)`` si no mejora.
+    """
+    if inv_app is None:
+        return None, None, None
+    try:
+        vista_orig = hoja_lado.DrawingViews.Item(1)
+        part_doc = vista_orig.ReferencedDocumentDescriptor.ReferencedDocument
+        to = inv_app.TransientObjects
+    except Exception:
+        return None, None, None
+
+    camaras = []
+    if _creador_vistas is not None:
+        try:
+            ori = _creador_vistas._orientacion_lado_doblado(
+                part_doc, tg, to, None
+            )
+            if ori is not None:
+                cam = _creador_vistas.crear_camara(
+                    part_doc, tg, to,
+                    ori["cx"], ori["cy"], ori["cz"],
+                    ori["v_lado"], ori["v_up"],
+                )
+                if cam is not None:
+                    camaras.append(cam)
+        except Exception:
+            pass
+    try:
+        camaras.extend(_camaras_transversales(part_doc, tg, to) or [])
+    except Exception:
+        pass
+
+    if not camaras:
+        return None, None, None
+
+    nombre_tmp = str(hoja_lado.Name) + "_ESC_TMP"
+    for cam in camaras:
+        hoja_n, vista_n = _clonar_hoja_lado_para_cota(
+            plano, hoja_lado, tg, nombre_tmp, inv_app, camara_alt=cam
+        )
+        if hoja_n is None:
+            continue
+        try:
+            datos_n = _obtener_curvas_validas(vista_n)
+        except Exception:
+            datos_n = None
+        if not datos_n or _parece_silueta_franja_canto(datos_n):
+            try:
+                hoja_n.Delete()
+            except Exception:
+                pass
+            continue
+        # Silueta más compacta = perfil L visible.
+        try:
+            nombre_final = str(hoja_lado.Name)
+            hoja_lado.Name = nombre_final + "_OLD_FACE"
+            hoja_n.Name = nombre_final
+            try:
+                hoja_lado.Delete()
+            except Exception:
+                pass
+            print(
+                f"↩️ {nombre_lado}: LADO reorientado a escuadra L "
+                f"({len(datos_n)} curvas)"
+            )
+            return hoja_n, vista_n, datos_n
+        except Exception as exc:
+            print(f"⚠️ {nombre_lado}: no se pudo sustituir LADO ({exc})")
+            try:
+                hoja_n.Delete()
+            except Exception:
+                pass
+            return None, None, None
+
+    return None, None, None
 
 
 def _calcular_camara_transversal(part_doc, tg, to):
@@ -2817,6 +3749,23 @@ def acotar_thk(nombres_permitidos=None):
             pendientes.append(nombre_hoja)
             continue
 
+        # Jacking pads: LADO debe ser la escuadra (THK 0.375), no la cara.
+        if _nombre_parece_jacking_escuadra(nombre_hoja):
+            thk_chk = _espesor_chapa_desde_vista(vista) or _espesor_desde_bbox_3d(
+                vista
+            )
+            necesita_escuadra = (
+                _parece_silueta_franja_canto(datos)
+                or _es_vista_cara_plana(datos)
+                or not _es_perfil_u_o_l(datos, thk_chk)
+            )
+            if necesita_escuadra:
+                hoja2, vista2, datos2 = _reorientar_lado_a_escuadra(
+                    plano, hoja, tg, inv_app, str(hoja.Name)
+                )
+                if datos2 is not None:
+                    hoja, vista, datos = hoja2, vista2, datos2
+
         tipo, outer, inner = _clasificar_lado(datos)
         print(f"🔎 {nombre_hoja}: clasificado como {tipo}")
 
@@ -2824,12 +3773,33 @@ def acotar_thk(nombres_permitidos=None):
         meta = None
 
         if tipo == "circular_solid":
-            ok, meta = _resolver_circular_solid(hoja, vista, tg, outer, nombre_hoja)
+            # TIERRA/GROUND: la cara redonda NO es el THK (Ø≈3.14 flotante).
+            # Forzar camino prismático / modelo.
+            if _nombre_parece_tierra(nombre_hoja):
+                print(
+                    f"↩️ {nombre_hoja}: TIERRA/GROUND — Ø de cara no es THK; "
+                    f"se resuelve espesor"
+                )
+                ok, meta = _resolver_prismatico(
+                    hoja, vista, tg, datos, nombre_hoja
+                )
+            else:
+                ok, meta = _resolver_circular_solid(
+                    hoja, vista, tg, outer, nombre_hoja
+                )
 
         elif tipo == "circular_hollow":
-            ok, meta = _resolver_circular_hollow(
-                hoja, vista, tg, outer, inner, nombre_hoja
-            )
+            if _nombre_parece_tierra(nombre_hoja):
+                print(
+                    f"↩️ {nombre_hoja}: TIERRA/GROUND hollow — espesor, no Ø"
+                )
+                ok, meta = _resolver_prismatico(
+                    hoja, vista, tg, datos, nombre_hoja
+                )
+            else:
+                ok, meta = _resolver_circular_hollow(
+                    hoja, vista, tg, outer, inner, nombre_hoja
+                )
 
         elif tipo == "rect_hollow":
             ok, meta = _resolver_rectangular_hollow(
@@ -2859,24 +3829,79 @@ def acotar_thk(nombres_permitidos=None):
             # dimensión — así el usuario puede verificar bend deduction
             # midiendo la pieza física contra cada foto.
             if thk_sheet and tipo != "rect_hollow":
-                extras = _crear_hoja_alto(
-                    plano, hoja, tg, datos, thk_sheet, str(hoja.Name)
-                )
+                if (meta or {}).get("es_patas_base"):
+                    # Parking: LADO ya tiene patas→base. Renombrar a ALTO y
+                    # crear hoja THK real desde Thickness de chapa/barra.
+                    extras = _finalizar_parking_patas_base(
+                        plano, hoja, tg, vista, meta, str(hoja.Name)
+                    )
+                else:
+                    extras = _crear_hoja_alto(
+                        plano, hoja, tg, datos, thk_sheet, str(hoja.Name)
+                    )
                 if extras:
                     hojas_extra.update(extras)
                     _dbg(f"{nombre_hoja}: hojas extra creadas -> {sorted(extras)}")
+
+            # Solera Jacking Pad: LARGO (eje mayor) desde la misma vista THK.
+            if _nombre_parece_solera_jacking(nombre_hoja):
+                extras_s = _finalizar_largo_desde_vista_thk(
+                    plano,
+                    hoja,
+                    tg,
+                    vista,
+                    datos,
+                    thk_sheet or (meta or {}).get("gap_sheet"),
+                    str(hoja.Name),
+                )
+                if extras_s:
+                    hojas_extra.update(extras_s)
+
+            # Nipple: longitud axial aparte (FRENTE suele ser solo Ø).
+            if _nombre_parece_nipple(nombre_hoja):
+                extras_n = _finalizar_nipple_alto(
+                    plano, hoja, tg, vista, datos, meta, str(hoja.Name)
+                )
+                if extras_n:
+                    hojas_extra.update(extras_n)
         else:
-            # Fallback final: si el resolver geométrico no encontró el THK
-            # (típicamente por vista de cara plana o pieza sin par lineal
-            # claro), tomamos el espesor directamente del modelo (Thickness
-            # de sheet metal, o menor lado del bbox 3D). Así ninguna hoja
-            # LADO queda sin dato de espesor.
-            forzado_ok, _valor_cm = _forzar_cota_thk_desde_modelo(
-                hoja, tg, vista, nombre_hoja
-            )
+            # Preferir cota asociativa antes que leyenda tipográfica.
+            thk_fallback = _espesor_chapa_desde_vista(vista)
+            if thk_fallback is None or thk_fallback <= EPS:
+                thk_fallback = _espesor_desde_bbox_3d(vista)
+            forzado_ok = False
+            _valor_cm = None
+            if thk_fallback and datos:
+                forzado_ok = _acotar_thk_asociativa_forzada(
+                    hoja, vista, tg, datos, nombre_hoja, thk_fallback
+                )
+                if forzado_ok:
+                    _valor_cm = thk_fallback
+                    print(
+                        f"↩️ {nombre_hoja}: THK asociativa forzada "
+                        f"= {thk_fallback / IN_TO_CM:.4f} in"
+                    )
+            if not forzado_ok:
+                forzado_ok, _valor_cm = _forzar_cota_thk_desde_modelo(
+                    hoja, tg, vista, nombre_hoja
+                )
             if forzado_ok:
                 procesadas += 1
                 _dbg(f"{nombre_hoja}: THK resuelto por fallback de modelo.")
+                # Aun con nota, intentar LARGO desde la vista de canto.
+                if _nombre_parece_solera_jacking(nombre_hoja):
+                    extras_s = _finalizar_largo_desde_vista_thk(
+                        plano, hoja, tg, vista, datos, _valor_cm, str(hoja.Name)
+                    )
+                    if extras_s:
+                        hojas_extra.update(extras_s)
+                # Nipple aún puede necesitar ALTO de longitud.
+                if _nombre_parece_nipple(nombre_hoja):
+                    extras_n = _finalizar_nipple_alto(
+                        plano, hoja, tg, vista, datos, None, str(hoja.Name)
+                    )
+                    if extras_n:
+                        hojas_extra.update(extras_n)
             else:
                 pendientes.append(nombre_hoja)
                 _dbg(f"{nombre_hoja}: NO resuelto (tipo={tipo})")

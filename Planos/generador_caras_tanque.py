@@ -99,8 +99,8 @@ MAX_COTAS_POR_LAMINA = 14
 UMBRAL_CIRCULAR_SOLO_CENTRO_CM = 3.5
 # Ignora basura tipo 0.19 cerca del origen (bridas / biseles).
 MIN_DIST_ORIGEN_CM = 0.50
-# Nunca descartar extremos por cantidad: cada pieza debe conservar Xmin/Xmax
-# e Ymin/Ymax. El encuadre adaptativo se ocupa de reservar el espacio.
+# Piezas no circulares: solo INICIO (Xmin / Ymin). Circulares/barrenos:
+# centro en X e Y (2 capturas). Una JPG por cota individual.
 MAX_COTAS_POR_EJE = None
 COTA_ALINEADA = 60161
 # Muros del cuerpo: fraccion minima del tamaño de vista (evita lugs como "pared").
@@ -2996,9 +2996,107 @@ def _es_recta_dominante(d, lado):
     return d["dx"] >= max(EPS, d["dy"] * DOMINANCIA_RECTA)
 
 
-def _elegir_extrema(datos, lado, tol):
+def _vertice_extremo_silueta(datos, lado):
+    """
+    Vértice Start/End más extremo de la silueta HLR.
+
+    En diagonales AISC el AABB/cy del tramo NO coincide con el tip donde
+    la pieza toca el marco: hay que anclar la extensión a este vértice.
+    """
     if not datos:
         return None
+    mejor = None
+    for d in datos:
+        curva = d.get("curve")
+        pts = []
+        if curva is not None:
+            for attr in ("StartPoint", "EndPoint"):
+                try:
+                    p = getattr(curva, attr)
+                    if p is None:
+                        continue
+                    pts.append((float(p.X), float(p.Y)))
+                except Exception:
+                    continue
+        if not pts:
+            # Respaldo: esquinas del bbox de la curva.
+            try:
+                pts = [
+                    (float(d["minx"]), float(d["miny"])),
+                    (float(d["minx"]), float(d["maxy"])),
+                    (float(d["maxx"]), float(d["miny"])),
+                    (float(d["maxx"]), float(d["maxy"])),
+                ]
+            except Exception:
+                continue
+        for xy in pts:
+            if mejor is None:
+                mejor = xy
+                continue
+            if lado == "izq":
+                if xy[0] < mejor[0] - 1e-9 or (
+                    abs(xy[0] - mejor[0]) <= 1e-9 and xy[1] < mejor[1]
+                ):
+                    mejor = xy
+            elif lado == "der":
+                if xy[0] > mejor[0] + 1e-9 or (
+                    abs(xy[0] - mejor[0]) <= 1e-9 and xy[1] > mejor[1]
+                ):
+                    mejor = xy
+            elif lado == "inf":
+                if xy[1] < mejor[1] - 1e-9 or (
+                    abs(xy[1] - mejor[1]) <= 1e-9 and xy[0] < mejor[0]
+                ):
+                    mejor = xy
+            else:  # sup
+                if xy[1] > mejor[1] + 1e-9 or (
+                    abs(xy[1] - mejor[1]) <= 1e-9 and xy[0] > mejor[0]
+                ):
+                    mejor = xy
+    return mejor
+
+
+def _elegir_extrema(datos, lado, tol):
+    """
+    Curva HLR en el extremo pedido.
+
+    Prioridad: curva que posee el vértice extremo real (tip de diagonal
+    AISC). Antes se prefería la recta más larga casi vertical/horizontal
+    cerca del borde — en arriostrados en W eso elegía un tramo de ala en
+    medio del vano y la extensión flotaba en vacío.
+    """
+    if not datos:
+        return None
+
+    vert = _vertice_extremo_silueta(datos, lado)
+    if vert is not None:
+        vx, vy = vert
+        dueños = []
+        for d in datos:
+            try:
+                if not (
+                    float(d["minx"]) - tol <= vx <= float(d["maxx"]) + tol
+                    and float(d["miny"]) - tol <= vy <= float(d["maxy"]) + tol
+                ):
+                    continue
+            except Exception:
+                continue
+            if lado == "izq" and abs(float(d["minx"]) - vx) > tol * 3:
+                continue
+            if lado == "der" and abs(float(d["maxx"]) - vx) > tol * 3:
+                continue
+            if lado == "inf" and abs(float(d["miny"]) - vy) > tol * 3:
+                continue
+            if lado == "sup" and abs(float(d["maxy"]) - vy) > tol * 3:
+                continue
+            dueños.append(d)
+        if dueños:
+            # La curva cuyo centro está más cerca del tip (no la más larga).
+            return min(
+                dueños,
+                key=lambda d: (float(d["cx"]) - vx) ** 2
+                + (float(d["cy"]) - vy) ** 2,
+            )
 
     if lado == "izq":
         objetivo = min(d["minx"] for d in datos)
@@ -3371,7 +3469,7 @@ def _agregar_centro_pieza(
     )
 
 
-def _agregar_inicio_y_fin(
+def _agregar_inicio(
     posiciones_x,
     posiciones_y,
     datos,
@@ -3381,37 +3479,56 @@ def _agregar_inicio_y_fin(
     contacto=False,
 ):
     """
-    Desde (0,0) se acota el INICIO y el FIN de cada componente:
-    Xmin/Xmax e Ymin/Ymax en todos los casos (nunca solo centro).
+    Desde (0,0) solo el INICIO de cada componente: Xmin (izq) e Ymin (inf).
+
+    El proceso aguas abajo necesita únicamente esas cotas primordiales;
+    Xmax/Ymax ya no se generan. Circulares/barrenos usan `_agregar_centro_pieza`.
+
+    Se guarda la lista completa de curvas HLR en ``dato["curvas"]`` para que
+    el refresco post-encuadre recalcule minx/miny sobre toda la silueta
+    visible (no solo la arista elegida al inicio).
     """
     izq = _elegir_extrema(datos, "izq", tol_extremo)
-    der = _elegir_extrema(datos, "der", tol_extremo)
     inf = _elegir_extrema(datos, "inf", tol_extremo)
-    sup = _elegir_extrema(datos, "sup", tol_extremo)
     if izq is not None:
+        dato_x = dict(izq)
+        dato_x["curvas"] = list(datos)
+        # Sin puntos_modelo 3D: el refresco debe releer HLR, no el AABB.
+        dato_x.pop("puntos_modelo", None)
         _agregar_posicion(
-            posiciones_x, izq["minx"], izq, tol_pos, "izq", pieza_id, contacto
-        )
-    if der is not None:
-        _agregar_posicion(
-            posiciones_x, der["maxx"], der, tol_pos, "der", pieza_id, contacto
+            posiciones_x,
+            izq["minx"],
+            dato_x,
+            tol_pos,
+            "izq",
+            pieza_id,
+            contacto,
         )
     if inf is not None:
+        dato_y = dict(inf)
+        dato_y["curvas"] = list(datos)
+        dato_y.pop("puntos_modelo", None)
         _agregar_posicion(
-            posiciones_y, inf["miny"], inf, tol_pos, "inf", pieza_id, contacto
+            posiciones_y,
+            inf["miny"],
+            dato_y,
+            tol_pos,
+            "inf",
+            pieza_id,
+            contacto,
         )
-    if sup is not None:
-        _agregar_posicion(
-            posiciones_y, sup["maxy"], sup, tol_pos, "sup", pieza_id, contacto
-        )
+
+
+# Alias legacy (antes inicio+fin); ahora solo inicio.
+_agregar_inicio_y_fin = _agregar_inicio
 
 
 def _debe_acotar_centro_barreno_adicional(nombre_pieza):
     """
-    Centros de barreno SOLO como complemento (nunca reemplazan inicio/fin).
+    Centros de barreno SOLO como complemento (nunca reemplazan Xmin/Ymin).
 
     Aplica a bridas con bore principal (L845, SP-*) o piezas *_HOLE.
-    NO aplica a soleras / bottom flange (P35): ahí solo inicio/fin.
+    NO aplica a soleras / bottom flange (P35): ahí solo inicio.
     """
     u = str(nombre_pieza or "").upper()
     if any(x in u for x in ("BOTTOM FLANGE", "SOLERA", "BASE DE", "FONDO")):
@@ -3425,29 +3542,68 @@ def _debe_acotar_centro_barreno_adicional(nombre_pieza):
     return False
 
 
-def _punto_geometria_acotada(miembro, eje):
-    """Punto en hoja donde la línea de extensión toca la geometría acotada."""
+def _punto_geometria_acotada(miembro, eje, valor_medida=None):
+    """
+    Punto en hoja donde la línea de extensión toca la geometría.
+
+    ``valor_medida``: coordenada de la cota en el eje medido (debe coincidir
+    con el extremo de la línea de cota).
+
+    Crítico en diagonales AISC (W de la BASE): el Xmin/Ymin ocurre en un
+    TIP (unión con el marco), no en el centro (cx/cy) del tramo. Si la
+    extensión se ancla a cy, atraviesa el vano vacío (cotas 44.272, 65.774
+    flotando). Aquí se usa el vértice extremo real de la silueta HLR.
+    """
     dato = miembro.get("dato") or {}
     lado = str(miembro.get("lado", "")).lower()
+    curvas = dato.get("curvas") or ([dato] if dato.get("curve") else [])
     try:
         if eje == "X":
-            x = float(miembro["valor"])
-            y = float(dato["cy"])
+            x = float(
+                valor_medida
+                if valor_medida is not None
+                else miembro["valor"]
+            )
+            if lado == "centro":
+                return x, float(dato.get("cy", 0.0))
+
+            lado_ext = lado if lado in ("izq", "der") else "izq"
+            vert = _vertice_extremo_silueta(curvas, lado_ext)
+            if vert is not None:
+                # Misma X de la cota; Y del tip donde la pieza sí existe.
+                return x, float(vert[1])
+
+            y = float(dato.get("cy", 0.0))
             if lado == "inf":
                 y = float(dato["miny"])
             elif lado == "sup":
                 y = float(dato["maxy"])
-            elif lado == "centro":
-                y = float(dato["cy"])
+            try:
+                y = min(max(y, float(dato["miny"])), float(dato["maxy"]))
+            except Exception:
+                pass
             return x, y
-        y = float(miembro["valor"])
-        x = float(dato["cx"])
+
+        y = float(
+            valor_medida if valor_medida is not None else miembro["valor"]
+        )
+        if lado == "centro":
+            return float(dato.get("cx", 0.0)), y
+
+        lado_ext = lado if lado in ("inf", "sup") else "inf"
+        vert = _vertice_extremo_silueta(curvas, lado_ext)
+        if vert is not None:
+            return float(vert[0]), y
+
+        x = float(dato.get("cx", 0.0))
         if lado == "izq":
             x = float(dato["minx"])
         elif lado == "der":
             x = float(dato["maxx"])
-        elif lado == "centro":
-            x = float(dato["cx"])
+        try:
+            x = min(max(x, float(dato["minx"])), float(dato["maxx"]))
+        except Exception:
+            pass
         return x, y
     except Exception:
         return (
@@ -3459,8 +3615,13 @@ def _punto_geometria_acotada(miembro, eje):
 def _envolvente_occurrence_en_hoja(datos, vista, tg):
     """
     Proyecta los ocho vértices del RangeBox de la ocurrencia a la hoja.
-    Las curvas HLR de una solera pueden mostrar solo una arista; la caja 3D
-    garantiza que se dimensionen los cuatro extremos reales de la pieza.
+
+    Útil como RESPALDO cuando el HLR no aporta silueta (p. ej. una sola
+    arista). NO debe usarse como fuente primaria de Xmin/Ymin: el AABB 3D
+    proyectado infla X/Y respecto a la silueta visible (profundidad del
+    ensamble, diagonales AISC, filetes) y deja cotas cortas con extensiones
+    flotando — p. ej. JACKING PADS 3.258 in vs 3.687 in reales,
+    INSPECTION_PLATE, AISC en BASE.
     """
     if not datos:
         return None
@@ -3507,6 +3668,53 @@ def _envolvente_occurrence_en_hoja(datos, vista, tg):
         return dato
     except Exception:
         return None
+
+
+def _hlr_sirve_para_inicio(datos):
+    """True si hay curvas HLR con extensión usable para Xmin/Ymin."""
+    if not datos:
+        return False
+    env = _envolvente_hlr_de_datos(datos)
+    if env is None:
+        return False
+    # Franja casi 1D (una sola arista HLR): respaldar con RangeBox.
+    menor = min(float(env["dx"]), float(env["dy"]))
+    mayor = max(float(env["dx"]), float(env["dy"]))
+    if menor <= EPS and mayor > EPS:
+        return False
+    if menor > EPS and mayor / menor >= 20.0 and menor < 0.12:
+        return False
+    return True
+
+
+def _datos_para_inicio_cota(datos, vista, tg, nombre_pieza=""):
+    """
+    Fuente de Xmin/Ymin: curvas HLR visibles (extensión toca la arista).
+
+    Solo si el HLR es insuficiente (franja) se usa el RangeBox 3D.
+    """
+    if _hlr_sirve_para_inicio(datos):
+        env_hlr = _envolvente_hlr_de_datos(datos)
+        env_3d = _envolvente_occurrence_en_hoja(datos, vista, tg)
+        # Diagnóstico: cuánto inflaba el AABB (caso JACKING / INSPECTION).
+        if env_hlr is not None and env_3d is not None:
+            dx = abs(float(env_3d["minx"]) - float(env_hlr["minx"]))
+            dy = abs(float(env_3d["miny"]) - float(env_hlr["miny"]))
+            if dx > 0.05 or dy > 0.05:
+                log(
+                    f"    HLR vs RangeBox {str(nombre_pieza)[:36]}: "
+                    f"Δminx={dx:.3f}cm Δminy={dy:.3f}cm "
+                    f"(se usa HLR)"
+                )
+        return list(datos)
+    env = _envolvente_occurrence_en_hoja(datos, vista, tg)
+    if env is not None:
+        log(
+            f"    Inicio por RangeBox (HLR franja): "
+            f"{str(nombre_pieza)[:36]}"
+        )
+        return [env]
+    return list(datos) if datos else []
 
 
 def _envolvente_visible_refrescada(dato, vista=None, tg=None):
@@ -4161,7 +4369,7 @@ def _circulo_cota_sketch(sketch, tg, x, y, radio, color=None):
         return None
 
 
-def _marcas_typ_en_accesorios(sketch, tg, eje, referencia, color):
+def _marcas_typ_en_accesorios(sketch, tg, eje, referencia, color, valor_medida=None):
     """
     Dona en el punto exacto donde la extension toca cada miembro TYP.
     """
@@ -4172,7 +4380,9 @@ def _marcas_typ_en_accesorios(sketch, tg, eje, referencia, color):
         return
     vistos = set()
     for miembro in miembros[1:]:
-        x, y = _punto_geometria_acotada(miembro, eje)
+        x, y = _punto_geometria_acotada(
+            miembro, eje, valor_medida=valor_medida
+        )
         clave = (round(x, 3), round(y, 3))
         if clave in vistos:
             continue
@@ -4347,19 +4557,30 @@ def _dibujar_cotas_hv_desde_origen(
             rep = (pos.get("miembros") or [pos])[0]
             x = float(pos["valor"])
             y_dim = base_abajo - indice * paso_x
-            x_geo, y_geo = _punto_geometria_acotada(rep, "X")
+            # Extensión en la MISMA X que cierra la cota (no la del miembro TYP).
+            x_geo, y_geo = _punto_geometria_acotada(rep, "X", valor_medida=x)
             valor = _valor_real_desde_hoja(vista, origen_x, x, hoja)
             if not valor:
                 fallos += 1
                 continue
 
             ok = _linea_cota_sketch(sketch, tg, origen_x, y_dim, x, y_dim, color)
-            ok = _linea_cota_sketch(sketch, tg, origen_x, origen_y, origen_x, y_dim, color) and ok
-            ok = _linea_cota_sketch(sketch, tg, x_geo, y_geo, x_geo, y_dim, color) and ok
+            ok = (
+                _linea_cota_sketch(
+                    sketch, tg, origen_x, origen_y, origen_x, y_dim, color
+                )
+                and ok
+            )
+            ok = (
+                _linea_cota_sketch(sketch, tg, x_geo, y_geo, x_geo, y_dim, color)
+                and ok
+            )
             _flechas_horizontales(sketch, tg, origen_x, x, y_dim, color)
-            _marcas_typ_en_accesorios(sketch, tg, "X", pos, color)
+            _marcas_typ_en_accesorios(
+                sketch, tg, "X", pos, color, valor_medida=x
+            )
             texto_valor = f"{valor} TYP" if pos.get("typ") else valor
-            dy_txt = 0.14 if (indice % 2 == 0) else (paso_x * 0.42)
+            dy_txt = 0.16
             texto = _texto_cota_sketch(
                 sketch,
                 tg,
@@ -4377,21 +4598,31 @@ def _dibujar_cotas_hv_desde_origen(
             rep = (pos.get("miembros") or [pos])[0]
             y = float(pos["valor"])
             x_dim = _nivel_cota_y(indice, n_y, base_izq, base_der, paso_y)
-            x_geo, y_geo = _punto_geometria_acotada(rep, "Y")
+            x_geo, y_geo = _punto_geometria_acotada(rep, "Y", valor_medida=y)
             valor = _valor_real_desde_hoja(vista, origen_y, y, hoja)
             if not valor:
                 fallos += 1
                 continue
 
             ok = _linea_cota_sketch(sketch, tg, x_dim, origen_y, x_dim, y, color)
-            ok = _linea_cota_sketch(sketch, tg, origen_x, origen_y, x_dim, origen_y, color) and ok
-            ok = _linea_cota_sketch(sketch, tg, x_geo, y_geo, x_dim, y_geo, color) and ok
+            ok = (
+                _linea_cota_sketch(
+                    sketch, tg, origen_x, origen_y, x_dim, origen_y, color
+                )
+                and ok
+            )
+            ok = (
+                _linea_cota_sketch(sketch, tg, x_geo, y_geo, x_dim, y_geo, color)
+                and ok
+            )
             _flechas_verticales(sketch, tg, x_dim, origen_y, y, color)
-            _marcas_typ_en_accesorios(sketch, tg, "Y", pos, color)
+            _marcas_typ_en_accesorios(
+                sketch, tg, "Y", pos, color, valor_medida=y
+            )
             texto_valor = f"{valor} TYP" if pos.get("typ") else valor
-            dx_txt = 0.14 if (indice % 2 == 0) else (paso_y * 0.42)
+            dx_txt = 0.16
             if indice >= n_y // 2 and n_y > UMBRAL_COTAS_Y_DOBLE_CARA:
-                dx_txt = -(0.14 + len(texto_valor) * 0.08)
+                dx_txt = -(0.16 + len(texto_valor) * 0.08)
             texto = _texto_cota_sketch(
                 sketch,
                 tg,
@@ -4958,6 +5189,37 @@ def _partir_grupos_en_laminas(
     return resultado
 
 
+def _expandir_grupos_una_cota(grupos):
+    """
+    Una foto = una cota (un valor en un eje).
+
+    El sistema aguas abajo necesita detectar cota y valor por imagen.
+    Circulares/barrenos quedan en 2 capturas (Xcentro + Ycentro).
+    """
+    resultado = []
+    for grupo in grupos:
+        base = {
+            "clave": grupo.get("clave"),
+            "qty": grupo.get("qty"),
+            "qty_total": grupo.get("qty_total", grupo.get("qty")),
+            "lamina": grupo.get("lamina", 1),
+            "laminas_total": grupo.get("laminas_total", 1),
+        }
+        for pos in grupo.get("posiciones_x") or []:
+            item = dict(base)
+            item["posiciones_x"] = [pos]
+            item["posiciones_y"] = []
+            item["eje_foto"] = "X"
+            resultado.append(item)
+        for pos in grupo.get("posiciones_y") or []:
+            item = dict(base)
+            item["posiciones_x"] = []
+            item["posiciones_y"] = [pos]
+            item["eje_foto"] = "Y"
+            resultado.append(item)
+    return resultado
+
+
 def _centros_barrenos_en_hoja(datos, vista, tg, envolvente=None):
     """
     Centros en hoja de barrenos (aristas Circle del sólido de la pieza).
@@ -5285,9 +5547,12 @@ def _acotar_vista(
         es_lug = _es_nombre_lug(nombre_pieza)
         tol_pos = (0.01 if es_lug else TOLERANCIA_COTA_CM) * escala_hoja
         envolvente = _envolvente_occurrence_en_hoja(datos, vista, tg)
-        datos_extremos = [envolvente] if envolvente is not None else datos
         if envolvente is not None:
             envolventes_3d += 1
+        # Xmin/Ymin: HLR visible (no RangeBox). Ver _datos_para_inicio_cota.
+        datos_inicio = _datos_para_inicio_cota(
+            datos, vista, tg, nombre_pieza=nombre_pieza
+        )
         barrenos = _centros_barrenos_en_hoja(datos, vista, tg, envolvente)
         if _es_pieza_solo_centro(nombre_pieza, datos, envolvente):
             _agregar_centro_pieza(
@@ -5303,10 +5568,10 @@ def _acotar_vista(
                 f"    Centro circular {nombre_pieza[:36]}"
             )
         else:
-            _agregar_inicio_y_fin(
+            _agregar_inicio(
                 posiciones_x,
                 posiciones_y,
-                datos_extremos,
+                datos_inicio,
                 tol,
                 tol_pos,
                 nombre,
@@ -5356,6 +5621,7 @@ def _acotar_vista(
             else None
         )
         if contacto_lug is not None:
+            # Solo inicio de la cara de contacto (Ymin o Xmin).
             if contacto_lug["eje_contacto"] == "Y":
                 _agregar_posicion(
                     posiciones_y,
@@ -5366,15 +5632,6 @@ def _acotar_vista(
                     nombre,
                     contacto=True,
                 )
-                _agregar_posicion(
-                    posiciones_y,
-                    contacto_lug["maxy"],
-                    contacto_lug,
-                    tol_pos,
-                    "sup",
-                    nombre,
-                    contacto=True,
-                )
             else:
                 _agregar_posicion(
                     posiciones_x,
@@ -5382,15 +5639,6 @@ def _acotar_vista(
                     contacto_lug,
                     tol_pos,
                     "izq",
-                    nombre,
-                    contacto=True,
-                )
-                _agregar_posicion(
-                    posiciones_x,
-                    contacto_lug["maxx"],
-                    contacto_lug,
-                    tol_pos,
-                    "der",
                     nombre,
                     contacto=True,
                 )
@@ -5458,6 +5706,8 @@ def _acotar_vista(
         vista,
         hoja,
     )
+    n_laminas = len(grupos_export)
+    grupos_export = _expandir_grupos_una_cota(grupos_export)
     total_refs = sum(
         len(g["posiciones_x"]) + len(g["posiciones_y"]) for g in grupos_export
     )
@@ -5466,7 +5716,8 @@ def _acotar_vista(
         f"    Piezas de superficie={piezas_superficie} | "
         f"envolventes 3D={envolventes_3d} sin ocurrencia={sin_componente} "
         f"otra cara={fuera_de_cara} | "
-        f"grupos={n_grupos_tipo} laminas={len(grupos_export)} refs={total_refs}"
+        f"grupos={n_grupos_tipo} laminas={n_laminas} "
+        f"fotos={len(grupos_export)} refs={total_refs}"
     )
     if nombres_ok:
         log(f"    Piezas: {', '.join(nombres_ok[:16])}")
@@ -6896,7 +7147,7 @@ def _nombre_archivo_referencia(indice, eje, referencia):
 
 
 def _bbox_foto_grupo(vista, posiciones_x, posiciones_y, origen_x, origen_y):
-    """Caja de recorte para una foto con todas las cotas X+Y de un grupo."""
+    """Caja de recorte para una foto: vista completa + gráficos de cota."""
     minx = float(vista.Left)
     maxx = minx + float(vista.Width)
     maxy = float(vista.Top)
@@ -6916,8 +7167,8 @@ def _bbox_foto_grupo(vista, posiciones_x, posiciones_y, origen_x, origen_y):
         rep = (referencia.get("miembros") or [referencia])[0]
         x = float(referencia["valor"])
         y_dim = base_abajo - indice * paso_x
-        x_geo, y_geo = _punto_geometria_acotada(rep, "X")
-        dy_txt = 0.14 if (indice % 2 == 0) else (paso_x * 0.42)
+        x_geo, y_geo = _punto_geometria_acotada(rep, "X", valor_medida=x)
+        dy_txt = 0.16
         puntos.extend([
             (origen_x, y_dim),
             (x, y_dim),
@@ -6925,17 +7176,17 @@ def _bbox_foto_grupo(vista, posiciones_x, posiciones_y, origen_x, origen_y):
             ((origen_x + x) * 0.5, y_dim + dy_txt + 0.45),
         ])
         for miembro in (referencia.get("miembros") or [])[1:]:
-            mx, my = _punto_geometria_acotada(miembro, "X")
+            mx, my = _punto_geometria_acotada(miembro, "X", valor_medida=x)
             puntos.append((mx, my))
 
     for indice, referencia in enumerate(posiciones_y):
         rep = (referencia.get("miembros") or [referencia])[0]
         y = float(referencia["valor"])
         x_dim = _nivel_cota_y(indice, n_y, base_izq, base_der, paso_y)
-        x_geo, y_geo = _punto_geometria_acotada(rep, "Y")
-        dx_txt = 0.14 if (indice % 2 == 0) else (paso_y * 0.42)
+        x_geo, y_geo = _punto_geometria_acotada(rep, "Y", valor_medida=y)
+        dx_txt = 0.16
         if indice >= n_y // 2 and n_y > UMBRAL_COTAS_Y_DOBLE_CARA:
-            dx_txt = -(0.14 + 1.2)
+            dx_txt = -(0.16 + 1.2)
         puntos.extend([
             (x_dim, origen_y),
             (x_dim, y),
@@ -6943,7 +7194,7 @@ def _bbox_foto_grupo(vista, posiciones_x, posiciones_y, origen_x, origen_y):
             (x_dim + dx_txt, (origen_y + y) * 0.5),
         ])
         for miembro in (referencia.get("miembros") or [])[1:]:
-            mx, my = _punto_geometria_acotada(miembro, "Y")
+            mx, my = _punto_geometria_acotada(miembro, "Y", valor_medida=y)
             puntos.append((mx, my))
 
     for x, y in puntos:
@@ -6964,14 +7215,41 @@ def _bbox_foto_grupo(vista, posiciones_x, posiciones_y, origen_x, origen_y):
 
 
 def _nombre_archivo_grupo(indice, grupo):
+    """
+    Nombre JPG por cota individual, p. ej.:
+      001_XMIN_TYP_SP-852_2.jpg
+      017_XCENTRO_62176-1251-P06_ROD_689.jpg
+    """
     pieza = _limpiar_nombre_archivo(grupo.get("clave", "PIEZA"))[:70] or "PIEZA"
     qty = int(grupo.get("qty") or 1)
     qty_total = int(grupo.get("qty_total") or qty)
     lamina = int(grupo.get("lamina") or 1)
     laminas_total = int(grupo.get("laminas_total") or 1)
+    prefijo_lam = ""
+    if laminas_total > 1:
+        prefijo_lam = f"p{lamina}of{laminas_total}_"
+
+    px = grupo.get("posiciones_x") or []
+    py = grupo.get("posiciones_y") or []
+    eje = grupo.get("eje_foto")
+    ref = None
+    if eje == "X" and px:
+        ref = px[0]
+    elif eje == "Y" and py:
+        ref = py[0]
+    elif len(px) == 1 and not py:
+        eje, ref = "X", px[0]
+    elif len(py) == 1 and not px:
+        eje, ref = "Y", py[0]
+
+    if eje and ref is not None:
+        etiqueta = _etiqueta_referencia(eje, ref)
+        typ = "TYP_" if ref.get("typ") else ""
+        return f"{indice:03d}_{prefijo_lam}{etiqueta}_{typ}{pieza}.jpg"
+
     if laminas_total > 1:
         return (
-            f"{indice:03d}_p{lamina}of{laminas_total}_"
+            f"{indice:03d}_{prefijo_lam}"
             f"QTY{qty}of{qty_total}_{pieza}.jpg"
         )
     return f"{indice:03d}_QTY{qty}_{pieza}.jpg"
@@ -6995,7 +7273,14 @@ def _limpiar_exportaciones_cara(carpeta):
 
 
 _RE_JPG_REFERENCIA = re.compile(
-    r"^\d{3}_(?:p\d+of\d+_)?QTY\d+(?:of\d+)?_(?P<pieza>.+)$",
+    r"^\d{3}_"
+    r"(?:p\d+of\d+_)?"
+    r"(?:"
+    r"QTY\d+(?:of\d+)?_"
+    r"|"
+    r"(?:XMIN|XMAX|YMIN|YMAX|XCENTRO|YCENTRO)(?:_CONTACTO)?_(?:TYP_)?"
+    r")"
+    r"(?P<pieza>.+)$",
     re.IGNORECASE,
 )
 
@@ -7004,6 +7289,8 @@ def _extraer_pieza_de_jpg_referencia(nombre_archivo):
     """
     `001_QTY4_SP-852_2.jpg` → `SP-852_2`
     `001_p1of2_QTY2of4_PIEZA.jpg` → `PIEZA`
+    `001_XMIN_TYP_62176-1248-P35_935.jpg` → `62176-1248-P35_935`
+    `017_XCENTRO_62176-1251-P06_ROD_689.jpg` → `62176-1251-P06_ROD_689`
     """
     base = os.path.splitext(os.path.basename(nombre_archivo))[0]
     match = _RE_JPG_REFERENCIA.match(base)
@@ -7014,26 +7301,24 @@ def _extraer_pieza_de_jpg_referencia(nombre_archivo):
 
 def _reorganizar_referencia_por_pieza(carpeta_raiz, mapa_clasificacion=None):
     """
-    Anida JPG de COTAS_POR_REFERENCIA como Abigail:
+    Anida JPG de COTAS_POR_REFERENCIA solo por cara y pieza:
 
-        <CARA>/<CLASIFICACIÓN>/<PIEZA>/<archivo>.jpg
-    o, sin clasificación:
         <CARA>/<PIEZA>/<archivo>.jpg
 
-    Cada cara ya exporta por separado; si la pieza aparece en SEGM1 y SEGM3
-    cada carpeta de cara conserva su propia foto.
+    (SEGM1..4 / TOP / BASE). No usa colorimetría ni carpetas de proceso
+    (Almacén / Corte / Doblado / …); eso es exclusivo de PIEZAS_ACOTADAS.
+
+    ``mapa_clasificacion`` se ignora (compatibilidad de firma).
     """
     from generador_tanque_completo import (
-        SUBCARPETA_SIN_CLASIFICAR,
         SUBCARPETAS_CARA_SELECCION,
-        SUBCARPETAS_CLASIFICACION_PIEZAS,
-        _clasificacion_para_pieza,
         _nombre_carpeta_pieza,
     )
 
+    del mapa_clasificacion  # no aplica a cotas por referencia / subensamble
+
     if not os.path.isdir(carpeta_raiz):
         return
-    clases_validas = {c.casefold() for c in SUBCARPETAS_CLASIFICACION_PIEZAS}
     total = 0
     for cara in list(SUBCARPETAS_CARA_SELECCION) + ["OTROS"]:
         cara_dir = os.path.join(carpeta_raiz, cara)
@@ -7048,21 +7333,7 @@ def _reorganizar_referencia_por_pieza(carpeta_raiz, mapa_clasificacion=None):
             nombre = os.path.basename(ruta)
             pieza = _extraer_pieza_de_jpg_referencia(nombre)
             pieza_folder = _nombre_carpeta_pieza(pieza)
-            if mapa_clasificacion:
-                clase = _clasificacion_para_pieza(nombre, mapa_clasificacion)
-                if clase and clase.casefold() in clases_validas:
-                    destino_clase = next(
-                        s
-                        for s in SUBCARPETAS_CLASIFICACION_PIEZAS
-                        if s.casefold() == clase.casefold()
-                    )
-                else:
-                    destino_clase = SUBCARPETA_SIN_CLASIFICAR
-                destino_dir = os.path.join(
-                    cara_dir, destino_clase, pieza_folder
-                )
-            else:
-                destino_dir = os.path.join(cara_dir, pieza_folder)
+            destino_dir = os.path.join(cara_dir, pieza_folder)
             try:
                 os.makedirs(destino_dir, exist_ok=True)
                 destino = os.path.join(destino_dir, nombre)
@@ -7077,7 +7348,7 @@ def _reorganizar_referencia_por_pieza(carpeta_raiz, mapa_clasificacion=None):
                     f"  AVISO: no se pudo anidar referencia '{nombre}' "
                     f"en {cara}/{pieza_folder}/: {err}"
                 )
-        # Limpiar carpetas vacías residuales bajo la cara.
+        # Limpiar carpetas vacías residuales (Almacén/Corte/… de corridas viejas).
         for root, _dirs, _files in os.walk(cara_dir, topdown=False):
             if root == cara_dir:
                 continue
@@ -7086,7 +7357,7 @@ def _reorganizar_referencia_por_pieza(carpeta_raiz, mapa_clasificacion=None):
                     os.rmdir(root)
             except OSError:
                 pass
-    log(f"  COTAS_POR_REFERENCIA anidada por pieza: {total} JPG")
+    log(f"  COTAS_POR_REFERENCIA anidada por cara/pieza: {total} JPG")
 
 
 def _exportar_caras_jpg(inv_app, plano, ensamble, planes_cotas):
@@ -7105,7 +7376,7 @@ def _exportar_caras_jpg(inv_app, plano, ensamble, planes_cotas):
     esperadas = 0
     tg = inv_app.TransientGeometry
 
-    log("Exportando una fotografía JPG por tipo de pieza (X+Y juntos)...")
+    log("Exportando una fotografía JPG por cota (inicio X/Y o centro)...")
     log("  Modo: encuadre estable por cara (1 Update; sin reframe por JPG)")
     log(f"  Carpeta: {carpeta_raiz}")
 
@@ -7122,11 +7393,12 @@ def _exportar_caras_jpg(inv_app, plano, ensamble, planes_cotas):
                     "posiciones_y": list(plan.get("posiciones_y") or []),
                 }
             ]
+            grupos = _expandir_grupos_una_cota(grupos)
         esperadas += len(grupos)
         carpeta_cara = os.path.join(carpeta_raiz, cara)
         _limpiar_exportaciones_cara(carpeta_cara)
         estado = _estado_base_vista(vista)
-        log(f"  {cara}: {len(grupos)} fotos por tipo")
+        log(f"  {cara}: {len(grupos)} fotos (1 cota c/u)")
         inicio_cara = time.perf_counter()
 
         try:
@@ -7420,15 +7692,14 @@ def ejecutar(gestionar_com=True, ruta_seleccion=None):
         if exportadas != esperadas:
             return False
 
-        # Anidar JPG en <CARA>/<CLASIFICACIÓN>/<PIEZA>/ (mismo esquema Abigail).
+        # Anidar JPG en <CARA>/<PIEZA>/ (sin colorimetría / proceso).
+        # El mapa por clasificación se sigue guardando para Abigail (piezas).
         try:
             carpeta_tanque = _carpeta_salida_tanque(plano, ensamble)
             mapa_cls = detectar_mapa_piezas_por_clasificacion(inv_app, ensamble)
             if mapa_cls:
                 guardar_mapa_piezas_por_clasificacion(carpeta_tanque, mapa_cls)
-            else:
-                mapa_cls = cargar_mapa_piezas_por_clasificacion(carpeta_tanque)
-            _reorganizar_referencia_por_pieza(carpeta, mapa_cls or None)
+            _reorganizar_referencia_por_pieza(carpeta)
         except Exception as err:
             log(f"  AVISO al anidar COTAS_POR_REFERENCIA por pieza: {err}")
 

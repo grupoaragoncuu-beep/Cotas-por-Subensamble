@@ -1,7 +1,8 @@
 import re
 
-# Inventor usa cm para FontSize en estilos de dibujo
-COTA_FONT_SIZE_CM = 0.18
+# Inventor usa cm para FontSize en estilos de dibujo.
+# +25% vs 0.18 cm base (pedido de legibilidad en Abigail y Subensamble).
+COTA_FONT_SIZE_CM = 0.225
 COTA_NAVY_RGB = (0, 0, 128)
 COTA_BOLD = True
 
