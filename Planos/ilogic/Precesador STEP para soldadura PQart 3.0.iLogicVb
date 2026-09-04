@@ -1,0 +1,2491 @@
+Option Explicit On
+
+' ============================================================
+' REGLA iLOGIC:
+' PROCESADOR STEP PARA SOLDADURA PQART 3.0
+' EXPORTAR 4 STEPS CON SELECCIÓN MANUAL DE TOP COVER + 4 CARAS
+'
+' ORIENTACION POR SEGMENTO (estable = mismo armado que PQart 2.0):
+' - Cara de cada segmento -> +Z  (igual que 2.0)
+' - Primero se orienta TOP COVER a +Y exactamente como en 2.0
+' - Luego una rotacion pura en Z lleva la tapa al destino 3.0:
+'      SEG 2 y 4: +Y -> +X  (Rz -90)
+'      SEG 1 y 3: +Y -> -Y  (Rz 180, acostado)
+'
+' FLUJO:
+' 1. Seleccionar TOP COVER (referencia; el eje destino depende del segmento).
+' 2. Seleccionar la cara expuesta de cada segmento 1-4 que debe quedar en +Z.
+' 3. Para cada segmento:
+'      - Orienta como 2.0 (cara +Z, tapa +Y).
+'      - Aplica Rz post para tapa +X (SEG2/4) o -Y (SEG1/3).
+'      - Mueve la esquina inferior izquierda de esa cara a 0,0,0.
+'      - Exporta STEP + JSON 3D + JSON 2D limpio para PQArt.
+'
+' IMPORTANTE PARA PLANOS / COTAS ABIGAIL:
+' Tras orientar (cara +Z, tapa +Y intermedio), la vista Front NATIVA de
+' Inventor mira desde +Y y el tanque se ve HUECO. No cambiamos +Z/+Y aqui
+' porque rompe la convencion de soldadura PQArt.
+'
+' Para planos de caras use COTAS_CARAS_TANQUE (camaras de las 4 paredes,
+' no Front/Right/Left/Back nativos).
+' ============================================================
+
+Sub Main()
+
+    Const TOP_TARGET As String = "+Z"
+    ' Paso intermedio identico a PQart 2.0 (tapa -> +Y). El destino final 3.0
+    ' (+X / -Y) se aplica despues con Rz (CoverPostRotationDegFromPlusY).
+    Const COVER_TARGET As String = "+Y"
+
+    Const NUM_SEGMENTS As Integer = 4
+
+    Const INVERT_SEGMENT_NORMAL As Boolean = False
+    Const INVERT_TOP_COVER_NORMAL As Boolean = False
+
+    ' Si True, antes de exportar cada STEP mueve el tanque para que
+    ' el origen quede en la esquina de la cara seleccionada para ese segmento.
+    Const REPOSITION_ORIGIN_TO_SELECTED_FACE_CORNER As Boolean = True
+
+    ' Esquina deseada sobre la cara seleccionada:
+    ' True  = mínimo X / mínimo Y después de orientar la pieza
+    ' False = máximo X / máximo Y después de orientar la pieza
+    Const ORIGIN_USE_MIN_X As Boolean = True
+    Const ORIGIN_USE_MIN_Y As Boolean = True
+
+    If ThisApplication.ActiveDocument.DocumentType <> DocumentTypeEnum.kAssemblyDocumentObject Then
+        Throw New Exception("Ejecuta desde un ensamble .iam con el STEP insertado.")
+    End If
+
+    Dim asmDoc As AssemblyDocument = CType(ThisApplication.ActiveDocument, AssemblyDocument)
+
+    If asmDoc.ComponentDefinition.Occurrences.Count = 0 Then
+        Throw New Exception("El ensamble no tiene ocurrencias para rotar.")
+    End If
+
+    Dim lenToMm As Double = 10.0
+
+    Dim originalTransforms As System.Collections.Generic.Dictionary(Of String, Matrix)
+    originalTransforms = SnapshotRootOccurrenceTransforms(asmDoc)
+
+    Dim outputDir As String = ResolvePqartWeldOutputFolder(asmDoc)
+    System.IO.Directory.CreateDirectory(outputDir)
+
+    Dim outBaseName As String = ResolveOutputBaseName(asmDoc)
+
+    If String.IsNullOrEmpty(outBaseName) Then
+        outBaseName = "tanque_enderezado"
+    End If
+
+    outBaseName = SafeFileName(outBaseName)
+
+    ' Pivot original del ensamble completo.
+    Dim preBoxCm As Double() = CombinedRootOccurrenceRangeBoxCm(asmDoc)
+
+    Dim pivotXcm As Double = preBoxCm(6)
+    Dim pivotYcm As Double = preBoxCm(7)
+    Dim pivotZcm As Double = preBoxCm(8)
+
+    Dim pivotMm As Double() = Vec( _
+        pivotXcm * lenToMm, _
+        pivotYcm * lenToMm, _
+        pivotZcm * lenToMm)
+
+    MessageBox.Show( _
+        "Modo forzado por selección manual." & vbCrLf & vbCrLf & _
+        "Este será el único mensaje de instrucciones." & vbCrLf & vbCrLf & _
+        "Procesador STEP PQart 3.0" & vbCrLf & vbCrLf & _
+        "Después de aceptar, realiza estas 5 selecciones en este orden:" & vbCrLf & _
+        "1. TOP COVER (referencia de tapa)." & vbCrLf & _
+        "2. Cara expuesta del SEGMENTO 1 -> +Z (tapa exportada a -Y, acostado)." & vbCrLf & _
+        "3. Cara expuesta del SEGMENTO 2 -> +Z (tapa exportada a +X)." & vbCrLf & _
+        "4. Cara expuesta del SEGMENTO 3 -> +Z (tapa exportada a -Y, acostado)." & vbCrLf & _
+        "5. Cara expuesta del SEGMENTO 4 -> +Z (tapa exportada a +X)." & vbCrLf & vbCrLf & _
+        "Cada STEP usará exactamente la cara seleccionada para colocar la triada en su esquina inferior izquierda." & vbCrLf & _
+        "Nota 3.0: SEG1/3 tapa -Y; SEG2/4 tapa +X.", _
+        "Exportar segmentos para PQArt 3.0")
+
+    ' ------------------------------------------------------------
+    ' 1) Seleccionar TOP COVER (eje destino depende del segmento)
+    ' ------------------------------------------------------------
+    Dim coverObj As Object = ThisApplication.CommandManager.Pick( _
+        SelectionFilterEnum.kPartFacePlanarFilter, _
+        "Selecciona el TOP COVER (SEG1/3 -> -Y, SEG2/4 -> +X)")
+
+    If coverObj Is Nothing Then Return
+
+    Dim coverFace As FaceProxy = TryCast(coverObj, FaceProxy)
+
+    If coverFace Is Nothing Then
+        Throw New Exception("Selecciona una cara plana del ensamble para el TOP COVER.")
+    End If
+
+    Dim coverOccName As String = ""
+
+    Try
+        coverOccName = coverFace.ContainingOccurrence.Name
+    Catch
+        coverOccName = ""
+    End Try
+
+    Dim coverPtBeforeMm As Double() = FacePointMm(coverFace, lenToMm)
+    Dim coverNormalImported As Double() = FaceNormal(coverFace)
+    Dim coverNormalRaw As Double() = ForceNormalAwayFromPivot(coverNormalImported, coverPtBeforeMm, pivotMm)
+
+    If INVERT_TOP_COVER_NORMAL Then
+        coverNormalRaw = ScaleVec(coverNormalRaw, -1.0)
+    End If
+
+    coverNormalRaw = NormalizeVec(coverNormalRaw)
+
+    ' ------------------------------------------------------------
+    ' 2) Seleccionar las 4 caras expuestas de los segmentos
+    ' ------------------------------------------------------------
+    Dim segmentNames As New System.Collections.Generic.List(Of String)
+    Dim segmentPtsBeforeMm As New System.Collections.Generic.List(Of Double())
+    Dim segmentNormalsRaw As New System.Collections.Generic.List(Of Double())
+    Dim segmentFaceVerticesMm As New System.Collections.Generic.List(Of System.Collections.Generic.List(Of Double()))
+
+    For pickIndex As Integer = 1 To NUM_SEGMENTS
+
+        Dim segObj As Object = ThisApplication.CommandManager.Pick( _
+            SelectionFilterEnum.kPartFacePlanarFilter, _
+            "Selecciona la cara expuesta del SEGMENTO " & pickIndex & " que debe quedar hacia +Z")
+
+        If segObj Is Nothing Then Return
+
+        Dim segFace As FaceProxy = TryCast(segObj, FaceProxy)
+
+        If segFace Is Nothing Then
+            Throw New Exception("Selecciona una cara plana del ensamble para el SEGMENTO " & pickIndex & ".")
+        End If
+
+        Dim segOccName As String = ""
+
+        Try
+            segOccName = segFace.ContainingOccurrence.Name
+        Catch
+            segOccName = ""
+        End Try
+
+        Dim segPt As Double() = FacePointMm(segFace, lenToMm)
+        Dim segNormalImported As Double() = FaceNormal(segFace)
+        Dim segNormalRaw As Double() = ForceNormalAwayFromPivot(segNormalImported, segPt, pivotMm)
+
+        If INVERT_SEGMENT_NORMAL Then
+            segNormalRaw = ScaleVec(segNormalRaw, -1.0)
+        End If
+
+        segNormalRaw = NormalizeVec(segNormalRaw)
+
+        Dim facePts As System.Collections.Generic.List(Of Double()) = FaceVerticesMm(segFace, lenToMm)
+
+        segmentNames.Add(segOccName)
+        segmentPtsBeforeMm.Add(segPt)
+        segmentNormalsRaw.Add(segNormalRaw)
+        segmentFaceVerticesMm.Add(facePts)
+
+    Next
+
+    Dim exportedCount As Integer = 0
+    Dim failedCount As Integer = 0
+    Dim summary As New System.Text.StringBuilder()
+
+    ' ------------------------------------------------------------
+    ' Exportar 4 segmentos usando la cara seleccionada de cada segmento
+    ' ------------------------------------------------------------
+    For segIndex As Integer = 1 To NUM_SEGMENTS
+
+        RestoreRootOccurrenceTransforms(asmDoc, originalTransforms)
+        asmDoc.Update()
+
+        Try
+
+            Dim segNormalRaw As Double() = segmentNormalsRaw(segIndex - 1)
+            Dim segPtBeforeMm As Double() = segmentPtsBeforeMm(segIndex - 1)
+            Dim currentSegOccName As String = segmentNames(segIndex - 1)
+            Dim currentFacePtsMm As System.Collections.Generic.List(Of Double()) = segmentFaceVerticesMm(segIndex - 1)
+
+            ' Estabilidad = mismo armado que PQart 2.0 (tapa como eje Y -> +Y),
+            ' luego Rz post para destino 3.0 (+X SEG2/4, -Y SEG1/3).
+            Dim coverTargetSeg As String = CoverTargetForSegment(segIndex)
+
+            Dim zCur As Double() = NormalizeVec(segNormalRaw)
+            Dim yCur As Double() = NormalizeVec(coverNormalRaw)
+
+            ' Proyectar TOP COVER para que sea perpendicular a la cara del segmento.
+            Dim dotYZ As Double = DotVec(yCur, zCur)
+            yCur = SubVec(yCur, ScaleVec(zCur, dotYZ))
+
+            If VecLength(yCur) < 0.000001 Then
+                Throw New Exception( _
+                    "La cara seleccionada del SEGMENTO " & segIndex & " y el TOP COVER son paralelos o casi paralelos. " & _
+                    "Selecciona una cara lateral expuesta del segmento y la tapa/top cover como referencia.")
+            End If
+
+            yCur = NormalizeVec(yCur)
+
+            Dim xCur As Double() = NormalizeVec(CrossVec(yCur, zCur))
+
+            Dim zDes As Double() = AxisVector(TOP_TARGET)
+            Dim yDes As Double() = AxisVector(COVER_TARGET)
+
+            If Math.Abs(DotVec(yDes, zDes)) > 0.000001 Then
+                Throw New Exception("TOP_TARGET y COVER_TARGET no pueden ser paralelos.")
+            End If
+
+            yDes = NormalizeVec(SubVec(yDes, ScaleVec(zDes, DotVec(yDes, zDes))))
+
+            Dim xDes As Double() = NormalizeVec(CrossVec(yDes, zDes))
+
+            Dim rotLike20(2, 2) As Double
+
+            For iRow As Integer = 0 To 2
+                For iCol As Integer = 0 To 2
+                    rotLike20(iRow, iCol) = xDes(iRow) * xCur(iCol) + _
+                                            yDes(iRow) * yCur(iCol) + _
+                                            zDes(iRow) * zCur(iCol)
+                Next
+            Next
+
+            Dim postDeg As Double = CoverPostRotationDegFromPlusY(coverTargetSeg)
+            Dim finalRot(2, 2) As Double
+            If Math.Abs(postDeg) < 0.000001 Then
+                finalRot = rotLike20
+            Else
+                finalRot = MatMul3(RotationAroundGlobalAxis("+Z", postDeg), rotLike20)
+            End If
+
+            Dim checkSegNormal As Double() = NormalizeVec(RotateVector(zCur, finalRot))
+            Dim checkCoverNormal As Double() = NormalizeVec(RotateVector(yCur, finalRot))
+
+            Dim movedCount As Integer = 0
+            Dim moveFailCount As Integer = 0
+
+            ApplyRotationToRootOccurrencesFromSnapshot( _
+                asmDoc, _
+                originalTransforms, _
+                finalRot, _
+                pivotXcm, pivotYcm, pivotZcm, _
+                movedCount, moveFailCount)
+
+            If movedCount = 0 Then
+                Throw New Exception("No se pudo mover ninguna ocurrencia para SEGMENTO " & segIndex & ".")
+            End If
+
+            asmDoc.Update()
+
+            ' ------------------------------------------------------------
+            ' Reposicionar origen a esquina de la cara seleccionada
+            ' ------------------------------------------------------------
+            Dim originBeforeShiftMm As Double() = Vec(0, 0, 0)
+            Dim originShiftMm As Double() = Vec(0, 0, 0)
+            Dim originMethod As String = "manual_selected_segment_face_corner"
+
+            If REPOSITION_ORIGIN_TO_SELECTED_FACE_CORNER Then
+
+                originBeforeShiftMm = SelectedFaceCornerAfterRotationMm( _
+                    currentFacePtsMm, _
+                    pivotMm, _
+                    finalRot, _
+                    ORIGIN_USE_MIN_X, _
+                    ORIGIN_USE_MIN_Y)
+
+                originShiftMm = Vec( _
+                    -originBeforeShiftMm(0), _
+                    -originBeforeShiftMm(1), _
+                    -originBeforeShiftMm(2))
+
+                TranslateRootOccurrencesCm( _
+                    asmDoc, _
+                    originShiftMm(0) / lenToMm, _
+                    originShiftMm(1) / lenToMm, _
+                    originShiftMm(2) / lenToMm)
+
+                asmDoc.Update()
+
+            End If
+
+            Dim postBoxCm As Double() = CombinedRootOccurrenceRangeBoxCm(asmDoc)
+
+            Dim xmin As Double = postBoxCm(0) * lenToMm
+            Dim ymin As Double = postBoxCm(1) * lenToMm
+            Dim zmin As Double = postBoxCm(2) * lenToMm
+
+            Dim xmax As Double = postBoxCm(3) * lenToMm
+            Dim ymax As Double = postBoxCm(4) * lenToMm
+            Dim zmax As Double = postBoxCm(5) * lenToMm
+
+            Dim cx As Double = postBoxCm(6) * lenToMm
+            Dim cy As Double = postBoxCm(7) * lenToMm
+            Dim cz As Double = postBoxCm(8) * lenToMm
+
+            Dim segOriginNoShift As Double() = RotatePointMm(segPtBeforeMm, pivotMm, finalRot)
+            Dim coverOriginNoShift As Double() = RotatePointMm(coverPtBeforeMm, pivotMm, finalRot)
+
+            Dim segOrigin As Double() = AddVec(segOriginNoShift, originShiftMm)
+            Dim coverOrigin As Double() = AddVec(coverOriginNoShift, originShiftMm)
+
+            Dim segN As Double() = NormalizeVec(RotateVector(segNormalRaw, finalRot))
+            Dim coverN As Double() = NormalizeVec(RotateVector(coverNormalRaw, finalRot))
+
+            Dim wobj2X As Double = 0.0
+            Dim wobj2Y As Double = 0.0
+            Dim wobj2Z As Double = 0.0
+
+            Dim segTag As String = "SEGMENTO_" & segIndex.ToString("00")
+            Dim segmentOutputDir As String = System.IO.Path.Combine(outputDir, segTag)
+            System.IO.Directory.CreateDirectory(segmentOutputDir)
+
+            Dim stepPath As String = System.IO.Path.Combine(segmentOutputDir, outBaseName & "_" & segTag & "_PQART_SOLDADURA.step")
+            Dim json3DPath As String = System.IO.Path.Combine(segmentOutputDir, outBaseName & "_" & segTag & "_3D_FRAME.json")
+            Dim json2DPath As String = System.IO.Path.Combine(segmentOutputDir, outBaseName & "_" & segTag & "_2D_FACE_MAP.json")
+
+            Dim selectedFacePtsAfterShiftMm As System.Collections.Generic.List(Of Double()) = TransformPointListAfterRotationAndShiftMm( _
+                currentFacePtsMm, _
+                pivotMm, _
+                finalRot, _
+                originShiftMm)
+
+            Dim json3DText As String = BuildFrameJson( _
+                asmDoc, _
+                segIndex, _
+                0.0, _
+                0.0, _
+                currentSegOccName, coverOccName, _
+                TOP_TARGET, coverTargetSeg, _
+                INVERT_SEGMENT_NORMAL, INVERT_TOP_COVER_NORMAL, _
+                REPOSITION_ORIGIN_TO_SELECTED_FACE_CORNER, _
+                originMethod, _
+                originBeforeShiftMm, originShiftMm, _
+                segOrigin, segN, coverOrigin, coverN, _
+                xmin, ymin, zmin, xmax, ymax, zmax, _
+                cx, cy, cz, _
+                wobj2X, wobj2Y, wobj2Z, _
+                finalRot, _
+                pivotMm, _
+                movedCount, moveFailCount, _
+                segmentOutputDir, stepPath)
+
+            Dim json2DText As String = BuildFace2DMapJson( _
+                asmDoc, _
+                segIndex, _
+                currentSegOccName, _
+                coverOccName, _
+                originMethod, _
+                selectedFacePtsAfterShiftMm, _
+                segN, _
+                coverN, _
+                xmin, ymin, zmin, xmax, ymax, zmax, _
+                segmentOutputDir, _
+                stepPath, _
+                json3DPath)
+
+            System.IO.File.WriteAllText(json3DPath, json3DText, System.Text.Encoding.UTF8)
+            System.IO.File.WriteAllText(json2DPath, json2DText, System.Text.Encoding.UTF8)
+
+            If System.IO.File.Exists(stepPath) Then
+                System.IO.File.Delete(stepPath)
+            End If
+
+            ExportAssemblyToStepSafe(asmDoc, stepPath)
+
+            exportedCount += 1
+
+            summary.AppendLine(segTag & ": OK")
+            summary.AppendLine("TOP COVER target: " & coverTargetSeg)
+            summary.AppendLine("STEP: " & stepPath)
+            summary.AppendLine("JSON 3D: " & json3DPath)
+            summary.AppendLine("JSON 2D: " & json2DPath)
+            summary.AppendLine("Origen: " & originMethod)
+            summary.AppendLine("Cara seleccionada: " & currentSegOccName)
+            summary.AppendLine("")
+
+        Catch ex As Exception
+
+            failedCount += 1
+
+            summary.AppendLine("SEGMENTO_" & segIndex.ToString("00") & ": ERROR")
+            summary.AppendLine(ex.Message)
+            summary.AppendLine("")
+
+        End Try
+
+    Next
+
+    RestoreRootOccurrenceTransforms(asmDoc, originalTransforms)
+    asmDoc.Update()
+
+    Try
+        Dim summaryPath As String = System.IO.Path.Combine(outputDir, outBaseName & "_resumen_exportacion_pqart.txt")
+        Dim finalSummary As New System.Text.StringBuilder()
+
+        finalSummary.AppendLine("Proceso terminado.")
+        finalSummary.AppendLine("Exportados correctamente: " & exportedCount)
+        finalSummary.AppendLine("Con error: " & failedCount)
+        finalSummary.AppendLine("")
+        finalSummary.AppendLine("Carpeta de salida:")
+        finalSummary.AppendLine(outputDir)
+        finalSummary.AppendLine("")
+        finalSummary.AppendLine(summary.ToString())
+
+        System.IO.File.WriteAllText(summaryPath, finalSummary.ToString(), System.Text.Encoding.UTF8)
+    Catch
+    End Try
+
+End Sub
+
+' ============================================================
+' APLICAR ROTACIÓN DESDE SNAPSHOT ORIGINAL
+' ============================================================
+
+Sub ApplyRotationToRootOccurrencesFromSnapshot( _
+    ByVal asmDoc As AssemblyDocument, _
+    ByVal originalTransforms As System.Collections.Generic.Dictionary(Of String, Matrix), _
+    ByVal rotMat As Double(,), _
+    ByVal pivotXcm As Double, _
+    ByVal pivotYcm As Double, _
+    ByVal pivotZcm As Double, _
+    ByRef movedCount As Integer, _
+    ByRef failCount As Integer)
+
+    movedCount = 0
+    failCount = 0
+
+    For Each rootOcc As ComponentOccurrence In asmDoc.ComponentDefinition.Occurrences
+
+        Try
+            rootOcc.Grounded = False
+        Catch
+        End Try
+
+        Try
+            If Not originalTransforms.ContainsKey(rootOcc.Name) Then
+                failCount += 1
+                Continue For
+            End If
+
+            Dim oldM As Matrix = originalTransforms(rootOcc.Name)
+            Dim newM As Matrix = oldM.Copy
+
+            For iRow As Integer = 1 To 3
+                For iCol As Integer = 1 To 3
+                    newM.Cell(iRow, iCol) = rotMat(iRow - 1, 0) * oldM.Cell(1, iCol) + _
+                                            rotMat(iRow - 1, 1) * oldM.Cell(2, iCol) + _
+                                            rotMat(iRow - 1, 2) * oldM.Cell(3, iCol)
+                Next
+            Next
+
+            Dim oldX As Double = oldM.Cell(1, 4)
+            Dim oldY As Double = oldM.Cell(2, 4)
+            Dim oldZ As Double = oldM.Cell(3, 4)
+
+            Dim dx As Double = oldX - pivotXcm
+            Dim dy As Double = oldY - pivotYcm
+            Dim dz As Double = oldZ - pivotZcm
+
+            newM.Cell(1, 4) = pivotXcm + rotMat(0, 0) * dx + rotMat(0, 1) * dy + rotMat(0, 2) * dz
+            newM.Cell(2, 4) = pivotYcm + rotMat(1, 0) * dx + rotMat(1, 1) * dy + rotMat(1, 2) * dz
+            newM.Cell(3, 4) = pivotZcm + rotMat(2, 0) * dx + rotMat(2, 1) * dy + rotMat(2, 2) * dz
+
+            rootOcc.SetTransformWithoutConstraints(newM)
+            movedCount += 1
+
+        Catch
+            failCount += 1
+        End Try
+
+    Next
+
+End Sub
+
+
+Sub TranslateRootOccurrencesCm( _
+    ByVal asmDoc As AssemblyDocument, _
+    ByVal dxCm As Double, _
+    ByVal dyCm As Double, _
+    ByVal dzCm As Double)
+
+    For Each occ As ComponentOccurrence In asmDoc.ComponentDefinition.Occurrences
+
+        Try
+            occ.Grounded = False
+        Catch
+        End Try
+
+        Try
+            Dim oldM As Matrix = occ.Transformation
+            Dim newM As Matrix = oldM.Copy
+
+            newM.Cell(1, 4) = oldM.Cell(1, 4) + dxCm
+            newM.Cell(2, 4) = oldM.Cell(2, 4) + dyCm
+            newM.Cell(3, 4) = oldM.Cell(3, 4) + dzCm
+
+            occ.SetTransformWithoutConstraints(newM)
+
+        Catch
+        End Try
+
+    Next
+
+End Sub
+
+
+' ============================================================
+' SNAPSHOT / RESTAURACIÓN
+' ============================================================
+
+Function SnapshotRootOccurrenceTransforms( _
+    ByVal asmDoc As AssemblyDocument) _
+    As System.Collections.Generic.Dictionary(Of String, Matrix)
+
+    Dim dict As New System.Collections.Generic.Dictionary(Of String, Matrix)
+
+    For Each occ As ComponentOccurrence In asmDoc.ComponentDefinition.Occurrences
+        Try
+            dict(occ.Name) = occ.Transformation.Copy
+        Catch
+        End Try
+    Next
+
+    Return dict
+
+End Function
+
+
+Sub RestoreRootOccurrenceTransforms( _
+    ByVal asmDoc As AssemblyDocument, _
+    ByVal dict As System.Collections.Generic.Dictionary(Of String, Matrix))
+
+    For Each occ As ComponentOccurrence In asmDoc.ComponentDefinition.Occurrences
+
+        Try
+            If dict.ContainsKey(occ.Name) Then
+                Try
+                    occ.Grounded = False
+                Catch
+                End Try
+
+                occ.SetTransformWithoutConstraints(dict(occ.Name))
+            End If
+
+        Catch
+        End Try
+
+    Next
+
+End Sub
+
+
+' ============================================================
+' FUNCIONES DE SALIDA / RUTAS
+' ============================================================
+
+Function ResolvePqartWeldOutputFolder(ByVal asmDoc As AssemblyDocument) As String
+
+    Dim originDir As String = FindProbableOriginalStepFolder(asmDoc)
+
+    If String.IsNullOrEmpty(originDir) Then
+        originDir = System.IO.Path.GetDirectoryName(asmDoc.FullFileName)
+    End If
+
+    If String.IsNullOrEmpty(originDir) Then
+        originDir = System.Environment.GetFolderPath(System.Environment.SpecialFolder.Desktop)
+    End If
+
+    Return System.IO.Path.Combine(originDir, "STEP para PQart de soldadura")
+
+End Function
+
+
+Function ResolveOutputBaseName(ByVal asmDoc As AssemblyDocument) As String
+
+    Dim stepFile As String = FindProbableOriginalStepFile(asmDoc)
+
+    If Not String.IsNullOrEmpty(stepFile) Then
+        Return System.IO.Path.GetFileNameWithoutExtension(stepFile)
+    End If
+
+    If Not String.IsNullOrEmpty(asmDoc.FullFileName) Then
+        Return System.IO.Path.GetFileNameWithoutExtension(asmDoc.FullFileName)
+    End If
+
+    Return "tanque_enderezado"
+
+End Function
+
+
+Function FindProbableOriginalStepFolder(ByVal asmDoc As AssemblyDocument) As String
+
+    Dim stepFile As String = FindProbableOriginalStepFile(asmDoc)
+
+    If Not String.IsNullOrEmpty(stepFile) Then
+        Return System.IO.Path.GetDirectoryName(stepFile)
+    End If
+
+    If Not String.IsNullOrEmpty(asmDoc.FullFileName) Then
+        Return System.IO.Path.GetDirectoryName(asmDoc.FullFileName)
+    End If
+
+    Return System.Environment.GetFolderPath(System.Environment.SpecialFolder.Desktop)
+
+End Function
+
+
+Function FindProbableOriginalStepFile(ByVal asmDoc As AssemblyDocument) As String
+
+    If String.IsNullOrEmpty(asmDoc.FullFileName) Then
+        Return ""
+    End If
+
+    Dim asmDir As String = System.IO.Path.GetDirectoryName(asmDoc.FullFileName)
+    Dim asmBase As String = System.IO.Path.GetFileNameWithoutExtension(asmDoc.FullFileName)
+
+    If String.IsNullOrEmpty(asmDir) Then
+        Return ""
+    End If
+
+    Dim currentDir As System.IO.DirectoryInfo = New System.IO.DirectoryInfo(asmDir)
+
+    For level As Integer = 0 To 6
+
+        If currentDir Is Nothing Then
+            Exit For
+        End If
+
+        Dim exact1 As String = System.IO.Path.Combine(currentDir.FullName, asmBase & ".stp")
+        Dim exact2 As String = System.IO.Path.Combine(currentDir.FullName, asmBase & ".step")
+        Dim exact3 As String = System.IO.Path.Combine(currentDir.FullName, asmBase & ".STP")
+        Dim exact4 As String = System.IO.Path.Combine(currentDir.FullName, asmBase & ".STEP")
+
+        If System.IO.File.Exists(exact1) Then Return exact1
+        If System.IO.File.Exists(exact2) Then Return exact2
+        If System.IO.File.Exists(exact3) Then Return exact3
+        If System.IO.File.Exists(exact4) Then Return exact4
+
+        Try
+            Dim stpFiles As String() = System.IO.Directory.GetFiles(currentDir.FullName, "*.stp")
+
+            If Not stpFiles Is Nothing AndAlso stpFiles.Length > 0 Then
+                Return stpFiles(0)
+            End If
+        Catch
+        End Try
+
+        Try
+            Dim stepFiles As String() = System.IO.Directory.GetFiles(currentDir.FullName, "*.step")
+
+            If Not stepFiles Is Nothing AndAlso stepFiles.Length > 0 Then
+                Return stepFiles(0)
+            End If
+        Catch
+        End Try
+
+        currentDir = currentDir.Parent
+
+    Next
+
+    Return ""
+
+End Function
+
+
+Function SafeFileName(ByVal s As String) As String
+
+    If s Is Nothing Then
+        Return ""
+    End If
+
+    Dim invalidChars As Char() = System.IO.Path.GetInvalidFileNameChars()
+
+    For Each ch As Char In invalidChars
+        s = s.Replace(ch, "_"c)
+    Next
+
+    Return s.Trim()
+
+End Function
+
+
+Sub ExportAssemblyToStepSafe(ByVal asmDoc As AssemblyDocument, ByVal stepPath As String)
+
+    Dim outDir As String = System.IO.Path.GetDirectoryName(stepPath)
+
+    If Not System.IO.Directory.Exists(outDir) Then
+        System.IO.Directory.CreateDirectory(outDir)
+    End If
+
+    Dim stepAddIn As TranslatorAddIn = CType( _
+        ThisApplication.ApplicationAddIns.ItemById("{90AF7F40-0C01-11D5-8E83-0010B541CD80}"), _
+        TranslatorAddIn)
+
+    Dim context As TranslationContext = ThisApplication.TransientObjects.CreateTranslationContext()
+    context.Type = IOMechanismEnum.kFileBrowseIOMechanism
+
+    Dim options As NameValueMap = ThisApplication.TransientObjects.CreateNameValueMap()
+
+    Try
+        If stepAddIn.HasSaveCopyAsOptions(asmDoc, context, options) Then
+            Try
+                options.Value("ApplicationProtocolType") = 3
+            Catch
+            End Try
+        End If
+    Catch
+    End Try
+
+    Dim data As DataMedium = ThisApplication.TransientObjects.CreateDataMedium()
+    data.FileName = stepPath
+
+    stepAddIn.SaveCopyAs(asmDoc, context, options, data)
+
+End Sub
+
+
+' ============================================================
+' GEOMETRÍA
+' ============================================================
+
+Function CombinedRootOccurrenceRangeBoxCm(ByVal asmDoc As AssemblyDocument) As Double()
+
+    Dim xmin As Double = Double.MaxValue
+    Dim ymin As Double = Double.MaxValue
+    Dim zmin As Double = Double.MaxValue
+
+    Dim xmax As Double = Double.MinValue
+    Dim ymax As Double = Double.MinValue
+    Dim zmax As Double = Double.MinValue
+
+    Dim found As Boolean = False
+
+    For Each occ As ComponentOccurrence In asmDoc.ComponentDefinition.Occurrences
+
+        Try
+            Dim rb As Box = occ.RangeBox
+
+            If rb.MinPoint.X < xmin Then xmin = rb.MinPoint.X
+            If rb.MinPoint.Y < ymin Then ymin = rb.MinPoint.Y
+            If rb.MinPoint.Z < zmin Then zmin = rb.MinPoint.Z
+
+            If rb.MaxPoint.X > xmax Then xmax = rb.MaxPoint.X
+            If rb.MaxPoint.Y > ymax Then ymax = rb.MaxPoint.Y
+            If rb.MaxPoint.Z > zmax Then zmax = rb.MaxPoint.Z
+
+            found = True
+
+        Catch
+        End Try
+
+    Next
+
+    If Not found Then
+        Throw New Exception("No se pudo calcular el bounding box del ensamble.")
+    End If
+
+    Dim vals(8) As Double
+
+    vals(0) = xmin
+    vals(1) = ymin
+    vals(2) = zmin
+
+    vals(3) = xmax
+    vals(4) = ymax
+    vals(5) = zmax
+
+    vals(6) = (xmin + xmax) / 2.0
+    vals(7) = (ymin + ymax) / 2.0
+    vals(8) = (zmin + zmax) / 2.0
+
+    Return vals
+
+End Function
+
+Function FindActiveSegmentOccurrenceCornerCm( _
+    ByVal asmDoc As AssemblyDocument, _
+    ByVal useMinX As Boolean, _
+    ByVal useMinY As Boolean) As Double()
+
+    ' Detecta la esquina del segmento activo, pero el nivel Z lo toma
+    ' de la placa/cara principal del segmento, no del accesorio más alto.
+    '
+    ' Resultado:
+    '   X = min/max X del ensamble/segmento activo
+    '   Y = min/max Y del ensamble/segmento activo
+    '   Z = nivel de la superficie principal de trabajo
+
+    Const TOP_ZONE_TOL_CM As Double = 35.0          ' 350 mm debajo del Z máximo
+    Const MIN_DIM_CM As Double = 5.0                ' 50 mm mínimo
+    Const MIN_AREA_RATIO As Double = 0.03           ' 3% del área global X-Y
+    Const MAX_PLATE_THICKNESS_CM As Double = 8.0    ' 80 mm máximo para placa/cara principal
+
+    Dim globalBox As Double() = CombinedRootOccurrenceRangeBoxCm(asmDoc)
+
+    Dim globalXMin As Double = globalBox(0)
+    Dim globalYMin As Double = globalBox(1)
+    Dim globalZMax As Double = globalBox(5)
+
+    Dim globalXMax As Double = globalBox(3)
+    Dim globalYMax As Double = globalBox(4)
+
+    Dim globalDx As Double = Math.Abs(globalXMax - globalXMin)
+    Dim globalDy As Double = Math.Abs(globalYMax - globalYMin)
+    Dim globalAreaXY As Double = globalDx * globalDy
+
+    If globalAreaXY <= 0.000001 Then
+        Throw New Exception("El área global X-Y del ensamble es inválida.")
+    End If
+
+    Dim minCandidateArea As Double = globalAreaXY * MIN_AREA_RATIO
+
+    Dim bestFound As Boolean = False
+    Dim bestScore As Double = -1.0
+
+    Dim bestX As Double = 0.0
+    Dim bestY As Double = 0.0
+    Dim bestZ As Double = 0.0
+
+    Dim allOccs As New System.Collections.Generic.List(Of ComponentOccurrence)
+
+    For Each rootOcc As ComponentOccurrence In asmDoc.ComponentDefinition.Occurrences
+        CollectOccurrenceAndChildren(rootOcc, allOccs)
+    Next
+
+    For Each occ As ComponentOccurrence In allOccs
+
+        Try
+            Dim rb As Box = occ.RangeBox
+
+            Dim xmin As Double = rb.MinPoint.X
+            Dim ymin As Double = rb.MinPoint.Y
+            Dim zmin As Double = rb.MinPoint.Z
+
+            Dim xmax As Double = rb.MaxPoint.X
+            Dim ymax As Double = rb.MaxPoint.Y
+            Dim zmax As Double = rb.MaxPoint.Z
+
+            Dim dx As Double = Math.Abs(xmax - xmin)
+            Dim dy As Double = Math.Abs(ymax - ymin)
+            Dim dz As Double = Math.Abs(zmax - zmin)
+
+            If dx < MIN_DIM_CM Or dy < MIN_DIM_CM Then
+                Continue For
+            End If
+
+            Dim areaXY As Double = dx * dy
+
+            If areaXY < minCandidateArea Then
+                Continue For
+            End If
+
+            ' Debe estar cerca de la zona superior del tanque ya orientado.
+            If zmax < globalZMax - TOP_ZONE_TOL_CM Then
+                Continue For
+            End If
+
+            ' Buscamos la placa/cara principal, no accesorios altos.
+            ' La placa principal debe tener mucha área X-Y y poco espesor en Z.
+            If dz > MAX_PLATE_THICKNESS_CM Then
+                Continue For
+            End If
+
+            ' Score:
+            ' - Mucha área X-Y = probable cara principal.
+            ' - Cercanía a la parte superior = probable cara activa.
+            ' - Menor espesor = más probable que sea la superficie principal.
+            Dim zBonus As Double = zmax - (globalZMax - TOP_ZONE_TOL_CM)
+            Dim thinBonus As Double = Math.Max(0.0, MAX_PLATE_THICKNESS_CM - dz) * 50.0
+            Dim score As Double = areaXY + (zBonus * 10.0) + thinBonus
+
+            If Not bestFound Or score > bestScore Then
+
+                bestFound = True
+                bestScore = score
+
+                If useMinX Then
+                    bestX = xmin
+                Else
+                    bestX = xmax
+                End If
+
+                If useMinY Then
+                    bestY = ymin
+                Else
+                    bestY = ymax
+                End If
+
+                ' Este Z debe corresponder al nivel de la cara/superficie principal,
+                ' no al accesorio más alto del ensamble.
+                bestZ = zmax
+
+            End If
+
+        Catch
+            ' Ignorar ocurrencias problemáticas.
+        End Try
+
+    Next
+
+    If Not bestFound Then
+        Throw New Exception("No se encontró una placa/cara principal candidata para el segmento activo.")
+    End If
+
+    Return Vec(bestX, bestY, bestZ)
+
+End Function
+
+Sub CollectOccurrenceAndChildren( _
+    ByVal occ As ComponentOccurrence, _
+    ByVal result As System.Collections.Generic.List(Of ComponentOccurrence))
+
+    Try
+        result.Add(occ)
+    Catch
+    End Try
+
+    Try
+        For Each childOcc As ComponentOccurrence In occ.SubOccurrences
+            CollectOccurrenceAndChildren(childOcc, result)
+        Next
+    Catch
+        ' Si no tiene subocurrencias, no pasa nada.
+    End Try
+
+End Sub
+
+Function FindActivePlusZFaceCornerCm( _
+    ByVal asmDoc As AssemblyDocument, _
+    ByVal useMinX As Boolean, _
+    ByVal useMinY As Boolean) As Double()
+
+    ' Busca la cara plana grande que quedó en la parte superior del ensamble ya rotado.
+    ' Esta versión transforma la geometría local de cada ocurrencia al espacio del ensamble.
+    ' Es más robusta que usar occ.SurfaceBodies directo.
+
+    Const FACE_Z_THICKNESS_TOL_CM As Double = 0.15   ' 1.5 mm
+    Const MIN_FACE_SIZE_CM As Double = 5.0           ' 50 mm mínimo
+    Const TOP_ZONE_TOL_CM As Double = 35.0           ' 350 mm desde Z máximo
+    Const NORMAL_Z_ABS_MIN As Double = 0.70
+
+    Dim globalBox As Double() = CombinedRootOccurrenceRangeBoxCm(asmDoc)
+    Dim globalZMax As Double = globalBox(5)
+
+    Dim bestFound As Boolean = False
+
+    Dim bestScore As Double = -1.0
+    Dim bestArea As Double = -1.0
+    Dim bestMidZ As Double = -999999999.0
+
+    Dim bestX As Double = 0.0
+    Dim bestY As Double = 0.0
+    Dim bestZ As Double = 0.0
+
+    For Each occ As ComponentOccurrence In asmDoc.ComponentDefinition.Occurrences
+
+        Try
+
+            Dim occM As Matrix = occ.Transformation
+
+            For Each bodyObj As Object In occ.Definition.SurfaceBodies
+
+                Try
+
+                    For Each faceObj As Object In bodyObj.Faces
+
+                        Try
+
+                            If Not TypeOf faceObj.Geometry Is Plane Then
+                                Continue For
+                            End If
+
+                            Dim planeObj As Plane = CType(faceObj.Geometry, Plane)
+
+                            ' Normal local de la cara transformada a coordenadas del ensamble.
+                            Dim localN As Double() = Vec(planeObj.Normal.X, planeObj.Normal.Y, planeObj.Normal.Z)
+                            Dim asmN As Double() = NormalizeVec(TransformVectorByMatrix(localN, occM))
+
+                            ' Aceptamos +Z o -Z porque algunos STEP traen normales invertidas.
+                            If Math.Abs(asmN(2)) < NORMAL_Z_ABS_MIN Then
+                                Continue For
+                            End If
+
+                            Dim rb As Box = faceObj.RangeBox
+                            Dim trb As Double() = TransformRangeBoxToAssemblyCm(rb, occM)
+
+                            Dim xmin As Double = trb(0)
+                            Dim ymin As Double = trb(1)
+                            Dim zmin As Double = trb(2)
+
+                            Dim xmax As Double = trb(3)
+                            Dim ymax As Double = trb(4)
+                            Dim zmax As Double = trb(5)
+
+                            Dim dx As Double = Math.Abs(xmax - xmin)
+                            Dim dy As Double = Math.Abs(ymax - ymin)
+                            Dim dz As Double = Math.Abs(zmax - zmin)
+
+                            ' La cara activa está en el plano XY, por eso su espesor en Z debe ser pequeño.
+                            If dz > FACE_Z_THICKNESS_TOL_CM Then
+                                Continue For
+                            End If
+
+                            If dx < MIN_FACE_SIZE_CM Or dy < MIN_FACE_SIZE_CM Then
+                                Continue For
+                            End If
+
+                            Dim midZ As Double = (zmin + zmax) / 2.0
+
+                            ' Debe estar cerca de la parte superior del tanque orientado.
+                            If midZ < globalZMax - TOP_ZONE_TOL_CM Then
+                                Continue For
+                            End If
+
+                            Dim areaApprox As Double = dx * dy
+
+                            ' Score: prioriza área grande y que esté arriba.
+                            Dim zBonus As Double = midZ - (globalZMax - TOP_ZONE_TOL_CM)
+                            Dim score As Double = areaApprox + (zBonus * 10.0)
+
+                            If Not bestFound Or score > bestScore Then
+
+                                bestFound = True
+                                bestScore = score
+                                bestArea = areaApprox
+                                bestMidZ = midZ
+
+                                If useMinX Then
+                                    bestX = xmin
+                                Else
+                                    bestX = xmax
+                                End If
+
+                                If useMinY Then
+                                    bestY = ymin
+                                Else
+                                    bestY = ymax
+                                End If
+
+                                bestZ = midZ
+
+                            End If
+
+                        Catch
+                            ' Ignorar caras problemáticas.
+                        End Try
+
+                    Next
+
+                Catch
+                    ' Ignorar cuerpos problemáticos.
+                End Try
+
+            Next
+
+        Catch
+            ' Ignorar ocurrencias problemáticas.
+        End Try
+
+    Next
+
+    If Not bestFound Then
+        Throw New Exception("No se encontró una cara plana candidata en la zona superior +Z.")
+    End If
+
+    Return Vec(bestX, bestY, bestZ)
+
+End Function
+
+Function TransformVectorByMatrix(ByVal v As Double(), ByVal m As Matrix) As Double()
+
+    Return Vec( _
+        m.Cell(1, 1) * v(0) + m.Cell(1, 2) * v(1) + m.Cell(1, 3) * v(2), _
+        m.Cell(2, 1) * v(0) + m.Cell(2, 2) * v(1) + m.Cell(2, 3) * v(2), _
+        m.Cell(3, 1) * v(0) + m.Cell(3, 2) * v(1) + m.Cell(3, 3) * v(2))
+
+End Function
+
+
+Function TransformRangeBoxToAssemblyCm(ByVal rb As Box, ByVal m As Matrix) As Double()
+
+    Dim xmin As Double = Double.MaxValue
+    Dim ymin As Double = Double.MaxValue
+    Dim zmin As Double = Double.MaxValue
+
+    Dim xmax As Double = Double.MinValue
+    Dim ymax As Double = Double.MinValue
+    Dim zmax As Double = Double.MinValue
+
+    Dim xs(1) As Double
+    Dim ys(1) As Double
+    Dim zs(1) As Double
+
+    xs(0) = rb.MinPoint.X
+    xs(1) = rb.MaxPoint.X
+
+    ys(0) = rb.MinPoint.Y
+    ys(1) = rb.MaxPoint.Y
+
+    zs(0) = rb.MinPoint.Z
+    zs(1) = rb.MaxPoint.Z
+
+    For ix As Integer = 0 To 1
+        For iy As Integer = 0 To 1
+            For iz As Integer = 0 To 1
+
+                Dim x As Double = xs(ix)
+                Dim y As Double = ys(iy)
+                Dim z As Double = zs(iz)
+
+                Dim tx As Double = m.Cell(1, 1) * x + m.Cell(1, 2) * y + m.Cell(1, 3) * z + m.Cell(1, 4)
+                Dim ty As Double = m.Cell(2, 1) * x + m.Cell(2, 2) * y + m.Cell(2, 3) * z + m.Cell(2, 4)
+                Dim tz As Double = m.Cell(3, 1) * x + m.Cell(3, 2) * y + m.Cell(3, 3) * z + m.Cell(3, 4)
+
+                If tx < xmin Then xmin = tx
+                If ty < ymin Then ymin = ty
+                If tz < zmin Then zmin = tz
+
+                If tx > xmax Then xmax = tx
+                If ty > ymax Then ymax = ty
+                If tz > zmax Then zmax = tz
+
+            Next
+        Next
+    Next
+
+    Dim vals(5) As Double
+
+    vals(0) = xmin
+    vals(1) = ymin
+    vals(2) = zmin
+
+    vals(3) = xmax
+    vals(4) = ymax
+    vals(5) = zmax
+
+    Return vals
+
+End Function
+
+
+Function FaceVerticesMm( _
+    ByVal f As FaceProxy, _
+    ByVal lenToMm As Double) As System.Collections.Generic.List(Of Double())
+
+    ' Obtiene puntos reales de la cara seleccionada.
+    ' Si no se pueden leer vértices, usa las 8 esquinas del RangeBox como respaldo.
+
+    Dim pts As New System.Collections.Generic.List(Of Double())
+
+    Try
+        For Each vObj As Object In f.Vertices
+            Try
+                Dim p As Point = vObj.Point
+                pts.Add(Vec(p.X * lenToMm, p.Y * lenToMm, p.Z * lenToMm))
+            Catch
+            End Try
+        Next
+    Catch
+    End Try
+
+    If pts.Count = 0 Then
+
+        Try
+            Dim rb As Box = f.RangeBox
+
+            Dim xs(1) As Double
+            Dim ys(1) As Double
+            Dim zs(1) As Double
+
+            xs(0) = rb.MinPoint.X * lenToMm
+            xs(1) = rb.MaxPoint.X * lenToMm
+
+            ys(0) = rb.MinPoint.Y * lenToMm
+            ys(1) = rb.MaxPoint.Y * lenToMm
+
+            zs(0) = rb.MinPoint.Z * lenToMm
+            zs(1) = rb.MaxPoint.Z * lenToMm
+
+            For ix As Integer = 0 To 1
+                For iy As Integer = 0 To 1
+                    For iz As Integer = 0 To 1
+                        pts.Add(Vec(xs(ix), ys(iy), zs(iz)))
+                    Next
+                Next
+            Next
+
+        Catch
+            Throw New Exception("No se pudieron obtener puntos de la cara seleccionada.")
+        End Try
+
+    End If
+
+    Return pts
+
+End Function
+
+
+Function SelectedFaceCornerAfterRotationMm( _
+    ByVal facePtsBeforeMm As System.Collections.Generic.List(Of Double()), _
+    ByVal pivotMm As Double(), _
+    ByVal rotMat As Double(,), _
+    ByVal useMinX As Boolean, _
+    ByVal useMinY As Boolean) As Double()
+
+    ' Calcula la esquina inferior izquierda de la MISMA CARA seleccionada por el usuario,
+    ' después de aplicar la rotación final.
+    '
+    ' X/Y salen del min/max de los vértices de esa cara.
+    ' Z sale del promedio de esos vértices ya rotados.
+    ' Como la cara seleccionada queda forzada hacia +Z, todos esos puntos deben quedar
+    ' prácticamente en el mismo nivel Z.
+
+    If facePtsBeforeMm Is Nothing OrElse facePtsBeforeMm.Count = 0 Then
+        Throw New Exception("La cara seleccionada no tiene puntos para calcular el origen.")
+    End If
+
+    Dim xmin As Double = Double.MaxValue
+    Dim ymin As Double = Double.MaxValue
+    Dim zmin As Double = Double.MaxValue
+
+    Dim xmax As Double = Double.MinValue
+    Dim ymax As Double = Double.MinValue
+    Dim zmax As Double = Double.MinValue
+
+    Dim zSum As Double = 0.0
+    Dim countPts As Integer = 0
+
+    For Each pt As Double() In facePtsBeforeMm
+
+        Dim rpt As Double() = RotatePointMm(pt, pivotMm, rotMat)
+
+        If rpt(0) < xmin Then xmin = rpt(0)
+        If rpt(1) < ymin Then ymin = rpt(1)
+        If rpt(2) < zmin Then zmin = rpt(2)
+
+        If rpt(0) > xmax Then xmax = rpt(0)
+        If rpt(1) > ymax Then ymax = rpt(1)
+        If rpt(2) > zmax Then zmax = rpt(2)
+
+        zSum += rpt(2)
+        countPts += 1
+
+    Next
+
+    If countPts = 0 Then
+        Throw New Exception("No se pudieron transformar puntos de la cara seleccionada.")
+    End If
+
+    Dim originX As Double
+    Dim originY As Double
+    Dim originZ As Double
+
+    If useMinX Then
+        originX = xmin
+    Else
+        originX = xmax
+    End If
+
+    If useMinY Then
+        originY = ymin
+    Else
+        originY = ymax
+    End If
+
+    originZ = zSum / CDbl(countPts)
+
+    Return Vec(originX, originY, originZ)
+
+End Function
+
+
+
+Function TransformPointListAfterRotationAndShiftMm( _
+    ByVal ptsBeforeMm As System.Collections.Generic.List(Of Double()), _
+    ByVal pivotMm As Double(), _
+    ByVal rotMat As Double(,), _
+    ByVal shiftMm As Double()) As System.Collections.Generic.List(Of Double())
+
+    Dim result As New System.Collections.Generic.List(Of Double())
+
+    If ptsBeforeMm Is Nothing Then
+        Return result
+    End If
+
+    For Each pt As Double() In ptsBeforeMm
+
+        Try
+            Dim rpt As Double() = RotatePointMm(pt, pivotMm, rotMat)
+            Dim spt As Double() = AddVec(rpt, shiftMm)
+
+            result.Add(spt)
+        Catch
+        End Try
+
+    Next
+
+    Return result
+
+End Function
+
+
+Function BuildFace2DMapJson( _
+    ByVal asmDoc As AssemblyDocument, _
+    ByVal segIndex As Integer, _
+    ByVal segOccName As String, _
+    ByVal coverOccName As String, _
+    ByVal originMethod As String, _
+    ByVal selectedFacePtsAfterShiftMm As System.Collections.Generic.List(Of Double()), _
+    ByVal segNormalAfterShift As Double(), _
+    ByVal coverNormalAfterShift As Double(), _
+    ByVal tankXMin As Double, ByVal tankYMin As Double, ByVal tankZMin As Double, _
+    ByVal tankXMax As Double, ByVal tankYMax As Double, ByVal tankZMax As Double, _
+    ByVal outputDir As String, _
+    ByVal stepPath As String, _
+    ByVal json3DPath As String) As String
+
+    ' JSON 2D reforzado V3:
+    ' - NO cambia el flujo de orientacion/origen/exportacion.
+    ' - Agrega mapa semantico de orillas del segmento.
+    ' - Agrega mapa mas explicito de accesorios/piezas sobre la cara seleccionada.
+    ' - Mantiene datos crudos para trazabilidad, pero agrega campos listos para postproceso en Python/PQArt.
+
+    Dim sb As New System.Text.StringBuilder()
+    Dim nl As String = vbLf
+
+    Dim faceXMin As Double = Double.MaxValue
+    Dim faceYMin As Double = Double.MaxValue
+    Dim faceZMin As Double = Double.MaxValue
+
+    Dim faceXMax As Double = Double.MinValue
+    Dim faceYMax As Double = Double.MinValue
+    Dim faceZMax As Double = Double.MinValue
+
+    Dim zSum As Double = 0.0
+    Dim ptCount As Integer = 0
+
+    If Not selectedFacePtsAfterShiftMm Is Nothing Then
+
+        For Each pt As Double() In selectedFacePtsAfterShiftMm
+
+            Try
+                If pt(0) < faceXMin Then faceXMin = pt(0)
+                If pt(1) < faceYMin Then faceYMin = pt(1)
+                If pt(2) < faceZMin Then faceZMin = pt(2)
+
+                If pt(0) > faceXMax Then faceXMax = pt(0)
+                If pt(1) > faceYMax Then faceYMax = pt(1)
+                If pt(2) > faceZMax Then faceZMax = pt(2)
+
+                zSum += pt(2)
+                ptCount += 1
+            Catch
+            End Try
+
+        Next
+
+    End If
+
+    If ptCount = 0 Then
+        faceXMin = 0.0
+        faceYMin = 0.0
+        faceZMin = 0.0
+
+        faceXMax = 0.0
+        faceYMax = 0.0
+        faceZMax = 0.0
+    End If
+
+    Dim faceZAvg As Double = 0.0
+
+    If ptCount > 0 Then
+        faceZAvg = zSum / CDbl(ptCount)
+    End If
+
+    Dim iam As String = ""
+
+    If Not String.IsNullOrEmpty(asmDoc.FullFileName) Then
+        iam = asmDoc.FullFileName
+    End If
+
+    sb.Append("{" & nl)
+    sb.Append("  ""schema_version"": 5," & nl)
+    sb.Append("  ""source"": ""inventor_ilogic_selected_segment_face_2d_map_weld_ready_pqart3_per_seg_cover""," & nl)
+    sb.Append("  ""generated_utc"": """ & System.DateTime.UtcNow.ToString("o") & """," & nl)
+    sb.Append("  ""segment_index"": " & segIndex & "," & nl)
+    sb.Append("  ""assembly_file"": """ & JsonEscape(iam) & """," & nl)
+    sb.Append("  ""units"": ""mm""," & nl)
+    sb.Append("  ""frame"": ""pqart_local_after_step_origin_shift""," & nl)
+    sb.Append("  ""output_folder"": """ & JsonEscape(outputDir) & """," & nl)
+    sb.Append("  ""exported_step_file"": """ & JsonEscape(stepPath) & """," & nl)
+    sb.Append("  ""paired_3d_frame_json"": """ & JsonEscape(json3DPath) & """," & nl)
+
+    sb.Append("  ""origin"": { ""x"": 0, ""y"": 0, ""z"": 0 }," & nl)
+
+    sb.Append("  ""selected_segment_face"": {" & nl)
+    sb.Append("    ""occurrence"": """ & JsonEscape(segOccName) & """," & nl)
+    sb.Append("    ""target_axis"": ""+Z""," & nl)
+    sb.Append("    ""origin_method"": """ & JsonEscape(originMethod) & """," & nl)
+    sb.Append("    ""normal_after_alignment_unit"": { ""x"": " & Fmt(segNormalAfterShift(0)) & ", ""y"": " & Fmt(segNormalAfterShift(1)) & ", ""z"": " & Fmt(segNormalAfterShift(2)) & " }," & nl)
+    sb.Append("    ""work_plane_z_mm"": 0," & nl)
+    sb.Append("    ""z_level_average_mm"": " & Fmt(faceZAvg) & "," & nl)
+    sb.Append("    ""z_range_mm"": { ""min"": " & Fmt(faceZMin) & ", ""max"": " & Fmt(faceZMax) & ", ""flatness"": " & Fmt(faceZMax - faceZMin) & " }," & nl)
+    sb.Append("    ""bounds_2d_mm"": { ""xmin"": " & Fmt(faceXMin) & ", ""ymin"": " & Fmt(faceYMin) & ", ""xmax"": " & Fmt(faceXMax) & ", ""ymax"": " & Fmt(faceYMax) & ", ""width"": " & Fmt(faceXMax - faceXMin) & ", ""height"": " & Fmt(faceYMax - faceYMin) & " }" & nl)
+    sb.Append("  }," & nl)
+
+    sb.Append("  ""segment_edge_map_2d"": " & SegmentEdgeMap2DJson(segIndex, faceXMin, faceYMin, faceXMax, faceYMax, "  ") & "," & nl)
+
+    sb.Append("  ""face_geometry_2d"": {" & nl)
+    sb.Append("    ""outer_contour_2d_from_bounds_mm"": " & RectangleContour2DJson(faceXMin, faceYMin, faceXMax, faceYMax, "    ") & "," & nl)
+    sb.Append("    ""selected_face_vertices_raw_unordered_mm"": " & PointList2DJson(selectedFacePtsAfterShiftMm, "    ") & "," & nl)
+    sb.Append("    ""internal_edges_status"": {" & nl)
+    sb.Append("      ""raw_vertices_available"": true," & nl)
+    sb.Append("      ""ordered_loops_available"": false," & nl)
+    sb.Append("      ""accessory_bbox_contours_available"": true," & nl)
+    sb.Append("      ""note"": ""Los puntos crudos pueden incluir contorno exterior, barrenos, textos, ranuras o aristas internas. Los accesorios se reportan con bbox/contorno rectangular aproximado; para paths finales exactos todavia conviene ordenar loops en postproceso.""" & nl)
+    sb.Append("    }" & nl)
+    sb.Append("  }," & nl)
+
+    sb.Append("  ""top_cover_reference"": {" & nl)
+    sb.Append("    ""occurrence"": """ & JsonEscape(coverOccName) & """," & nl)
+    sb.Append("    ""target_axis"": ""+X""," & nl)
+    sb.Append("    ""normal_after_alignment_unit"": { ""x"": " & Fmt(coverNormalAfterShift(0)) & ", ""y"": " & Fmt(coverNormalAfterShift(1)) & ", ""z"": " & Fmt(coverNormalAfterShift(2)) & " }" & nl)
+    sb.Append("  }," & nl)
+
+    sb.Append("  ""tank_bounds_after_origin_shift_mm"": {" & nl)
+    sb.Append("    ""min"": { ""x"": " & Fmt(tankXMin) & ", ""y"": " & Fmt(tankYMin) & ", ""z"": " & Fmt(tankZMin) & " }," & nl)
+    sb.Append("    ""max"": { ""x"": " & Fmt(tankXMax) & ", ""y"": " & Fmt(tankYMax) & ", ""z"": " & Fmt(tankZMax) & " }" & nl)
+    sb.Append("  }," & nl)
+
+    sb.Append("  ""pqart_2d_convention"": {" & nl)
+    sb.Append("    ""x_axis"": ""STEP local +X after origin shift (toward TOP COVER in PQart 3.0)""," & nl)
+    sb.Append("    ""y_axis"": ""STEP local +Y after origin shift (lateral neighbors)""," & nl)
+    sb.Append("    ""z_axis"": ""selected face normal, expected +Z""," & nl)
+    sb.Append("    ""face_work_plane_z_mm"": 0," & nl)
+    sb.Append("    ""lower_left_corner"": ""origin 0,0,0 of selected segment face""," & nl)
+    sb.Append("    ""edge_policy"": ""top=Xmax(TOP_COVER), bottom=Xmin(BASE), left=Ymin, right=Ymax in the exported STEP local 2D frame""," & nl)
+    sb.Append("    ""note"": ""PQart 3.0: tapa hacia +X; cara de segmento en Z=0. Vs 2.0 la tapa estaba en +Y.""" & nl)
+    sb.Append("  }," & nl)
+
+    sb.Append("  ""projected_occurrences_2d"": {" & nl)
+    sb.Append("    ""face_touch_tolerance_mm"": 5," & nl)
+    sb.Append("    ""classification_note"": ""Los candidatos se filtran por cercania a Z=0 y traslape con el rectangulo de la cara seleccionada. Cada candidato incluye nombre de pieza, bbox, contorno rectangular aproximado, cercania a orillas y una pista de soldadura.""," & nl)
+    sb.Append("    ""selected_or_major_face_panels"": " & OccurrenceBoxes2DJson(asmDoc, nl, "major", faceXMin, faceYMin, faceXMax, faceYMax) & "," & nl)
+    sb.Append("    ""accessory_candidates_2d_mm"": " & OccurrenceBoxes2DJson(asmDoc, nl, "accessory", faceXMin, faceYMin, faceXMax, faceYMax) & "," & nl)
+    sb.Append("    ""face_touching_occurrences_2d_mm"": " & OccurrenceBoxes2DJson(asmDoc, nl, "touching", faceXMin, faceYMin, faceXMax, faceYMax) & "," & nl)
+    sb.Append("    ""occurrence_boxes_raw_2d_mm"": " & OccurrenceBoxes2DJson(asmDoc, nl, "all", faceXMin, faceYMin, faceXMax, faceYMax) & nl)
+    sb.Append("  }," & nl)
+
+    sb.Append("  ""weld_path_extraction_notes"": {" & nl)
+    sb.Append("    ""edge_map_ready"": true," & nl)
+    sb.Append("    ""accessory_bbox_map_ready"": true," & nl)
+    sb.Append("    ""exact_accessory_contours_ready"": false," & nl)
+    sb.Append("    ""recommended_next_step"": ""Usar accessory_candidates_2d_mm para seleccionar soleras/accesorios por nombre, tamano o aspect_ratio. Para cordones finales, convertir bbox_contour_2d_mm a path preliminar o enriquecer con extraccion exacta de loops.""" & nl)
+    sb.Append("  }" & nl)
+
+    sb.Append("}" & nl)
+
+    Return sb.ToString()
+
+End Function
+
+
+Function PointList2DJson( _
+    ByVal pts As System.Collections.Generic.List(Of Double()), _
+    ByVal indent As String) As String
+
+    Dim sb As New System.Text.StringBuilder()
+    Dim nl As String = vbLf
+
+    sb.Append("[")
+
+    If pts Is Nothing OrElse pts.Count = 0 Then
+        sb.Append("]")
+        Return sb.ToString()
+    End If
+
+    sb.Append(nl)
+
+    For i As Integer = 0 To pts.Count - 1
+
+        Dim pt As Double() = pts(i)
+
+        sb.Append(indent & "  { ""x"": " & Fmt(pt(0)) & ", ""y"": " & Fmt(pt(1)) & ", ""z"": " & Fmt(pt(2)) & " }")
+
+        If i < pts.Count - 1 Then
+            sb.Append(",")
+        End If
+
+        sb.Append(nl)
+
+    Next
+
+    sb.Append(indent & "]")
+
+    Return sb.ToString()
+
+End Function
+
+
+Function RectangleContour2DJson( _
+    ByVal xmin As Double, _
+    ByVal ymin As Double, _
+    ByVal xmax As Double, _
+    ByVal ymax As Double, _
+    ByVal indent As String) As String
+
+    Dim sb As New System.Text.StringBuilder()
+    Dim nl As String = vbLf
+
+    sb.Append("[" & nl)
+    sb.Append(indent & "  { ""x"": " & Fmt(xmin) & ", ""y"": " & Fmt(ymin) & ", ""z"": 0 }," & nl)
+    sb.Append(indent & "  { ""x"": " & Fmt(xmax) & ", ""y"": " & Fmt(ymin) & ", ""z"": 0 }," & nl)
+    sb.Append(indent & "  { ""x"": " & Fmt(xmax) & ", ""y"": " & Fmt(ymax) & ", ""z"": 0 }," & nl)
+    sb.Append(indent & "  { ""x"": " & Fmt(xmin) & ", ""y"": " & Fmt(ymax) & ", ""z"": 0 }," & nl)
+    sb.Append(indent & "  { ""x"": " & Fmt(xmin) & ", ""y"": " & Fmt(ymin) & ", ""z"": 0 }" & nl)
+    sb.Append(indent & "]")
+
+    Return sb.ToString()
+
+End Function
+
+
+Function CoverTargetForSegment(ByVal segIndex As Integer) As String
+    ' SEG1/3: tapa -Y (acostado para el track). SEG2/4: tapa +X (3.0).
+    If segIndex = 1 Or segIndex = 3 Then
+        Return "-Y"
+    End If
+    Return "+X"
+End Function
+
+
+Function CoverPostRotationDegFromPlusY(ByVal coverTarget As String) As Double
+    ' Tras el armado identico a 2.0 (tapa en +Y), Rz lleva la tapa al destino 3.0.
+    ' +Y -> +X : Rz -90
+    ' +Y -> -Y : Rz 180
+    ' +Y -> -X : Rz +90
+    Dim t As String = UCase(Trim(coverTarget))
+    If t = "+Y" Or t = "Y" Then
+        Return 0.0
+    End If
+    If t = "+X" Or t = "X" Then
+        Return -90.0
+    End If
+    If t = "-Y" Then
+        Return 180.0
+    End If
+    If t = "-X" Then
+        Return 90.0
+    End If
+    Throw New Exception("Cover target 3.0 no soportado: " & coverTarget)
+End Function
+
+
+Function SegmentEdgeMap2DJson( _
+    ByVal segIndex As Integer, _
+    ByVal xmin As Double, _
+    ByVal ymin As Double, _
+    ByVal xmax As Double, _
+    ByVal ymax As Double, _
+    ByVal indent As String) As String
+
+    Dim sb As New System.Text.StringBuilder()
+    Dim nl As String = vbLf
+    Dim coverTarget As String = CoverTargetForSegment(segIndex)
+
+    sb.Append("{" & nl)
+    If coverTarget = "-Y" Then
+        sb.Append(indent & "  ""purpose"": ""Mapa semantico de orillas (PQart 3.0 SEG1/3: tapa en -Y, tanque acostado).""," & nl)
+        sb.Append(indent & "  ""coordinate_policy"": ""top=YMIN(TOP_COVER -Y), bottom=YMAX(BASE +Y), left=XMAX, right=XMIN en el frame 2D local exportado.""," & nl)
+        sb.Append(indent & "  ""selected_segment"": " & segIndex & "," & nl)
+        sb.Append(indent & "  ""top_cover_target"": ""-Y""," & nl)
+        sb.Append(indent & "  ""adjacency_assumption"": ""PQart 3.0 SEG1/3 (tapa -Y = Rz 180 deg vs 2.0): left/right invertidos respecto a tapa +Y.""," & nl)
+        sb.Append(indent & "  ""edges"": [" & nl)
+        sb.Append(SegmentEdgeItemJson("top", "YMIN", SegmentEdgeNeighbor(segIndex, "top", coverTarget), xmin, ymin, xmax, ymin, indent & "    "))
+        sb.Append("," & nl)
+        sb.Append(SegmentEdgeItemJson("bottom", "YMAX", SegmentEdgeNeighbor(segIndex, "bottom", coverTarget), xmin, ymax, xmax, ymax, indent & "    "))
+        sb.Append("," & nl)
+        sb.Append(SegmentEdgeItemJson("left", "XMAX", SegmentEdgeNeighbor(segIndex, "left", coverTarget), xmax, ymin, xmax, ymax, indent & "    "))
+        sb.Append("," & nl)
+        sb.Append(SegmentEdgeItemJson("right", "XMIN", SegmentEdgeNeighbor(segIndex, "right", coverTarget), xmin, ymin, xmin, ymax, indent & "    "))
+    Else
+        sb.Append(indent & "  ""purpose"": ""Mapa semantico de orillas (PQart 3.0 SEG2/4: tapa en +X).""," & nl)
+        sb.Append(indent & "  ""coordinate_policy"": ""top=XMAX(TOP_COVER), bottom=XMIN(BASE), left=YMIN, right=YMAX en el frame 2D local exportado.""," & nl)
+        sb.Append(indent & "  ""selected_segment"": " & segIndex & "," & nl)
+        sb.Append(indent & "  ""top_cover_target"": ""+X""," & nl)
+        sb.Append(indent & "  ""adjacency_assumption"": ""PQart 3.0 SEG2/4 (tapa +X): SEG2 left=SEG1 right=SEG3; SEG4 left=SEG3 right=SEG1.""," & nl)
+        sb.Append(indent & "  ""edges"": [" & nl)
+        sb.Append(SegmentEdgeItemJson("top", "XMAX", SegmentEdgeNeighbor(segIndex, "top", coverTarget), xmax, ymin, xmax, ymax, indent & "    "))
+        sb.Append("," & nl)
+        sb.Append(SegmentEdgeItemJson("bottom", "XMIN", SegmentEdgeNeighbor(segIndex, "bottom", coverTarget), xmin, ymin, xmin, ymax, indent & "    "))
+        sb.Append("," & nl)
+        sb.Append(SegmentEdgeItemJson("left", "YMIN", SegmentEdgeNeighbor(segIndex, "left", coverTarget), xmin, ymin, xmax, ymin, indent & "    "))
+        sb.Append("," & nl)
+        sb.Append(SegmentEdgeItemJson("right", "YMAX", SegmentEdgeNeighbor(segIndex, "right", coverTarget), xmin, ymax, xmax, ymax, indent & "    "))
+    End If
+    sb.Append(nl & indent & "  ]" & nl)
+    sb.Append(indent & "}")
+
+    Return sb.ToString()
+
+End Function
+
+
+Function SegmentEdgeItemJson( _
+    ByVal edgeId As String, _
+    ByVal localBound As String, _
+    ByVal neighbor As String, _
+    ByVal x1 As Double, ByVal y1 As Double, _
+    ByVal x2 As Double, ByVal y2 As Double, _
+    ByVal indent As String) As String
+
+    Dim lengthVal As Double = Math.Sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1))
+    Dim mx As Double = (x1 + x2) / 2.0
+    Dim my As Double = (y1 + y2) / 2.0
+
+    Dim sb As New System.Text.StringBuilder()
+    Dim nl As String = vbLf
+
+    sb.Append(indent & "{" & nl)
+    sb.Append(indent & "  ""edge_id"": """ & JsonEscape(edgeId) & """," & nl)
+    sb.Append(indent & "  ""local_bound"": """ & JsonEscape(localBound) & """," & nl)
+    sb.Append(indent & "  ""expected_adjacent_reference"": """ & JsonEscape(neighbor) & """," & nl)
+    sb.Append(indent & "  ""use_for_weld_context"": true," & nl)
+    sb.Append(indent & "  ""start_mm"": { ""x"": " & Fmt(x1) & ", ""y"": " & Fmt(y1) & ", ""z"": 0 }," & nl)
+    sb.Append(indent & "  ""end_mm"": { ""x"": " & Fmt(x2) & ", ""y"": " & Fmt(y2) & ", ""z"": 0 }," & nl)
+    sb.Append(indent & "  ""midpoint_mm"": { ""x"": " & Fmt(mx) & ", ""y"": " & Fmt(my) & ", ""z"": 0 }," & nl)
+    sb.Append(indent & "  ""length_mm"": " & Fmt(lengthVal) & nl)
+    sb.Append(indent & "}")
+
+    Return sb.ToString()
+
+End Function
+
+
+Function SegmentEdgeNeighbor(ByVal segIndex As Integer, ByVal edgeId As String, Optional ByVal coverTarget As String = "") As String
+
+    Dim e As String = LCase(Trim(edgeId))
+    Dim cover As String = UCase(Trim(coverTarget))
+    If cover = "" Then
+        cover = UCase(CoverTargetForSegment(segIndex))
+    End If
+
+    If e = "top" Then
+        Return "TOP_COVER"
+    End If
+
+    If e = "bottom" Then
+        Return "BASE_OR_BOTTOM_FRAME"
+    End If
+
+    ' tapa -Y: left/right invertidos vs tapa +Y / +X (Rz 180 deg).
+    If cover = "-Y" Then
+        Select Case segIndex
+            Case 1
+                If e = "left" Then Return "SEGMENTO_02"
+                If e = "right" Then Return "SEGMENTO_04"
+            Case 2
+                If e = "left" Then Return "SEGMENTO_03"
+                If e = "right" Then Return "SEGMENTO_01"
+            Case 3
+                If e = "left" Then Return "SEGMENTO_04"
+                If e = "right" Then Return "SEGMENTO_02"
+            Case 4
+                If e = "left" Then Return "SEGMENTO_01"
+                If e = "right" Then Return "SEGMENTO_03"
+        End Select
+        Return "UNKNOWN"
+    End If
+
+    Select Case segIndex
+
+        Case 1
+            If e = "left" Then Return "SEGMENTO_04"
+            If e = "right" Then Return "SEGMENTO_02"
+
+        Case 2
+            If e = "left" Then Return "SEGMENTO_01"
+            If e = "right" Then Return "SEGMENTO_03"
+
+        Case 3
+            If e = "left" Then Return "SEGMENTO_02"
+            If e = "right" Then Return "SEGMENTO_04"
+
+        Case 4
+            If e = "left" Then Return "SEGMENTO_03"
+            If e = "right" Then Return "SEGMENTO_01"
+
+    End Select
+
+    Return "UNKNOWN"
+
+End Function
+
+
+Function OccurrenceBoxes2DJson( _
+    ByVal asmDoc As AssemblyDocument, _
+    ByVal nl As String, _
+    ByVal filterMode As String, _
+    ByVal faceXMin As Double, _
+    ByVal faceYMin As Double, _
+    ByVal faceXMax As Double, _
+    ByVal faceYMax As Double) As String
+
+    Dim sb As New System.Text.StringBuilder()
+    Dim allOccs As New System.Collections.Generic.List(Of ComponentOccurrence)
+
+    For Each rootOcc As ComponentOccurrence In asmDoc.ComponentDefinition.Occurrences
+        CollectOccurrenceAndChildren(rootOcc, allOccs)
+    Next
+
+    Dim modeUpper As String = UCase(Trim(filterMode))
+    Dim faceWidth As Double = Math.Abs(faceXMax - faceXMin)
+    Dim faceHeight As Double = Math.Abs(faceYMax - faceYMin)
+    Dim faceArea As Double = faceWidth * faceHeight
+
+    If faceArea < 0.000001 Then
+        faceArea = 1.0
+    End If
+
+    sb.Append("[")
+
+    Dim firstWritten As Boolean = True
+
+    For Each occ As ComponentOccurrence In allOccs
+
+        Try
+            Dim rb As Box = occ.RangeBox
+
+            Dim xmin As Double = rb.MinPoint.X * 10.0
+            Dim ymin As Double = rb.MinPoint.Y * 10.0
+            Dim zmin As Double = rb.MinPoint.Z * 10.0
+
+            Dim xmax As Double = rb.MaxPoint.X * 10.0
+            Dim ymax As Double = rb.MaxPoint.Y * 10.0
+            Dim zmax As Double = rb.MaxPoint.Z * 10.0
+
+            Dim width As Double = Math.Abs(xmax - xmin)
+            Dim height As Double = Math.Abs(ymax - ymin)
+            Dim depth As Double = Math.Abs(zmax - zmin)
+            Dim areaXY As Double = width * height
+
+            Dim nearFace As Boolean = False
+
+            If Math.Abs(zmin) <= 5.0 Or Math.Abs(zmax) <= 5.0 Or (zmin <= 0.0 And zmax >= 0.0) Then
+                nearFace = True
+            End If
+
+            Dim overlapsFace As Boolean = True
+
+            If xmax < faceXMin Or xmin > faceXMax Or ymax < faceYMin Or ymin > faceYMax Then
+                overlapsFace = False
+            End If
+
+            Dim clipXMin As Double = Math.Max(xmin, faceXMin)
+            Dim clipYMin As Double = Math.Max(ymin, faceYMin)
+            Dim clipXMax As Double = Math.Min(xmax, faceXMax)
+            Dim clipYMax As Double = Math.Min(ymax, faceYMax)
+
+            Dim overlapWidth As Double = clipXMax - clipXMin
+            Dim overlapHeight As Double = clipYMax - clipYMin
+
+            If overlapWidth < 0 Then overlapWidth = 0
+            If overlapHeight < 0 Then overlapHeight = 0
+
+            Dim overlapArea As Double = overlapWidth * overlapHeight
+            Dim overlapRatioOfOccurrence As Double = 0.0
+
+            If areaXY > 0.000001 Then
+                overlapRatioOfOccurrence = overlapArea / areaXY
+            End If
+
+            Dim isMajorPanel As Boolean = False
+            If areaXY >= faceArea * 0.35 Then
+                isMajorPanel = True
+            End If
+
+            Dim isAccessoryCandidate As Boolean = False
+            If nearFace And overlapsFace And Not isMajorPanel Then
+                If width >= 5.0 And height >= 5.0 Then
+                    isAccessoryCandidate = True
+                End If
+            End If
+
+            Dim shouldWrite As Boolean = False
+
+            Select Case modeUpper
+
+                Case "ALL"
+                    shouldWrite = True
+
+                Case "TOUCHING"
+                    shouldWrite = nearFace And overlapsFace
+
+                Case "ACCESSORY"
+                    shouldWrite = isAccessoryCandidate
+
+                Case "MAJOR"
+                    shouldWrite = nearFace And overlapsFace And isMajorPanel
+
+                Case Else
+                    shouldWrite = True
+
+            End Select
+
+            If Not shouldWrite Then
+                Continue For
+            End If
+
+            Dim className As String = "raw_occurrence"
+
+            If isMajorPanel Then
+                className = "selected_or_major_face_panel"
+            ElseIf isAccessoryCandidate Then
+                className = "accessory_candidate"
+            ElseIf nearFace And overlapsFace Then
+                className = "touching_face_non_accessory"
+            End If
+
+            Dim longDim As Double = Math.Max(width, height)
+            Dim shortDim As Double = Math.Min(width, height)
+            Dim aspectRatio As Double = 0.0
+
+            If shortDim > 0.000001 Then
+                aspectRatio = longDim / shortDim
+            End If
+
+            Dim hintKind As String = ResolveWeldHintKind(width, height, depth, aspectRatio, isMajorPanel, isAccessoryCandidate)
+            Dim priority As String = ResolveWeldPriority(hintKind)
+
+            If Not firstWritten Then
+                sb.Append(",")
+            End If
+
+            sb.Append(nl)
+            sb.Append("      {" & nl)
+            sb.Append("        ""occurrence"": """ & JsonEscape(occ.Name) & """," & nl)
+            sb.Append("        ""component_name"": """ & JsonEscape(OccurrenceDisplayName(occ)) & """," & nl)
+            sb.Append("        ""component_file"": """ & JsonEscape(OccurrenceDocumentFileName(occ)) & """," & nl)
+            sb.Append("        ""component_full_file_name"": """ & JsonEscape(OccurrenceFullFileName(occ)) & """," & nl)
+            sb.Append("        ""part_number"": """ & JsonEscape(OccurrencePartNumber(occ)) & """," & nl)
+            sb.Append("        ""class"": """ & JsonEscape(className) & """," & nl)
+            sb.Append("        ""weld_candidate_hint"": {" & nl)
+            sb.Append("          ""kind"": """ & JsonEscape(hintKind) & """," & nl)
+            sb.Append("          ""priority"": """ & JsonEscape(priority) & """," & nl)
+            sb.Append("          ""aspect_ratio_long_over_short"": " & Fmt(aspectRatio) & "," & nl)
+            sb.Append("          ""long_dimension_mm"": " & Fmt(longDim) & "," & nl)
+            sb.Append("          ""short_dimension_mm"": " & Fmt(shortDim) & nl)
+            sb.Append("        }," & nl)
+            sb.Append("        ""bbox_2d_mm"": { ""xmin"": " & Fmt(xmin) & ", ""ymin"": " & Fmt(ymin) & ", ""xmax"": " & Fmt(xmax) & ", ""ymax"": " & Fmt(ymax) & ", ""width"": " & Fmt(width) & ", ""height"": " & Fmt(height) & " }," & nl)
+            sb.Append("        ""bbox_center_2d_mm"": { ""x"": " & Fmt((xmin + xmax) / 2.0) & ", ""y"": " & Fmt((ymin + ymax) / 2.0) & ", ""z"": 0 }," & nl)
+            sb.Append("        ""bbox_contour_2d_mm"": " & RectangleContour2DJson(xmin, ymin, xmax, ymax, "        ") & "," & nl)
+            sb.Append("        ""bbox_clipped_to_selected_face_2d_mm"": { ""xmin"": " & Fmt(clipXMin) & ", ""ymin"": " & Fmt(clipYMin) & ", ""xmax"": " & Fmt(clipXMax) & ", ""ymax"": " & Fmt(clipYMax) & ", ""width"": " & Fmt(overlapWidth) & ", ""height"": " & Fmt(overlapHeight) & ", ""area_mm2"": " & Fmt(overlapArea) & " }," & nl)
+            sb.Append("        ""edge_proximity_mm"": { ""to_left_xmin"": " & Fmt(xmin - faceXMin) & ", ""to_right_xmax"": " & Fmt(faceXMax - xmax) & ", ""to_bottom_ymin"": " & Fmt(ymin - faceYMin) & ", ""to_top_ymax"": " & Fmt(faceYMax - ymax) & " }," & nl)
+            sb.Append("        ""z_range_mm"": { ""min"": " & Fmt(zmin) & ", ""max"": " & Fmt(zmax) & " }," & nl)
+            sb.Append("        ""size_mm"": { ""x"": " & Fmt(width) & ", ""y"": " & Fmt(height) & ", ""z"": " & Fmt(depth) & " }," & nl)
+            sb.Append("        ""area_2d_mm2"": " & Fmt(areaXY) & "," & nl)
+            sb.Append("        ""overlap_ratio_of_occurrence_area"": " & Fmt(overlapRatioOfOccurrence) & "," & nl)
+            sb.Append("        ""relationship_to_selected_face"": {" & nl)
+            sb.Append("          ""overlaps_selected_face_bounds"": " & JsonBool(overlapsFace) & "," & nl)
+            sb.Append("          ""touches_selected_face_z0_tolerance_5mm"": " & JsonBool(nearFace) & "," & nl)
+            sb.Append("          ""is_major_panel"": " & JsonBool(isMajorPanel) & "," & nl)
+            sb.Append("          ""is_accessory_candidate"": " & JsonBool(isAccessoryCandidate) & nl)
+            sb.Append("        }" & nl)
+            sb.Append("      }")
+
+            firstWritten = False
+
+        Catch
+        End Try
+
+    Next
+
+    If Not firstWritten Then
+        sb.Append(nl)
+    End If
+
+    sb.Append("    ]")
+
+    Return sb.ToString()
+
+End Function
+
+
+Function ResolveWeldHintKind( _
+    ByVal width As Double, _
+    ByVal height As Double, _
+    ByVal depth As Double, _
+    ByVal aspectRatio As Double, _
+    ByVal isMajorPanel As Boolean, _
+    ByVal isAccessoryCandidate As Boolean) As String
+
+    If isMajorPanel Then
+        Return "selected_or_major_face_panel"
+    End If
+
+    If Not isAccessoryCandidate Then
+        Return "reference_or_non_weld_candidate"
+    End If
+
+    Dim longDim As Double = Math.Max(width, height)
+    Dim shortDim As Double = Math.Min(width, height)
+
+    If aspectRatio >= 6.0 And longDim >= 250.0 And shortDim <= 120.0 Then
+        Return "long_solera_or_stiffener_candidate"
+    End If
+
+    If aspectRatio >= 3.0 And longDim >= 150.0 Then
+        Return "linear_accessory_candidate"
+    End If
+
+    If width >= 40.0 And height >= 40.0 Then
+        Return "plate_or_bracket_candidate"
+    End If
+
+    Return "small_accessory_candidate"
+
+End Function
+
+
+Function ResolveWeldPriority(ByVal hintKind As String) As String
+
+    Select Case LCase(Trim(hintKind))
+
+        Case "long_solera_or_stiffener_candidate"
+            Return "high"
+
+        Case "linear_accessory_candidate"
+            Return "high"
+
+        Case "plate_or_bracket_candidate"
+            Return "medium"
+
+        Case "small_accessory_candidate"
+            Return "low"
+
+        Case Else
+            Return "reference"
+
+    End Select
+
+End Function
+
+
+Function OccurrenceDisplayName(ByVal occ As ComponentOccurrence) As String
+
+    Try
+        Dim docObj As Object = occ.Definition.Document
+        Return CStr(docObj.DisplayName)
+    Catch
+    End Try
+
+    Try
+        Return occ.Name
+    Catch
+    End Try
+
+    Return ""
+
+End Function
+
+
+Function OccurrenceFullFileName(ByVal occ As ComponentOccurrence) As String
+
+    Try
+        Dim docObj As Object = occ.Definition.Document
+        Return CStr(docObj.FullFileName)
+    Catch
+    End Try
+
+    Return ""
+
+End Function
+
+
+Function OccurrenceDocumentFileName(ByVal occ As ComponentOccurrence) As String
+
+    Dim fullName As String = OccurrenceFullFileName(occ)
+
+    If String.IsNullOrEmpty(fullName) Then
+        Return ""
+    End If
+
+    Try
+        Return System.IO.Path.GetFileName(fullName)
+    Catch
+    End Try
+
+    Return fullName
+
+End Function
+
+
+Function OccurrencePartNumber(ByVal occ As ComponentOccurrence) As String
+
+    Try
+        Dim docObj As Object = occ.Definition.Document
+        Dim propSets As Object = docObj.PropertySets
+        Dim trackingProps As Object = propSets.Item("Design Tracking Properties")
+        Dim pnProp As Object = trackingProps.Item("Part Number")
+        Return CStr(pnProp.Value)
+    Catch
+    End Try
+
+    Return ""
+
+End Function
+
+
+Function FacePointMm(ByVal f As FaceProxy, ByVal lenToMm As Double) As Double()
+
+    Dim p As Point = Nothing
+
+    Try
+        Dim rb As Box = f.RangeBox
+        p = rb.MidPoint
+    Catch
+        Dim pl As Plane = CType(f.Geometry, Plane)
+        p = pl.RootPoint
+    End Try
+
+    Return Vec(p.X * lenToMm, p.Y * lenToMm, p.Z * lenToMm)
+
+End Function
+
+
+Function FaceNormal(ByVal f As FaceProxy) As Double()
+
+    If Not TypeOf f.Geometry Is Plane Then
+        Throw New Exception("La cara no es plana.")
+    End If
+
+    Dim p As Plane = CType(f.Geometry, Plane)
+
+    Return NormalizeVec(Vec(p.Normal.X, p.Normal.Y, p.Normal.Z))
+
+End Function
+
+
+Function ForceNormalAwayFromPivot( _
+    ByVal importedNormal As Double(), _
+    ByVal facePointMm As Double(), _
+    ByVal pivotMm As Double()) As Double()
+
+    Dim outDir As Double() = SubVec(facePointMm, pivotMm)
+
+    If VecLength(outDir) < 0.000001 Then
+        Return NormalizeVec(importedNormal)
+    End If
+
+    outDir = NormalizeVec(outDir)
+
+    Dim n As Double() = NormalizeVec(importedNormal)
+
+    If DotVec(n, outDir) < 0 Then
+        n = ScaleVec(n, -1.0)
+    End If
+
+    Return NormalizeVec(n)
+
+End Function
+
+
+Function RotatePointMm(ByVal pt As Double(), ByVal pivot As Double(), ByVal rotMat As Double(,)) As Double()
+
+    Dim dx As Double = pt(0) - pivot(0)
+    Dim dy As Double = pt(1) - pivot(1)
+    Dim dz As Double = pt(2) - pivot(2)
+
+    Return Vec( _
+        pivot(0) + rotMat(0, 0) * dx + rotMat(0, 1) * dy + rotMat(0, 2) * dz, _
+        pivot(1) + rotMat(1, 0) * dx + rotMat(1, 1) * dy + rotMat(1, 2) * dz, _
+        pivot(2) + rotMat(2, 0) * dx + rotMat(2, 1) * dy + rotMat(2, 2) * dz)
+
+End Function
+
+
+Function RotateVector(ByVal v As Double(), ByVal rotMat As Double(,)) As Double()
+
+    Return Vec( _
+        rotMat(0, 0) * v(0) + rotMat(0, 1) * v(1) + rotMat(0, 2) * v(2), _
+        rotMat(1, 0) * v(0) + rotMat(1, 1) * v(1) + rotMat(1, 2) * v(2), _
+        rotMat(2, 0) * v(0) + rotMat(2, 1) * v(1) + rotMat(2, 2) * v(2))
+
+End Function
+
+
+' ============================================================
+' MATRICES / ROTACIONES
+' ============================================================
+
+Function MatMul3(ByVal a As Double(,), ByVal b As Double(,)) As Double(,)
+
+    Dim resultMat(2, 2) As Double
+
+    For iRow As Integer = 0 To 2
+        For iCol As Integer = 0 To 2
+            resultMat(iRow, iCol) = a(iRow, 0) * b(0, iCol) + _
+                                    a(iRow, 1) * b(1, iCol) + _
+                                    a(iRow, 2) * b(2, iCol)
+        Next
+    Next
+
+    Return resultMat
+
+End Function
+
+
+Function RotationAroundGlobalAxis(ByVal axisName As String, ByVal degrees As Double) As Double(,)
+
+    Dim axisUpper As String = UCase(Trim(axisName))
+    Dim rad As Double = degrees * Math.PI / 180.0
+
+    Dim cosA As Double = Math.Cos(rad)
+    Dim sinA As Double = Math.Sin(rad)
+
+    Dim rot(2, 2) As Double
+
+    rot(0, 0) = 1.0
+    rot(1, 1) = 1.0
+    rot(2, 2) = 1.0
+
+    Select Case axisUpper
+
+        Case "+X", "X"
+            rot(0, 0) = 1.0 : rot(0, 1) = 0.0 : rot(0, 2) = 0.0
+            rot(1, 0) = 0.0 : rot(1, 1) = cosA : rot(1, 2) = -sinA
+            rot(2, 0) = 0.0 : rot(2, 1) = sinA : rot(2, 2) = cosA
+
+        Case "-X"
+            Return RotationAroundGlobalAxis("+X", -degrees)
+
+        Case "+Y", "Y"
+            rot(0, 0) = cosA : rot(0, 1) = 0.0 : rot(0, 2) = sinA
+            rot(1, 0) = 0.0  : rot(1, 1) = 1.0 : rot(1, 2) = 0.0
+            rot(2, 0) = -sinA : rot(2, 1) = 0.0 : rot(2, 2) = cosA
+
+        Case "-Y"
+            Return RotationAroundGlobalAxis("+Y", -degrees)
+
+        Case "+Z", "Z"
+            rot(0, 0) = cosA : rot(0, 1) = -sinA : rot(0, 2) = 0.0
+            rot(1, 0) = sinA : rot(1, 1) = cosA  : rot(1, 2) = 0.0
+            rot(2, 0) = 0.0  : rot(2, 1) = 0.0   : rot(2, 2) = 1.0
+
+        Case "-Z"
+            Return RotationAroundGlobalAxis("+Z", -degrees)
+
+        Case Else
+            Throw New Exception("Eje no válido para rotación automática: " & axisName)
+
+    End Select
+
+    Return rot
+
+End Function
+
+
+' ============================================================
+' JSON
+' ============================================================
+
+Function BuildFrameJson( _
+    ByVal asmDoc As AssemblyDocument, _
+    ByVal segIndex As Integer, _
+    ByVal stepDegrees As Double, _
+    ByVal angleDegrees As Double, _
+    ByVal seg1OccName As String, _
+    ByVal coverOccName As String, _
+    ByVal topTarget As String, _
+    ByVal coverTarget As String, _
+    ByVal invSeg1 As Boolean, _
+    ByVal invCover As Boolean, _
+    ByVal originRepositionApplied As Boolean, _
+    ByVal originMethod As String, _
+    ByVal originBeforeShiftMm As Double(), _
+    ByVal originShiftMm As Double(), _
+    ByVal seg1Pt As Double(), _
+    ByVal seg1N As Double(), _
+    ByVal coverPt As Double(), _
+    ByVal coverN As Double(), _
+    ByVal xmin As Double, ByVal ymin As Double, ByVal zmin As Double, _
+    ByVal xmax As Double, ByVal ymax As Double, ByVal zmax As Double, _
+    ByVal cx As Double, ByVal cy As Double, ByVal cz As Double, _
+    ByVal w2x As Double, ByVal w2y As Double, ByVal w2z As Double, _
+    ByVal rotMat As Double(,), _
+    ByVal pivotMm As Double(), _
+    ByVal movedCount As Integer, _
+    ByVal failCount As Integer, _
+    ByVal outputDir As String, _
+    ByVal stepPath As String) As String
+
+    Dim sb As New System.Text.StringBuilder()
+    Dim nl As String = vbLf
+    Dim iam As String = ""
+
+    If Not String.IsNullOrEmpty(asmDoc.FullFileName) Then
+        iam = asmDoc.FullFileName
+    End If
+
+    sb.Append("{" & nl)
+    sb.Append("  ""schema_version"": 10," & nl)
+    sb.Append("  ""source"": ""inventor_ilogic_manual_selected_segment_3d_frame_pqart3""," & nl)
+    sb.Append("  ""generated_utc"": """ & System.DateTime.UtcNow.ToString("o") & """," & nl)
+    sb.Append("  ""segment_index"": " & segIndex & "," & nl)
+    sb.Append("  ""auto_rotation_step_degrees"": " & Fmt(stepDegrees) & "," & nl)
+    sb.Append("  ""auto_rotation_total_degrees"": " & Fmt(angleDegrees) & "," & nl)
+    sb.Append("  ""assembly_file"": """ & JsonEscape(iam) & """," & nl)
+    sb.Append("  ""component_mode"": ""multi_root_occurrence_assembly""," & nl)
+    sb.Append("  ""units"": ""mm""," & nl)
+    sb.Append("  ""frame"": ""inventor_assembly_after_alignment_and_origin_shift""," & nl)
+    sb.Append("  ""output_folder"": """ & JsonEscape(outputDir) & """," & nl)
+    sb.Append("  ""exported_step_file"": """ & JsonEscape(stepPath) & """," & nl)
+
+    sb.Append("  ""convention"": {" & nl)
+    sb.Append("    ""active_segment_selected_face_target"": """ & JsonEscape(topTarget) & """," & nl)
+    sb.Append("    ""top_cover_target"": """ & JsonEscape(coverTarget) & """," & nl)
+    sb.Append("    ""automatic_rotation_axis"": """ & JsonEscape(coverTarget) & """," & nl)
+    sb.Append("    ""invert_segment_normal"": " & JsonBool(invSeg1) & "," & nl)
+    sb.Append("    ""invert_top_cover_normal"": " & JsonBool(invCover) & "," & nl)
+    sb.Append("    ""selected_normals_forced_outward_before_alignment"": true," & nl)
+    sb.Append("    ""origin_repositioned_to_selected_face_corner"": " & JsonBool(originRepositionApplied) & "," & nl)
+    sb.Append("    ""origin_method"": """ & JsonEscape(originMethod) & """" & nl)
+    sb.Append("  }," & nl)
+
+    sb.Append("  ""origin_reposition_mm"": {" & nl)
+    sb.Append("    ""origin_corner_before_shift"": { ""x"": " & Fmt(originBeforeShiftMm(0)) & ", ""y"": " & Fmt(originBeforeShiftMm(1)) & ", ""z"": " & Fmt(originBeforeShiftMm(2)) & " }," & nl)
+    sb.Append("    ""translation_applied"": { ""x"": " & Fmt(originShiftMm(0)) & ", ""y"": " & Fmt(originShiftMm(1)) & ", ""z"": " & Fmt(originShiftMm(2)) & " }," & nl)
+    sb.Append("    ""final_origin"": { ""x"": 0, ""y"": 0, ""z"": 0 }," & nl)
+    sb.Append("    ""note"": ""El STEP fue trasladado para que el origen quede en la esquina real de la cara activa cuando fue posible.""" & nl)
+    sb.Append("  }," & nl)
+
+    sb.Append("  ""selected_reference_occurrences"": {" & nl)
+    sb.Append("    ""active_segment_occurrence"": """ & JsonEscape(seg1OccName) & """," & nl)
+    sb.Append("    ""top_cover_occurrence"": """ & JsonEscape(coverOccName) & """" & nl)
+    sb.Append("  }," & nl)
+
+    Dim coverLabel As String = "top_cover_should_remain_plus_x"
+    Dim coverNx As Double = 1.0
+    Dim coverNy As Double = 0.0
+    Dim coverNz As Double = 0.0
+    Dim coverNote As String = "PQart 3.0 SEG2/4: cara del segmento hacia +Z, top cover hacia +X."
+    If UCase(Trim(coverTarget)) = "-Y" Then
+        coverLabel = "top_cover_should_remain_minus_y"
+        coverNx = 0.0
+        coverNy = -1.0
+        coverNz = 0.0
+        coverNote = "PQart 3.0 SEG1/3: cara del segmento hacia +Z, top cover hacia -Y (acostado)."
+    End If
+
+    sb.Append("  ""reference_faces_after_this_export"": {" & nl)
+    sb.Append("    ""active_segment_reference_face"": " & FaceJsonBlock("active_segment_selected_reference", seg1Pt, seg1N) & "," & nl)
+    sb.Append("    ""top_cover_reference_face"": " & FaceJsonBlock(coverLabel, coverPt, coverN) & nl)
+    sb.Append("  }," & nl)
+
+    sb.Append("  ""active_segment_hint"": {" & nl)
+    sb.Append("    ""segment_index"": " & segIndex & "," & nl)
+    sb.Append("    ""expected_active_face_normal"": { ""x"": 0, ""y"": 0, ""z"": 1 }," & nl)
+    sb.Append("    ""expected_top_cover_normal"": { ""x"": " & Fmt(coverNx) & ", ""y"": " & Fmt(coverNy) & ", ""z"": " & Fmt(coverNz) & " }," & nl)
+    sb.Append("    ""origin_for_pqart"": { ""x"": 0, ""y"": 0, ""z"": 0 }," & nl)
+    sb.Append("    ""note"": """ & JsonEscape(coverNote) & """" & nl)
+    sb.Append("  }," & nl)
+
+    sb.Append("  ""tank_range_box_mm_after_origin_shift"": {" & nl)
+    sb.Append("    ""min"": { ""x"": " & Fmt(xmin) & ", ""y"": " & Fmt(ymin) & ", ""z"": " & Fmt(zmin) & " }," & nl)
+    sb.Append("    ""max"": { ""x"": " & Fmt(xmax) & ", ""y"": " & Fmt(ymax) & ", ""z"": " & Fmt(zmax) & " }," & nl)
+    sb.Append("    ""center"": { ""x"": " & Fmt(cx) & ", ""y"": " & Fmt(cy) & ", ""z"": " & Fmt(cz) & " }," & nl)
+    sb.Append("    ""size"": { ""x"": " & Fmt(xmax - xmin) & ", ""y"": " & Fmt(ymax - ymin) & ", ""z"": " & Fmt(zmax - zmin) & " }" & nl)
+    sb.Append("  }," & nl)
+
+    sb.Append("  ""alignment_transform_applied_mm"": {" & nl)
+    sb.Append("    ""pivot"": { ""x"": " & Fmt(pivotMm(0)) & ", ""y"": " & Fmt(pivotMm(1)) & ", ""z"": " & Fmt(pivotMm(2)) & " }," & nl)
+    sb.Append("    ""rotated_root_occurrences"": " & movedCount & "," & nl)
+    sb.Append("    ""failed_root_occurrences"": " & failCount & "," & nl)
+    sb.Append("    ""rotation_row_major"": [" & nl)
+
+    For iRow As Integer = 0 To 2
+        sb.Append("      [")
+
+        For iCol As Integer = 0 To 2
+            sb.Append(Fmt(rotMat(iRow, iCol)))
+
+            If iCol < 2 Then
+                sb.Append(", ")
+            End If
+        Next
+
+        sb.Append("]")
+
+        If iRow < 2 Then
+            sb.Append(",")
+        End If
+
+        sb.Append(nl)
+    Next
+
+    sb.Append("    ]" & nl)
+    sb.Append("  }," & nl)
+
+    sb.Append("  ""wobj_secondary_hints_step_mm"": {" & nl)
+    sb.Append("    ""frame"": ""inventor_assembly_mm_after_origin_shift""," & nl)
+    sb.Append("    ""note"": ""Usar como referencia para WOBJ2 en PQArt. El origen sugerido ya es 0,0,0 porque el STEP fue trasladado a la esquina de trabajo.""," & nl)
+    sb.Append("    ""suggested_wobj2_origin_mm"": { ""x"": " & Fmt(w2x) & ", ""y"": " & Fmt(w2y) & ", ""z"": " & Fmt(w2z) & " }" & nl)
+    sb.Append("  }" & nl)
+
+    sb.Append("}" & nl)
+
+    Return sb.ToString()
+
+End Function
+
+
+Function FaceJsonBlock(ByVal role As String, ByVal pt As Double(), ByVal n As Double()) As String
+
+    Dim nl As String = vbLf
+
+    Return "{" & nl & _
+           "      ""role"": """ & JsonEscape(role) & """," & nl & _
+           "      ""point_on_face_mm"": { ""x"": " & Fmt(pt(0)) & ", ""y"": " & Fmt(pt(1)) & ", ""z"": " & Fmt(pt(2)) & " }," & nl & _
+           "      ""normal_unit"": { ""x"": " & Fmt(n(0)) & ", ""y"": " & Fmt(n(1)) & ", ""z"": " & Fmt(n(2)) & " }" & nl & _
+           "    }"
+
+End Function
+
+
+Function JsonEscape(ByVal s As String) As String
+
+    If s Is Nothing Then
+        Return ""
+    End If
+
+    Dim q As String = Chr(34)
+
+    s = s.Replace("\", "\\")
+    s = s.Replace(q, "\" & q)
+    s = s.Replace(vbCrLf, "\n")
+    s = s.Replace(vbCr, "\n")
+    s = s.Replace(vbLf, "\n")
+
+    Return s
+
+End Function
+
+
+Function JsonBool(ByVal v As Boolean) As String
+
+    If v Then
+        Return "true"
+    Else
+        Return "false"
+    End If
+
+End Function
+
+
+Function Fmt(ByVal v As Double) As String
+
+    Return v.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)
+
+End Function
+
+
+' ============================================================
+' FUNCIONES VECTORIALES
+' ============================================================
+
+Function AxisVector(ByVal axisName As String) As Double()
+
+    Select Case UCase(Trim(axisName))
+
+        Case "+X", "X"
+            Return Vec(1, 0, 0)
+
+        Case "-X"
+            Return Vec(-1, 0, 0)
+
+        Case "+Y", "Y"
+            Return Vec(0, 1, 0)
+
+        Case "-Y"
+            Return Vec(0, -1, 0)
+
+        Case "+Z", "Z"
+            Return Vec(0, 0, 1)
+
+        Case "-Z"
+            Return Vec(0, 0, -1)
+
+        Case Else
+            Throw New Exception("Eje no válido: " & axisName)
+
+    End Select
+
+End Function
+
+
+Function Vec(ByVal x As Double, ByVal y As Double, ByVal z As Double) As Double()
+
+    Dim a(2) As Double
+
+    a(0) = x
+    a(1) = y
+    a(2) = z
+
+    Return a
+
+End Function
+
+
+Function AddVec(ByVal a As Double(), ByVal b As Double()) As Double()
+
+    Return Vec(a(0) + b(0), a(1) + b(1), a(2) + b(2))
+
+End Function
+
+
+Function DotVec(ByVal a As Double(), ByVal b As Double()) As Double
+
+    Return a(0) * b(0) + a(1) * b(1) + a(2) * b(2)
+
+End Function
+
+
+Function CrossVec(ByVal a As Double(), ByVal b As Double()) As Double()
+
+    Return Vec( _
+        a(1) * b(2) - a(2) * b(1), _
+        a(2) * b(0) - a(0) * b(2), _
+        a(0) * b(1) - a(1) * b(0))
+
+End Function
+
+
+Function VecLength(ByVal a As Double()) As Double
+
+    Return Math.Sqrt(DotVec(a, a))
+
+End Function
+
+
+Function NormalizeVec(ByVal a As Double()) As Double()
+
+    Dim l As Double = VecLength(a)
+
+    If l < 0.000000001 Then
+        Throw New Exception("Vector cero.")
+    End If
+
+    Return Vec(a(0) / l, a(1) / l, a(2) / l)
+
+End Function
+
+
+Function ScaleVec(ByVal a As Double(), ByVal s As Double) As Double()
+
+    Return Vec(a(0) * s, a(1) * s, a(2) * s)
+
+End Function
+
+
+Function SubVec(ByVal a As Double(), ByVal b As Double()) As Double()
+
+    Return Vec(a(0) - b(0), a(1) - b(1), a(2) - b(2))
+
+End Function

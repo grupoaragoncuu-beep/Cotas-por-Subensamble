@@ -32,19 +32,23 @@ from inventor_com import conectar_inventor
 
 
 CARPETA_PIEZAS_ACOTADAS = "PIEZAS_ACOTADAS"
-SUBCARPETAS_CARA_PIEZAS = (
+# Carpetas activas con selección manual (COTAS_ILOGIC_ABIGAIL).
+SUBCARPETAS_CARA_SELECCION = (
     "SEGM1",
     "SEGM2",
     "SEGM3",
     "SEGM4",
     "TOP",
     "BASE",
-    # Compat mapeo automático PQart (sin selección manual).
+)
+# Solo limpieza/compat de corridas viejas PQart; NO se crean vacías.
+SUBCARPETAS_CARA_LEGACY = (
     "FRONT",
     "BACK",
     "LEFT",
     "RIGHT",
 )
+SUBCARPETAS_CARA_PIEZAS = SUBCARPETAS_CARA_SELECCION + SUBCARPETAS_CARA_LEGACY
 SUBCARPETA_OTROS_PIEZAS = "OTROS"
 
 # --- Clasificación por proceso (iProperty escrita por el iLogic Colorimetria).
@@ -68,6 +72,7 @@ SUBCARPETA_SIN_CLASIFICAR = "SIN CLASIFICACION"
 _SUFIJOS_JPG_PIEZA = (
     "DIAMETRO_EXTERIOR",
     "DIAMETRO_INTERIOR",
+    "DIAMETRO_H\\d{2}",
     "LARGO_PATA",
     "ANCHO",
     "LARGO",
@@ -142,27 +147,84 @@ def _clave_pieza(texto):
     return limpio
 
 
+def _clave_familia_pieza(texto):
+    """
+    Familia de pieza (SP-852_1 y SP-852_2 → misma clave).
+
+    Misma idea que ``_clave_tipo_pieza`` del flujo de caras, local aquí
+    para no importar generador_caras (ciclo).
+    """
+    base = str(texto or "").upper().strip()
+    if "|" in base:
+        base = base.rsplit("|", 1)[-1]
+    base = base.split(":")[0].strip()
+    # Quitar sufijos de cota del JPG de piezas.
+    base = re.sub(
+        r"_(DIAMETRO_EXTERIOR|DIAMETRO_INTERIOR|DIAMETRO_H\d{2}|LARGO_PATA|ANCHO|LARGO|THK|ALTO)_\d+$",
+        "",
+        base,
+        flags=re.IGNORECASE,
+    )
+    m = re.match(r"^(\d+-\d+-[AP]\d+)", base)
+    if m:
+        return _clave_pieza(m.group(1))
+    base = re.sub(r"_\d+$", "", base)
+    return _clave_pieza(base)
+
+
+def _claves_match_pieza(texto):
+    """Claves full + familia para matching multi-cara."""
+    claves = set()
+    c = _clave_pieza(texto)
+    if c:
+        claves.add(c)
+    f = _clave_familia_pieza(texto)
+    if f:
+        claves.add(f)
+    return claves
+
+
 def _cara_para_pieza(nombre_archivo, mapa_por_cara):
-    """Devuelve la cara asignada al JPG según los catálogos de piezas."""
+    """Devuelve UNA cara (match más específico). Compat con callers viejos."""
+    caras = _caras_para_pieza(nombre_archivo, mapa_por_cara)
+    return caras[0] if caras else None
+
+
+def _caras_para_pieza(nombre_archivo, mapa_por_cara):
+    """
+    Todas las caras donde la pieza aparece en el catálogo.
+
+    Si la misma pieza (o familia SP-852_1 / SP-852_2) está en SEGM1 y SEGM3,
+    devuelve ambas para que PIEZAS_ACOTADAS reciba una copia en cada carpeta.
+    """
     if not mapa_por_cara:
-        return None
+        return []
     base_archivo = os.path.splitext(os.path.basename(nombre_archivo))[0]
-    clave_archivo = _clave_pieza(base_archivo)
-    if not clave_archivo:
-        return None
-    mejor_cara = None
-    mejor_len = 0
+    claves_archivo = _claves_match_pieza(base_archivo)
+    if not claves_archivo:
+        return []
+    halladas = []
     for cara, piezas in mapa_por_cara.items():
+        mejor_len = 0
         for pieza in piezas:
-            clave_pieza = _clave_pieza(pieza)
-            if not clave_pieza:
+            claves_pieza = _claves_match_pieza(pieza)
+            if not claves_pieza:
                 continue
-            if clave_pieza in clave_archivo or clave_archivo in clave_pieza:
-                # Preferir el match más largo (más específico) ante empates.
-                if len(clave_pieza) > mejor_len:
-                    mejor_cara = cara
-                    mejor_len = len(clave_pieza)
-    return mejor_cara
+            for ca in claves_archivo:
+                for cp in claves_pieza:
+                    if ca in cp or cp in ca:
+                        mejor_len = max(mejor_len, len(cp), len(ca))
+        if mejor_len > 0:
+            halladas.append((mejor_len, str(cara).upper()))
+    if not halladas:
+        return []
+    orden = {c: i for i, c in enumerate(SUBCARPETAS_CARA_SELECCION)}
+    halladas.sort(key=lambda item: (orden.get(item[1], 99), -item[0], item[1]))
+    vistas = []
+    for _n, cara in halladas:
+        if cara not in vistas:
+            vistas.append(cara)
+    return vistas
 
 
 def _extraer_pieza_de_jpg(nombre_archivo):
@@ -187,23 +249,75 @@ def _nombre_carpeta_pieza(nombre_pieza):
     return limpio or "PIEZA"
 
 
+def _carpetas_cara_activas(mapa_por_cara=None):
+    """
+    Carpetas a crear/usar: SEGM*/TOP/BASE (+ OTROS), nunca FRONT/BACK/LEFT/RIGHT.
+    """
+    activas = list(SUBCARPETAS_CARA_SELECCION)
+    if mapa_por_cara:
+        extras = [
+            str(k).upper()
+            for k in mapa_por_cara.keys()
+            if str(k).upper() in SUBCARPETAS_CARA_SELECCION
+        ]
+        if extras:
+            activas = [c for c in SUBCARPETAS_CARA_SELECCION if c in extras]
+            for c in extras:
+                if c not in activas:
+                    activas.append(c)
+    return tuple(activas) + (SUBCARPETA_OTROS_PIEZAS,)
+
+
+def _limpiar_carpetas_cara_vacias_y_legacy(carpeta_piezas):
+    """Borra FRONT/BACK/LEFT/RIGHT y cualquier cara activa que haya quedado vacía."""
+    if not os.path.isdir(carpeta_piezas):
+        return
+    candidatas = set(SUBCARPETAS_CARA_LEGACY) | set(SUBCARPETAS_CARA_SELECCION)
+    candidatas.add(SUBCARPETA_OTROS_PIEZAS)
+    for nombre in list(candidatas):
+        ruta = os.path.join(carpeta_piezas, nombre)
+        if not os.path.isdir(ruta):
+            continue
+        # Legacy siempre se elimina si está vacío; si tiene JPG (corrida vieja)
+        # se deja, pero FRONT/BACK/LEFT/RIGHT vacíos no deben residualizar.
+        try:
+            tiene_jpg = False
+            for _root, _dirs, files in os.walk(ruta):
+                if any(f.lower().endswith(".jpg") for f in files):
+                    tiene_jpg = True
+                    break
+            if not tiene_jpg:
+                shutil.rmtree(ruta, ignore_errors=True)
+                print(f"  Carpeta residual vacía eliminada: {nombre}/")
+            elif nombre in SUBCARPETAS_CARA_LEGACY:
+                print(
+                    f"  AVISO: {nombre}/ aún tiene JPG de esquema PQart viejo; "
+                    "no se borró automáticamente."
+                )
+        except OSError as err:
+            print(f"  AVISO: no se pudo limpiar {nombre}/: {err}")
+
+
 def _reorganizar_piezas_por_cara(carpeta_piezas, mapa_por_cara):
     """
-    Mueve cada JPG a `<CARA>/<PIEZA>/<archivo>.jpg`.
+    Coloca cada JPG en `<CARA>/<PIEZA>/<archivo>.jpg`.
 
-    - Piezas sin match a una cara caen en `OTROS/<PIEZA>/`.
-    - Si falla el movimiento, el JPG queda en su ubicación original.
+    Si la pieza aparece en varias caras (p. ej. SEGM1 y SEGM3), COPIA el
+    JPG a cada una. Sin match → `OTROS/<PIEZA>/`.
+    NO crea FRONT/BACK/LEFT/RIGHT (esquema PQart residual).
     """
+    activas = _carpetas_cara_activas(mapa_por_cara)
+    validas_destino = set(SUBCARPETAS_CARA_SELECCION) | {SUBCARPETA_OTROS_PIEZAS}
     try:
         os.makedirs(carpeta_piezas, exist_ok=True)
-        for sub in SUBCARPETAS_CARA_PIEZAS + (SUBCARPETA_OTROS_PIEZAS,):
+        for sub in activas:
             os.makedirs(os.path.join(carpeta_piezas, sub), exist_ok=True)
     except OSError as err:
         print(f"AVISO: no se pudieron preparar subcarpetas de PIEZAS_ACOTADAS: {err}")
         return {}
 
-    conteo_cara = {sub: 0 for sub in SUBCARPETAS_CARA_PIEZAS + (SUBCARPETA_OTROS_PIEZAS,)}
-    piezas_por_cara = {sub: set() for sub in SUBCARPETAS_CARA_PIEZAS + (SUBCARPETA_OTROS_PIEZAS,)}
+    conteo_cara = {sub: 0 for sub in activas}
+    piezas_por_cara = {sub: set() for sub in activas}
     try:
         entradas = list(os.listdir(carpeta_piezas))
     except OSError as err:
@@ -216,30 +330,52 @@ def _reorganizar_piezas_por_cara(carpeta_piezas, mapa_por_cara):
             continue
         if not nombre.lower().endswith(".jpg"):
             continue
-        cara = _cara_para_pieza(nombre, mapa_por_cara)
-        destino_sub = cara if cara in SUBCARPETAS_CARA_PIEZAS else SUBCARPETA_OTROS_PIEZAS
+        caras = [
+            c for c in _caras_para_pieza(nombre, mapa_por_cara)
+            if c in validas_destino
+        ]
+        if not caras:
+            caras = [SUBCARPETA_OTROS_PIEZAS]
         pieza = _extraer_pieza_de_jpg(nombre)
         pieza_folder = _nombre_carpeta_pieza(pieza)
-        destino_dir = os.path.join(carpeta_piezas, destino_sub, pieza_folder)
-        try:
-            os.makedirs(destino_dir, exist_ok=True)
-            destino = os.path.join(destino_dir, nombre)
-            if os.path.exists(destino):
-                os.remove(destino)
-            shutil.move(ruta, destino)
-            conteo_cara[destino_sub] += 1
-            piezas_por_cara[destino_sub].add(pieza_folder)
-        except OSError as err:
+        ruta_fuente = None
+        for idx_cara, destino_sub in enumerate(caras):
+            if destino_sub not in conteo_cara:
+                conteo_cara[destino_sub] = 0
+                piezas_por_cara[destino_sub] = set()
+            destino_dir = os.path.join(carpeta_piezas, destino_sub, pieza_folder)
+            try:
+                os.makedirs(destino_dir, exist_ok=True)
+                destino = os.path.join(destino_dir, nombre)
+                if os.path.exists(destino):
+                    os.remove(destino)
+                if idx_cara == 0:
+                    shutil.move(ruta, destino)
+                    ruta_fuente = destino
+                else:
+                    shutil.copy2(ruta_fuente, destino)
+                conteo_cara[destino_sub] += 1
+                piezas_por_cara[destino_sub].add(pieza_folder)
+            except OSError as err:
+                print(
+                    f"AVISO: no se pudo colocar '{nombre}' en "
+                    f"{destino_sub}/{pieza_folder}/: {err}"
+                )
+        if len(caras) > 1:
             print(
-                f"AVISO: no se pudo mover '{nombre}' a "
-                f"{destino_sub}/{pieza_folder}/: {err}"
+                f"  Pieza multi-cara '{pieza_folder}': "
+                f"copiada a {', '.join(caras)}"
             )
 
+    _limpiar_carpetas_cara_vacias_y_legacy(carpeta_piezas)
+
     print("  PIEZAS_ACOTADAS por cara:")
-    for sub in SUBCARPETAS_CARA_PIEZAS + (SUBCARPETA_OTROS_PIEZAS,):
+    for sub in list(activas):
+        if sub not in conteo_cara:
+            continue
         print(
             f"    {sub}: {conteo_cara[sub]} JPG en "
-            f"{len(piezas_por_cara[sub])} piezas"
+            f"{len(piezas_por_cara.get(sub, ()))} piezas"
         )
     return conteo_cara
 

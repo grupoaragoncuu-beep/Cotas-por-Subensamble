@@ -257,6 +257,135 @@ def _crear_intent_punto2d(hoja, tg, curva, x, y):
         return None
 
 
+def _puntos_clave_curva_thk(curva):
+    puntos = []
+    usados = set()
+    for attr in ("StartPoint", "MidPoint", "EndPoint"):
+        try:
+            p = getattr(curva, attr)
+            if p is None:
+                continue
+            x, y = float(p.X), float(p.Y)
+            key = (round(x, 6), round(y, 6))
+            if key in usados:
+                continue
+            usados.add(key)
+            puntos.append((x, y, p))
+        except Exception:
+            continue
+    return puntos
+
+
+def _es_recta_dominante_thk(d, lado):
+    if lado in ("izq", "der"):
+        return d["dy"] >= max(EPS, d["dx"] * 2.0)
+    return d["dx"] >= max(EPS, d["dy"] * 2.0)
+
+
+def _elegir_curva_extrema_thk(datos, lado, tol):
+    """
+    Extremo REAL de silueta (incluye filo exterior del doblez).
+
+    Prefiere rectas alineadas al borde (horizontales arriba/abajo,
+    verticales izq/der) para no anclar en la tangencia del radio.
+    """
+    minx, maxx, miny, maxy = _bbox_global(datos)
+    if lado == "izq":
+        objetivo = minx
+        cands = [d for d in datos if abs(d["minx"] - objetivo) <= tol]
+        rectos = [d for d in cands if _es_recta_dominante_thk(d, lado)]
+        base = rectos if rectos else cands
+        if not base:
+            return None
+        return max(base, key=lambda d: (d["dy"], d["dx"]))
+    if lado == "der":
+        objetivo = maxx
+        cands = [d for d in datos if abs(d["maxx"] - objetivo) <= tol]
+        rectos = [d for d in cands if _es_recta_dominante_thk(d, lado)]
+        base = rectos if rectos else cands
+        if not base:
+            return None
+        return max(base, key=lambda d: (d["dy"], d["dx"]))
+    if lado == "inf":
+        objetivo = miny
+        cands = [d for d in datos if abs(d["miny"] - objetivo) <= tol]
+        rectos = [d for d in cands if _es_recta_dominante_thk(d, lado)]
+        base = rectos if rectos else cands
+        if not base:
+            return None
+        return max(base, key=lambda d: (d["dx"], d["dy"]))
+    if lado == "sup":
+        objetivo = maxy
+        cands = [d for d in datos if abs(d["maxy"] - objetivo) <= tol]
+        rectos = [d for d in cands if _es_recta_dominante_thk(d, lado)]
+        base = rectos if rectos else cands
+        if not base:
+            return None
+        return max(base, key=lambda d: (d["dx"], d["dy"]))
+    return None
+
+
+def _intent_en_extremo(hoja, tg, dato, lado):
+    """GeometryIntent anclado al punto extremo real de la curva."""
+    curva = dato["curve"]
+    puntos = _puntos_clave_curva_thk(curva)
+    if puntos:
+        try:
+            if lado == "izq":
+                p = min(puntos, key=lambda t: t[0])[2]
+            elif lado == "der":
+                p = max(puntos, key=lambda t: t[0])[2]
+            elif lado == "inf":
+                p = min(puntos, key=lambda t: t[1])[2]
+            else:
+                p = max(puntos, key=lambda t: t[1])[2]
+            return hoja.CreateGeometryIntent(curva, p)
+        except Exception:
+            pass
+    # Fallback: Point2d en la esquina del bbox de la curva.
+    if lado == "izq":
+        x, y = dato["minx"], (dato["miny"] + dato["maxy"]) * 0.5
+    elif lado == "der":
+        x, y = dato["maxx"], (dato["miny"] + dato["maxy"]) * 0.5
+    elif lado == "inf":
+        x, y = (dato["minx"] + dato["maxx"]) * 0.5, dato["miny"]
+    else:
+        x, y = (dato["minx"] + dato["maxx"]) * 0.5, dato["maxy"]
+    intent = _crear_intent_punto2d(hoja, tg, curva, x, y)
+    if intent is not None:
+        return intent
+    try:
+        return hoja.CreateGeometryIntent(curva)
+    except Exception:
+        return None
+
+
+def _validar_span_cota(dimension, esperado_sheet, vista, nombre_hoja, etiqueta):
+    """
+    Rechaza cotas ancladas a tangencia de doblez (típicamente 2–8% cortas).
+    """
+    try:
+        valor = abs(float(dimension.ModelValue))
+    except Exception:
+        return True
+    esperado = _esperado_modelo(vista, esperado_sheet)
+    if esperado <= EPS:
+        return True
+    ratio = valor / esperado
+    if ratio < 0.97 or ratio > 1.05:
+        try:
+            dimension.Delete()
+        except Exception:
+            pass
+        print(
+            f"⚠️ {nombre_hoja}: {etiqueta} descartada "
+            f"(valor={valor / IN_TO_CM:.3f} in, "
+            f"silueta≈{esperado / IN_TO_CM:.3f} in, ratio={ratio:.3f})"
+        )
+        return False
+    return True
+
+
 def _es_circular_aprox(d):
     lado = max(d["dx"], d["dy"])
     if lado < 0.05:
@@ -1217,8 +1346,11 @@ def _dibujar_cota_prismatica(hoja, tg, mejor):
     tipo = mejor["tipo"]
 
     if tipo == "horizontal":
-        int_a = hoja.CreateGeometryIntent(a["curve"])
-        int_b = hoja.CreateGeometryIntent(b["curve"])
+        int_a = _intent_en_extremo(hoja, tg, a, "der" if a["cx"] >= b["cx"] else "izq")
+        int_b = _intent_en_extremo(hoja, tg, b, "izq" if a["cx"] >= b["cx"] else "der")
+        if int_a is None or int_b is None:
+            int_a = hoja.CreateGeometryIntent(a["curve"])
+            int_b = hoja.CreateGeometryIntent(b["curve"])
         x_texto = ((a["cx"] + b["cx"]) / 2.0)
         y_texto = max(a["maxy"], b["maxy"]) + OFFSET_COTA
         pt_texto = _clampear_punto_hoja(hoja, tg, x_texto, y_texto)
@@ -1226,8 +1358,11 @@ def _dibujar_cota_prismatica(hoja, tg, mejor):
             pt_texto, int_a, int_b, kHorizontalDimensionType
         )
     else:
-        int_a = hoja.CreateGeometryIntent(a["curve"])
-        int_b = hoja.CreateGeometryIntent(b["curve"])
+        int_a = _intent_en_extremo(hoja, tg, a, "sup" if a["cy"] >= b["cy"] else "inf")
+        int_b = _intent_en_extremo(hoja, tg, b, "inf" if a["cy"] >= b["cy"] else "sup")
+        if int_a is None or int_b is None:
+            int_a = hoja.CreateGeometryIntent(a["curve"])
+            int_b = hoja.CreateGeometryIntent(b["curve"])
         x_texto = min(a["minx"], b["minx"]) - OFFSET_COTA
         y_texto = ((a["cy"] + b["cy"]) / 2.0)
         pt_texto = _clampear_punto_hoja(hoja, tg, x_texto, y_texto)
@@ -1603,30 +1738,71 @@ def _es_perfil_u_o_l(datos, thk_sheet):
     if len(similares) >= 2:
         return True
 
-    # Canales/escuadras con fillets suelen fragmentar curvas: aceptar
-    # perfiles compactos con bastante geometría.
-    if len(datos) >= 8 and aspect < 4.5:
+    # Antes: ``len(datos)>=8 and aspect<4.5`` marcaba placas (P12_2 aspect
+    # ~1.8) como perfil y generaba ALTO/PATA vacíos. Exigir al menos un
+    # candidato THK + aspect de sección (no placa alargada ni cara plana).
+    if len(similares) >= 1 and 1.15 <= aspect < 4.0 and mayor >= thk_sheet * 6.0:
         return True
     return False
 
 
+def _span_bordes_seleccionados(a, b, orientacion):
+    """Distancia en hoja entre los extremos de los dos bordes elegidos."""
+    if orientacion == "V":
+        return abs(float(a["maxy"]) - float(b["miny"]))
+    return abs(float(a["maxx"]) - float(b["minx"]))
+
+
+def _pares_borde_silueta(datos, orientacion, tol):
+    """
+    Candidatos (superior/inferior o der/izq) que SÍ tocan el extremo global.
+
+    Evita anclar en tangencia: el borde inferior debe tener miny≈miny_global
+    y el superior maxy≈maxy_global (idem en X).
+    """
+    minx, maxx, miny, maxy = _bbox_global(datos)
+    if orientacion == "V":
+        a = _elegir_curva_extrema_thk(datos, "sup", tol)
+        b = _elegir_curva_extrema_thk(datos, "inf", tol)
+        if a is None:
+            a = max(datos, key=lambda d: d["maxy"])
+        if b is None:
+            b = min(datos, key=lambda d: d["miny"])
+        # Exigir que los bordes toquen la silueta exterior.
+        if a is not None and a["maxy"] < maxy - tol:
+            tops = [d for d in datos if d["maxy"] >= maxy - tol]
+            if tops:
+                a = max(tops, key=lambda d: (d["dx"], d["dy"]))
+        if b is not None and b["miny"] > miny + tol:
+            bots = [d for d in datos if d["miny"] <= miny + tol]
+            if bots:
+                b = max(bots, key=lambda d: (d["dx"], d["dy"]))
+        return a, b, "sup", "inf", (maxy - miny)
+    a = _elegir_curva_extrema_thk(datos, "der", tol)
+    b = _elegir_curva_extrema_thk(datos, "izq", tol)
+    if a is None:
+        a = max(datos, key=lambda d: d["maxx"])
+    if b is None:
+        b = min(datos, key=lambda d: d["minx"])
+    if a is not None and a["maxx"] < maxx - tol:
+        ders = [d for d in datos if d["maxx"] >= maxx - tol]
+        if ders:
+            a = max(ders, key=lambda d: (d["dy"], d["dx"]))
+    if b is not None and b["minx"] > minx + tol:
+        izqs = [d for d in datos if d["minx"] <= minx + tol]
+        if izqs:
+            b = max(izqs, key=lambda d: (d["dy"], d["dx"]))
+    return a, b, "der", "izq", (maxx - minx)
+
+
 def _acotar_lado_bbox(hoja, vista, tg, datos, nombre_hoja, orientacion, etiqueta):
     """
-    Dibuja UNA cota lineal (vertical u horizontal) sobre el bbox global de
-    ``datos``. ``orientacion`` es 'V' (mide alto del bbox) o 'H' (mide ancho).
+    Dibuja UNA cota lineal (vertical u horizontal) sobre la silueta exterior.
 
-    Reintenta hasta 3 veces si Inventor devuelve -2147352567 (curvas COM
-    en estado inestable tras crear la vista).
-
-    Validación post-dibujo: después de crear la cota, verificamos que su
-    ``RangeBox`` quede dentro del sheet físico con al menos 0.5 cm de
-    margen. Si NO cabe, borramos la cota, movemos el punto de anclaje
-    hacia el centro y reintentamos. Sin esta validación, la cota se
-    puede dibujar en un lugar donde el JPG exportado no la incluye
-    (P05_LARGO_PATA sin cota visible).
-
-    Devuelve ``True`` si logró colocar la cota Y la cota queda dentro del
-    sheet, ``False`` en caso contrario.
+    No usa ``min/max`` crudo de una sola curva (eso ancla en la tangencia
+    del doblez). Elige bordes reales (recto horizontal arriba/abajo o
+    vertical izq/der) y fija GeometryIntent en el punto extremo.
+    Valida ModelValue ≈ span de silueta; si queda corto, reintenta.
     """
     if not datos:
         return False
@@ -1650,10 +1826,11 @@ def _acotar_lado_bbox(hoja, vista, tg, datos, nombre_hoja, orientacion, etiqueta
         sheet_w = None
         sheet_h = None
 
-    def _pt_para_orient(dx_off, dy_off):
-        """Calcula el punto de anclaje de la cota, con offsets adicionales
-        que empujan hacia el centro del sheet si la primera posición se sale."""
-        if orientacion == 'V':
+    span = h if orientacion == "V" else w
+    tol = max(0.03, max(w, h) * 0.02)
+
+    def _pt_para_orient(a, b, dx_off, dy_off):
+        if orientacion == "V":
             x = min(a["minx"], b["minx"]) - OFFSET_COTA - dx_off
             y = (miny + maxy) / 2.0 + dy_off
         else:
@@ -1662,8 +1839,6 @@ def _acotar_lado_bbox(hoja, vista, tg, datos, nombre_hoja, orientacion, etiqueta
         return _clampear_punto_hoja(hoja, tg, x, y)
 
     def _cota_dentro_de_sheet(dim_obj):
-        """Verifica que el RangeBox de la cota (línea + texto + flechas)
-        quede DENTRO del sheet físico con margen mínimo de 0.3 cm."""
         if sheet_w is None or sheet_h is None:
             return True
         try:
@@ -1683,24 +1858,27 @@ def _acotar_lado_bbox(hoja, vista, tg, datos, nombre_hoja, orientacion, etiqueta
         )
 
     ultimo_error = None
-    datos_iter = datos
+    datos_iter = list(datos)
     for intento in range(3):
         try:
-            if orientacion == 'V':
-                a = max(datos_iter, key=lambda d: d["maxy"])
-                b = min(datos_iter, key=lambda d: d["miny"])
-            else:
-                a = max(datos_iter, key=lambda d: d["maxx"])
-                b = min(datos_iter, key=lambda d: d["minx"])
+            a, b, lado_a, lado_b, span = _pares_borde_silueta(
+                datos_iter, orientacion, tol
+            )
+            if a is None or b is None or a.get("curve") is b.get("curve"):
+                raise RuntimeError("sin pares de borde para silueta exterior")
 
-            int_a = hoja.CreateGeometryIntent(a["curve"])
-            int_b = hoja.CreateGeometryIntent(b["curve"])
+            span_bordes = _span_bordes_seleccionados(a, b, orientacion)
+            if span > EPS and span_bordes / span < 0.97:
+                raise RuntimeError(
+                    f"bordes no cubren silueta "
+                    f"({span_bordes:.3f}/{span:.3f})"
+                )
 
-            # Intentamos varias posiciones para la cota, empujando cada vez
-            # más hacia el centro del sheet si la anterior no cupo. Si
-            # ninguna cabe perfecto, nos quedamos con la PRIMERA como
-            # último recurso (mejor una cota parcialmente al borde que
-            # ninguna cota).
+            int_a = _intent_en_extremo(hoja, tg, a, lado_a)
+            int_b = _intent_en_extremo(hoja, tg, b, lado_b)
+            if int_a is None or int_b is None:
+                raise RuntimeError("GeometryIntent de borde falló")
+
             offsets_a_probar = [
                 (0.0, 0.0),
                 (1.5, 0.0),
@@ -1712,9 +1890,9 @@ def _acotar_lado_bbox(hoja, vista, tg, datos, nombre_hoja, orientacion, etiqueta
             dim_creado = None
             dim_fallback = None
             for dx_off, dy_off in offsets_a_probar:
-                pt = _pt_para_orient(dx_off, dy_off)
+                pt = _pt_para_orient(a, b, dx_off, dy_off)
                 try:
-                    if orientacion == 'V':
+                    if orientacion == "V":
                         dim_test = hoja.DrawingDimensions.GeneralDimensions.AddLinear(
                             pt, int_a, int_b, kVerticalDimensionType
                         )
@@ -1725,12 +1903,15 @@ def _acotar_lado_bbox(hoja, vista, tg, datos, nombre_hoja, orientacion, etiqueta
                 except Exception:
                     continue
 
+                if not _validar_span_cota(
+                    dim_test, span, vista, nombre_hoja, etiqueta
+                ):
+                    continue
+
                 if _cota_dentro_de_sheet(dim_test):
                     dim_creado = dim_test
                     break
 
-                # Guardar como fallback la primera cota que sí se pudo
-                # crear (aunque no quepa perfectamente).
                 if dim_fallback is None:
                     dim_fallback = dim_test
                 else:
@@ -1740,22 +1921,27 @@ def _acotar_lado_bbox(hoja, vista, tg, datos, nombre_hoja, orientacion, etiqueta
                         pass
 
             if dim_creado is None and dim_fallback is not None:
-                dim_creado = dim_fallback
-                _dbg(
-                    f"{nombre_hoja}: cota aceptada como fallback (cerca del "
-                    f"borde), mejor eso que hoja sin dimensión."
-                )
+                # Fallback sólo si aún cubre ≥92% de la silueta.
+                if _validar_span_cota(
+                    dim_fallback, span, vista, nombre_hoja, etiqueta
+                ):
+                    dim_creado = dim_fallback
+                    _dbg(
+                        f"{nombre_hoja}: cota aceptada como fallback (cerca del "
+                        f"borde), mejor eso que hoja sin dimensión."
+                    )
+                else:
+                    dim_fallback = None
 
             if dim_creado is None:
                 raise RuntimeError(
-                    "no se pudo crear cota en ningún offset probado"
+                    "no se pudo crear cota de silueta en ningún offset"
                 )
 
             aplicar_estilo_cota(dim_creado, hoja=hoja)
 
-            span = h if orientacion == 'V' else w
             valor_in = _esperado_modelo(vista, span) / IN_TO_CM
-            print(f"✅ {nombre_hoja}: {etiqueta} = {valor_in:.4f} in")
+            print(f"✅ {nombre_hoja}: {etiqueta} = {valor_in:.4f} in (silueta)")
             return True
         except Exception as e:
             ultimo_error = e
@@ -1776,6 +1962,8 @@ def _acotar_lado_bbox(hoja, vista, tg, datos, nombre_hoja, orientacion, etiqueta
                     minx, maxx, miny, maxy = _bbox_global(datos_iter)
                     w = maxx - minx
                     h = maxy - miny
+                    span = h if orientacion == "V" else w
+                    tol = max(0.03, max(w, h) * 0.02)
             except Exception:
                 pass
 
@@ -1933,61 +2121,106 @@ def _debe_generar_alto(datos, thk_sheet, vista=None):
 
 def _calcular_camara_transversal(part_doc, tg, to):
     """
-    Calcula una cámara que mire A LO LARGO del eje MAYOR del bbox 3D del
-    modelo, para mostrar la SECCIÓN TRANSVERSAL de un perfil L/U/C.
+    Primera cámara transversal (compat). Preferir ``_camaras_transversales``.
+    """
+    cams = _camaras_transversales(part_doc, tg, to)
+    return cams[0] if cams else None
 
-    Reutiliza ``creador_vistas._orientacion_lado_doblado`` cuando está
-    disponible (detección específica para perfiles doblados con normales
-    perpendiculares). Si no, calcula manualmente desde el bbox 3D.
 
-    Devuelve un ``Camera`` de Inventor listo para ``AddBaseView``, o
-    ``None`` si no se pudo determinar.
+def _camaras_transversales(part_doc, tg, to):
+    """
+    Lista de cámaras candidatas para sección transversal de perfil L/U/C.
+
+    Orden: orientación doblada (si existe) → mirar eje mayor → eje medio.
+    Así P16 / perfiles con LADO plano pueden reintentar otra dirección.
     """
     if part_doc is None or tg is None or to is None:
-        return None
+        return []
 
-    # Vía preferida: reutilizar la lógica probada del flujo normal.
+    cams = []
     if _creador_vistas is not None:
         try:
             ori = _creador_vistas._orientacion_lado_doblado(
                 part_doc, tg, to, None
             )
             if ori is not None:
-                eye_dir = ori["v_lado"]
-                up_hint = ori["v_up"]
-                cx, cy, cz = ori["cx"], ori["cy"], ori["cz"]
-                return _creador_vistas.crear_camara(
-                    part_doc, tg, to, cx, cy, cz, eye_dir, up_hint
+                cam = _creador_vistas.crear_camara(
+                    part_doc, tg, to,
+                    ori["cx"], ori["cy"], ori["cz"],
+                    ori["v_lado"], ori["v_up"],
                 )
+                if cam is not None:
+                    cams.append(cam)
         except Exception:
             pass
 
-    # Fallback manual: eye = eje mayor del bbox 3D.
+    if _creador_vistas is None:
+        return cams
+
     try:
         rb = part_doc.ComponentDefinition.RangeBox
         cx = (float(rb.MaxPoint.X) + float(rb.MinPoint.X)) / 2.0
         cy = (float(rb.MaxPoint.Y) + float(rb.MinPoint.Y)) / 2.0
         cz = (float(rb.MaxPoint.Z) + float(rb.MinPoint.Z)) / 2.0
-        dx = float(rb.MaxPoint.X) - float(rb.MinPoint.X)
-        dy = float(rb.MaxPoint.Y) - float(rb.MinPoint.Y)
-        dz = float(rb.MaxPoint.Z) - float(rb.MinPoint.Z)
+        dx = abs(float(rb.MaxPoint.X) - float(rb.MinPoint.X))
+        dy = abs(float(rb.MaxPoint.Y) - float(rb.MinPoint.Y))
+        dz = abs(float(rb.MaxPoint.Z) - float(rb.MinPoint.Z))
         ejes = sorted(
-            [("X", abs(dx)), ("Y", abs(dy)), ("Z", abs(dz))],
+            [("X", dx), ("Y", dy), ("Z", dz)],
             key=lambda t: t[1],
             reverse=True,
         )
-        eje_mayor = ejes[0][0]
-        eje_medio = ejes[1][0]
         vec = {"X": (1, 0, 0), "Y": (0, 1, 0), "Z": (0, 0, 1)}
-        eye_dir = tg.CreateVector(*vec[eje_mayor])
-        up_hint = tg.CreateVector(*vec[eje_medio])
-        if _creador_vistas is not None:
-            return _creador_vistas.crear_camara(
-                part_doc, tg, to, cx, cy, cz, eye_dir, up_hint
-            )
+        # Mirar a lo largo del mayor (sección) y, si falla, del medio.
+        for i_eye, i_up in ((0, 1), (1, 0), (0, 2)):
+            if i_eye >= len(ejes) or i_up >= len(ejes):
+                continue
+            eye_dir = tg.CreateVector(*vec[ejes[i_eye][0]])
+            up_hint = tg.CreateVector(*vec[ejes[i_up][0]])
+            try:
+                cam = _creador_vistas.crear_camara(
+                    part_doc, tg, to, cx, cy, cz, eye_dir, up_hint
+                )
+                if cam is not None:
+                    cams.append(cam)
+            except Exception:
+                continue
     except Exception:
         pass
-    return None
+    return cams
+
+
+def _vista_parece_seccion_perfil(datos, thk_sheet, vista=None):
+    """
+    True si el bbox 2D (y opcionalmente 3D) luce como sección U/L, no placa.
+    """
+    if not datos:
+        return False
+    if _es_perfil_u_o_l(datos, thk_sheet):
+        return True
+    minx, maxx, miny, maxy = _bbox_global(datos)
+    w = maxx - minx
+    h = maxy - miny
+    mayor = max(w, h)
+    menor = min(w, h)
+    if menor <= EPS or thk_sheet is None or thk_sheet <= EPS:
+        return False
+    # Sección útil: alto del canal >> espesor; no una tira de canto fina.
+    if mayor < thk_sheet * 4.0:
+        return False
+    if menor < thk_sheet * 1.8:
+        return False
+    if vista is not None:
+        dims = _dimensiones_bbox_3d(vista)
+        if dims and len(dims) >= 3:
+            d_ord = sorted(dims)
+            # El menor 2D no debe ser el largo de la viga (mayor 3D).
+            if mayor > d_ord[2] * 0.85:
+                return False
+            # Debe parecerse al medio o menor 3D (sección).
+            if menor < d_ord[0] * 0.5:
+                return False
+    return True
 
 
 def _es_com_transitorio_thk(exc):
@@ -2298,169 +2531,144 @@ def _crear_hoja_alto(plano, hoja_lado, tg, datos, thk_sheet, nombre_lado):
     # ¿La vista LADO 2D muestra el perfil correctamente?
     perfil_ok_en_lado = _es_perfil_u_o_l(datos, thk_sheet)
 
-    # Si NO lo muestra pero SÍ es perfil por modelo 3D, calcular cámara
-    # transversal alternativa. Esto atiende P05_Default_As Machined y
-    # similares donde la vista LADO cayó en cara plana.
-    camara_alt = None
+    # Cámaras transversales candidatas (reintentos si LADO es cara plana).
+    camaras_alt = []
     if not perfil_ok_en_lado and vista_orig is not None and inv_app is not None:
         try:
             part_doc = vista_orig.ReferencedDocumentDescriptor.ReferencedDocument
             to = inv_app.TransientObjects
-            camara_alt = _calcular_camara_transversal(part_doc, tg, to)
-            if camara_alt is not None:
+            camaras_alt = _camaras_transversales(part_doc, tg, to)
+            if camaras_alt:
                 _dbg(
-                    f"{nombre_lado}: LADO no muestra perfil; usando cámara "
-                    f"transversal alternativa para _ALTO/_LARGO_PATA."
+                    f"{nombre_lado}: LADO no muestra perfil; "
+                    f"{len(camaras_alt)} cámara(s) transversal(es) a probar."
                 )
         except Exception as exc_cam:
             _dbg(f"{nombre_lado}: no se pudo calcular cámara alterna ({exc_cam})")
-            camara_alt = None
+            camaras_alt = []
 
-    # ============================================================
-    # Hoja 1: _ALTO
-    # ============================================================
-    nombre_alto = _nombre_hoja_alto(nombre_lado)
-    hoja_alto, vista_alto = _clonar_hoja_lado_para_cota(
-        plano, hoja_lado, tg, nombre_alto, inv_app, camara_alt=camara_alt
-    )
-    if hoja_alto is None:
-        print(f"⚠️ {nombre_lado}: no se pudo crear hoja {nombre_alto}")
-    else:
-        datos_alto = None
-        for intento in range(3):
-            try:
-                datos_alto = _obtener_curvas_validas(vista_alto)
-            except Exception:
-                datos_alto = None
-            if datos_alto:
-                break
-            if inv_app is not None:
+    def _clonar_con_reintentos(nombre_nueva):
+        """Prueba LADO (si ya es sección) y luego cámaras transversales."""
+        if perfil_ok_en_lado:
+            intentos = [None] + list(camaras_alt)
+        else:
+            intentos = list(camaras_alt) if camaras_alt else [None]
+        for idx, cam in enumerate(intentos):
+            hoja_n, vista_n = _clonar_hoja_lado_para_cota(
+                plano, hoja_lado, tg, nombre_nueva, inv_app, camara_alt=cam
+            )
+            if hoja_n is None:
+                continue
+            datos_n = None
+            for intento in range(3):
                 try:
-                    inv_app.UserInterfaceManager.DoEvents()
+                    datos_n = _obtener_curvas_validas(vista_n)
+                except Exception:
+                    datos_n = None
+                if datos_n:
+                    break
+                if inv_app is not None:
+                    try:
+                        inv_app.UserInterfaceManager.DoEvents()
+                    except Exception:
+                        pass
+                time.sleep(0.35 * (intento + 1))
+            if not datos_n:
+                try:
+                    hoja_n.Delete()
                 except Exception:
                     pass
-            time.sleep(0.4 * (intento + 1))
+                continue
+            if not _vista_parece_seccion_perfil(datos_n, thk_sheet, vista_n):
+                _dbg(
+                    f"{nombre_nueva}: intento {idx} descartado "
+                    "(vista no parece sección de perfil)."
+                )
+                try:
+                    hoja_n.Delete()
+                except Exception:
+                    pass
+                continue
+            return hoja_n, vista_n, datos_n
+        return None, None, None
 
-        if not datos_alto:
-            print(f"⚠️ {nombre_alto}: sin curvas 2D en la vista clonada.")
+    # ============================================================
+    # Hoja 1: _ALTO  (solo cota asociativa; sin nota-only → se borra)
+    # ============================================================
+    nombre_alto = _nombre_hoja_alto(nombre_lado)
+    hoja_alto, vista_alto, datos_alto = _clonar_con_reintentos(nombre_alto)
+    if hoja_alto is None:
+        print(f"⚠️ {nombre_lado}: no se pudo crear hoja usable {nombre_alto}")
+    else:
+        aminx, amaxx, aminy, amaxy = _bbox_global(datos_alto)
+        aw = amaxx - aminx
+        ah = amaxy - aminy
+        orient_mayor_a = 'V' if ah >= aw else 'H'
+        ok_alto = _acotar_lado_bbox(
+            hoja_alto, vista_alto, tg, datos_alto, nombre_alto,
+            orient_mayor_a, "ALTO perfil"
+        )
+        if ok_alto:
+            creadas.add(nombre_alto)
+            print(f"📐 {nombre_lado}: creada hoja extra {nombre_alto}")
+        else:
+            print(
+                f"🗑️ {nombre_alto}: sin cota asociativa; se elimina "
+                "(no se exporta JPG solo-nota)."
+            )
             try:
                 hoja_alto.Delete()
             except Exception:
                 pass
-        else:
-            # Bbox 2D calculado sobre la vista NUEVA (así funciona igual
-            # si venimos de LADO original que si venimos de cámara alterna).
-            aminx, amaxx, aminy, amaxy = _bbox_global(datos_alto)
-            aw = amaxx - aminx
-            ah = amaxy - aminy
-            orient_mayor_a = 'V' if ah >= aw else 'H'
-            ok_alto = _acotar_lado_bbox(
-                hoja_alto, vista_alto, tg, datos_alto, nombre_alto,
-                orient_mayor_a, "ALTO perfil"
-            )
-            if not ok_alto:
-                # Fallback: nota con el valor del bbox 3D (dimensión media).
-                dims_3d = _dimensiones_bbox_3d(vista_alto)
-                valor_alto_cm = None
-                if dims_3d and len(dims_3d) >= 3:
-                    dims_ord = sorted(dims_3d)
-                    valor_alto_cm = dims_ord[1]  # medio = ALTO del perfil
-                ok_alto = _forzar_nota_dimension_individual(
-                    hoja_alto, tg, vista_alto, nombre_alto,
-                    "ALTO", valor_alto_cm
-                )
-            if ok_alto:
-                creadas.add(nombre_alto)
-                print(f"📐 {nombre_lado}: creada hoja extra {nombre_alto}")
-            else:
-                try:
-                    hoja_alto.Delete()
-                except Exception:
-                    pass
 
     # ============================================================
     # Hoja 2: _LARGO_PATA (sólo perfiles con ambas dimensiones útiles)
     # ============================================================
     nombre_pata = _nombre_hoja_largo_pata(nombre_lado)
-    hoja_pata, vista_pata = _clonar_hoja_lado_para_cota(
-        plano, hoja_lado, tg, nombre_pata, inv_app, camara_alt=camara_alt
-    )
+    hoja_pata, vista_pata, datos_pata = _clonar_con_reintentos(nombre_pata)
     if hoja_pata is None:
-        print(f"⚠️ {nombre_lado}: no se pudo crear hoja {nombre_pata}")
+        print(f"⚠️ {nombre_lado}: no se pudo crear hoja usable {nombre_pata}")
     else:
-        datos_pata = None
-        for intento in range(3):
-            try:
-                datos_pata = _obtener_curvas_validas(vista_pata)
-            except Exception:
-                datos_pata = None
-            if datos_pata:
-                break
-            if inv_app is not None:
-                try:
-                    inv_app.UserInterfaceManager.DoEvents()
-                except Exception:
-                    pass
-            time.sleep(0.4 * (intento + 1))
+        pminx, pmaxx, pminy, pmaxy = _bbox_global(datos_pata)
+        pw = pmaxx - pminx
+        ph = pmaxy - pminy
+        menor_p = min(pw, ph)
 
-        if not datos_pata:
-            print(f"⚠️ {nombre_pata}: sin curvas 2D en la vista clonada.")
+        cotar_menor = False
+        if thk_sheet is not None and thk_sheet > EPS:
+            if menor_p >= thk_sheet * 2.2:
+                cotar_menor = True
+        else:
+            if menor_p >= 0.6:
+                cotar_menor = True
+
+        if not cotar_menor:
+            _dbg(
+                f"{nombre_pata}: se omite (menor_bbox={menor_p:.3f}cm "
+                f"≈ thk_sheet, no aporta cota nueva)."
+            )
             try:
                 hoja_pata.Delete()
             except Exception:
                 pass
         else:
-            pminx, pmaxx, pminy, pmaxy = _bbox_global(datos_pata)
-            pw = pmaxx - pminx
-            ph = pmaxy - pminy
-            menor_p = min(pw, ph)
-
-            # Sólo cotar la pata cuando el menor del bbox NO es prácticamente
-            # el espesor (evita duplicar THK en franjas L de canto).
-            cotar_menor = False
-            if thk_sheet is not None and thk_sheet > EPS:
-                if menor_p >= thk_sheet * 2.2:
-                    cotar_menor = True
+            orient_menor_p = 'H' if ph >= pw else 'V'
+            ok_pata = _acotar_lado_bbox(
+                hoja_pata, vista_pata, tg, datos_pata, nombre_pata,
+                orient_menor_p, "LARGO pata"
+            )
+            if ok_pata:
+                creadas.add(nombre_pata)
+                print(f"📐 {nombre_lado}: creada hoja extra {nombre_pata}")
             else:
-                if menor_p >= 0.6:
-                    cotar_menor = True
-
-            if not cotar_menor:
-                _dbg(
-                    f"{nombre_pata}: se omite (menor_bbox={menor_p:.3f}cm "
-                    f"≈ thk_sheet, no aporta cota nueva)."
+                print(
+                    f"🗑️ {nombre_pata}: sin cota asociativa; se elimina "
+                    "(no se exporta JPG solo-nota)."
                 )
                 try:
                     hoja_pata.Delete()
                 except Exception:
                     pass
-            else:
-                orient_menor_p = 'H' if ph >= pw else 'V'
-                ok_pata = _acotar_lado_bbox(
-                    hoja_pata, vista_pata, tg, datos_pata, nombre_pata,
-                    orient_menor_p, "LARGO pata"
-                )
-                if not ok_pata:
-                    # Fallback: nota con el valor del bbox 3D (menor
-                    # descartando el espesor de chapa).
-                    dims_3d = _dimensiones_bbox_3d(vista_pata)
-                    valor_pata_cm = None
-                    if dims_3d and len(dims_3d) >= 3:
-                        dims_ord = sorted(dims_3d)
-                        # menor > thk (ya validado por cotar_menor).
-                        valor_pata_cm = dims_ord[0]
-                    ok_pata = _forzar_nota_dimension_individual(
-                        hoja_pata, tg, vista_pata, nombre_pata,
-                        "LARGO_PATA", valor_pata_cm
-                    )
-                if ok_pata:
-                    creadas.add(nombre_pata)
-                    print(f"📐 {nombre_lado}: creada hoja extra {nombre_pata}")
-                else:
-                    try:
-                        hoja_pata.Delete()
-                    except Exception:
-                        pass
 
     return creadas
 

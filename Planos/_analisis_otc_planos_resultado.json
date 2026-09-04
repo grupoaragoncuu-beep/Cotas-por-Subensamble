@@ -1,0 +1,1715 @@
+{
+  "tanks": [
+    {
+      "order": "1991 - OTC 62176 TANK",
+      "proyecto": "62176",
+      "planos_path": "Z:\\♦♦GRUPO ARGA CARPETAS COMPARTIDAS♦♦\\BIENVENIDO\\Departamentos _antes TIK\\ORDENES DE PRODUCCION\\1991 - OTC 62176 TANK\\4. Planos",
+      "pdfs": [
+        "62176 - Tank Manufacturing Rev.02.pdf",
+        "62176-46.00 Rev 00.PDF",
+        "62176-47.00 Rev 00.PDF",
+        "62176-47.01 Rev 00.PDF",
+        "62176-48.00 Rev 02.pdf",
+        "62176-49.00 Rev 00.PDF",
+        "62176-51.00 Rev 00.PDF",
+        "62176-52.00 Rev 00.PDF",
+        "62176-53.00 Rev 00.PDF",
+        "62176-54.00 Rev 00.PDF",
+        "62176-59.00 Rev 00.PDF",
+        "62176-59.01 Rev 00.PDF",
+        "62176-60.00 Rev 00.PDF",
+        "SP-702  Rev 00.PDF",
+        "SP-710  Rev 00.PDF",
+        "SP-736  Rev 00.pdf",
+        "SP-740 Rev 00.pdf",
+        "SP-741  Rev 00.pdf",
+        "SP-742  Rev 00.PDF",
+        "SP-752  Rev 00.pdf",
+        "SP-767  Rev 00.PDF",
+        "SP-771 Rev 00.PDF",
+        "SP-774.pdf",
+        "SP-776.pdf",
+        "SP-788  Rev 00.PDF",
+        "SP-792  Rev 00.PDF",
+        "SP-797  Rev 00.PDF",
+        "SP-798  Rev 00.PDF",
+        "SP-799  Rev 00.PDF",
+        "SP-800  Rev 00.PDF",
+        "SP-852  Rev 00.PDF",
+        "SP-855  Rev 00.PDF"
+      ],
+      "drawings": [
+        {
+          "proj": "62176",
+          "code": "46",
+          "sub": "00",
+          "drawing_key": "46",
+          "fam_full": "46",
+          "hint": "TANQUE_GENERAL",
+          "stem": "62176-46.00"
+        },
+        {
+          "proj": "62176",
+          "code": "47",
+          "sub": "00",
+          "drawing_key": "47",
+          "fam_full": "47",
+          "hint": "TOP_COVER",
+          "stem": "62176-47.00"
+        },
+        {
+          "proj": "62176",
+          "code": "47",
+          "sub": "01",
+          "drawing_key": "47",
+          "fam_full": "47",
+          "hint": "TOP_COVER",
+          "stem": "62176-47.01"
+        },
+        {
+          "proj": "62176",
+          "code": "48",
+          "sub": "00",
+          "drawing_key": "48",
+          "fam_full": "48",
+          "hint": "CASCO_SHELL",
+          "stem": "62176-48.00"
+        },
+        {
+          "proj": "62176",
+          "code": "49",
+          "sub": "00",
+          "drawing_key": "49",
+          "fam_full": "49",
+          "hint": "OTRO_O_DETALLE",
+          "stem": "62176-49.00"
+        },
+        {
+          "proj": "62176",
+          "code": "51",
+          "sub": "00",
+          "drawing_key": "51",
+          "fam_full": "51",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62176-51.00"
+        },
+        {
+          "proj": "62176",
+          "code": "52",
+          "sub": "00",
+          "drawing_key": "52",
+          "fam_full": "52",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62176-52.00"
+        },
+        {
+          "proj": "62176",
+          "code": "53",
+          "sub": "00",
+          "drawing_key": "53",
+          "fam_full": "53",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62176-53.00"
+        },
+        {
+          "proj": "62176",
+          "code": "54",
+          "sub": "00",
+          "drawing_key": "54",
+          "fam_full": "54",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62176-54.00"
+        },
+        {
+          "proj": "62176",
+          "code": "59",
+          "sub": "00",
+          "drawing_key": "59",
+          "fam_full": "59",
+          "hint": "OTRO_O_DETALLE",
+          "stem": "62176-59.00"
+        },
+        {
+          "proj": "62176",
+          "code": "59",
+          "sub": "01",
+          "drawing_key": "59",
+          "fam_full": "59",
+          "hint": "OTRO_O_DETALLE",
+          "stem": "62176-59.01"
+        },
+        {
+          "proj": "62176",
+          "code": "60",
+          "sub": "00",
+          "drawing_key": "60",
+          "fam_full": "60",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62176-60.00"
+        }
+      ],
+      "steps": [
+        {
+          "name": "62176-1246-A01.STEP",
+          "mb": 83.42,
+          "n_products": 11,
+          "error": null
+        },
+        {
+          "name": "62176-1246-A01 LIMPIO Y MARCADO.stp",
+          "mb": 6.88,
+          "n_products": 0,
+          "error": null
+        }
+      ],
+      "iam_roles": {},
+      "products_sample": []
+    },
+    {
+      "order": "1992 - OTC 62177 TANK",
+      "proyecto": "62177",
+      "planos_path": "Z:\\♦♦GRUPO ARGA CARPETAS COMPARTIDAS♦♦\\BIENVENIDO\\Departamentos _antes TIK\\ORDENES DE PRODUCCION\\1992 - OTC 62177 TANK\\4. Planos",
+      "pdfs": [
+        "62177 - TANK MANUFACTURING REV.1.pdf",
+        "62177-46.00 Rev 01.PDF",
+        "62177-47.00 Rev 00.PDF",
+        "62177-47.01 Rev 00.PDF",
+        "62177-48.00 Rev 01.PDF",
+        "62177-49.00 Rev 00.PDF",
+        "62177-51.00 Rev 00.PDF",
+        "62177-52.00 Rev 00.PDF",
+        "62177-53.00 Rev 00.PDF",
+        "62177-54.00 Rev 00.PDF",
+        "62177-60.00 Rev 00.PDF",
+        "SP-702  Rev 00.PDF",
+        "SP-736  Rev 00.pdf",
+        "SP-740 Rev 00.pdf",
+        "SP-741  Rev 00.pdf",
+        "SP-742  Rev 00.PDF",
+        "SP-752  Rev 00.pdf",
+        "SP-767  Rev 00.PDF",
+        "SP-771 Rev 00.PDF",
+        "SP-776.pdf",
+        "SP-779  Rev 01.PDF",
+        "SP-788  Rev 00.PDF",
+        "SP-792  Rev 00.PDF",
+        "SP-799  Rev 00.PDF",
+        "SP-800  Rev 00.PDF",
+        "SP-801 Rev 00.PDF",
+        "SP-851  Rev 00.PDF",
+        "SP-852  Rev 00.PDF",
+        "SP-855  Rev 00.PDF"
+      ],
+      "drawings": [
+        {
+          "proj": "62177",
+          "code": "46",
+          "sub": "00",
+          "drawing_key": "46",
+          "fam_full": "46",
+          "hint": "TANQUE_GENERAL",
+          "stem": "62177-46.00"
+        },
+        {
+          "proj": "62177",
+          "code": "47",
+          "sub": "00",
+          "drawing_key": "47",
+          "fam_full": "47",
+          "hint": "TOP_COVER",
+          "stem": "62177-47.00"
+        },
+        {
+          "proj": "62177",
+          "code": "47",
+          "sub": "01",
+          "drawing_key": "47",
+          "fam_full": "47",
+          "hint": "TOP_COVER",
+          "stem": "62177-47.01"
+        },
+        {
+          "proj": "62177",
+          "code": "48",
+          "sub": "00",
+          "drawing_key": "48",
+          "fam_full": "48",
+          "hint": "CASCO_SHELL",
+          "stem": "62177-48.00"
+        },
+        {
+          "proj": "62177",
+          "code": "49",
+          "sub": "00",
+          "drawing_key": "49",
+          "fam_full": "49",
+          "hint": "OTRO_O_DETALLE",
+          "stem": "62177-49.00"
+        },
+        {
+          "proj": "62177",
+          "code": "51",
+          "sub": "00",
+          "drawing_key": "51",
+          "fam_full": "51",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62177-51.00"
+        },
+        {
+          "proj": "62177",
+          "code": "52",
+          "sub": "00",
+          "drawing_key": "52",
+          "fam_full": "52",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62177-52.00"
+        },
+        {
+          "proj": "62177",
+          "code": "53",
+          "sub": "00",
+          "drawing_key": "53",
+          "fam_full": "53",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62177-53.00"
+        },
+        {
+          "proj": "62177",
+          "code": "54",
+          "sub": "00",
+          "drawing_key": "54",
+          "fam_full": "54",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62177-54.00"
+        },
+        {
+          "proj": "62177",
+          "code": "60",
+          "sub": "00",
+          "drawing_key": "60",
+          "fam_full": "60",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62177-60.00"
+        }
+      ],
+      "steps": [
+        {
+          "name": "62177-1246-A01 Step 3D.STEP",
+          "mb": 4.33,
+          "n_products": 119,
+          "error": null
+        }
+      ],
+      "iam_roles": {
+        "SUB_A_CASCO": 7,
+        "PIEZA_CASCO": 34,
+        "PIEZA_TOP": 10,
+        "OTRO": 31,
+        "SEGM_WALL": 4,
+        "TOP": 5,
+        "CASCO_SHELL": 1,
+        "TANQUE": 1,
+        "BASE": 1
+      },
+      "products_sample": [
+        "62177-1248-A04=SEGM_WALL",
+        "62177-1247-A04=TOP",
+        "62177-1247-A02=TOP",
+        "62177-1247-A05=TOP",
+        "62177-1248-A01=CASCO_SHELL",
+        "62177-1248-A05=SEGM_WALL",
+        "62177-1246-A01=TANQUE",
+        "62177-1248-A03=SEGM_WALL",
+        "62177-1247-A01=TOP",
+        "62177-1247-A03=TOP",
+        "62177-1248-A02=BASE",
+        "62177-1248-A06=SEGM_WALL"
+      ]
+    },
+    {
+      "order": "2024 - OTC 62178 TANK",
+      "proyecto": "62178",
+      "planos_path": "Z:\\♦♦GRUPO ARGA CARPETAS COMPARTIDAS♦♦\\BIENVENIDO\\Departamentos _antes TIK\\ORDENES DE PRODUCCION\\2024 - OTC 62178 TANK\\4. Planos",
+      "pdfs": [
+        "62178 - Tank Manufacturing Rev.02.pdf",
+        "62178-46.00 Rev 02.PDF",
+        "62178-47.00 Rev 00.PDF",
+        "62178-48.00 Rev 01.PDF",
+        "62178-49.00 Rev 00.PDF",
+        "62178-51.00 Rev 00.PDF",
+        "62178-52.00 Rev 00.PDF",
+        "62178-53.00 Rev 00.PDF",
+        "62178-54.00 Rev 00.PDF",
+        "62178-60.00 Rev 00.PDF",
+        "SP-702  Rev 00.PDF",
+        "SP-736  Rev 00.pdf",
+        "SP-740 Rev 00.pdf",
+        "SP-741  Rev 00.pdf",
+        "SP-742  Rev 00.PDF",
+        "SP-751 Rev 00.pdf",
+        "SP-752  Rev 00.pdf",
+        "SP-766 Rev 00.pdf",
+        "SP-774.pdf",
+        "SP-779 Rev 00.pdf",
+        "SP-788  Rev 00.PDF",
+        "SP-792  Rev 00.PDF",
+        "SP-799  Rev 00.PDF",
+        "SP-800  Rev 00.PDF",
+        "SP-810 Rev 00.pdf",
+        "SP-851  Rev 00.PDF",
+        "SP-852  Rev 00.PDF",
+        "SP-855  Rev 00.PDF"
+      ],
+      "drawings": [
+        {
+          "proj": "62178",
+          "code": "46",
+          "sub": "00",
+          "drawing_key": "46",
+          "fam_full": "46",
+          "hint": "TANQUE_GENERAL",
+          "stem": "62178-46.00"
+        },
+        {
+          "proj": "62178",
+          "code": "47",
+          "sub": "00",
+          "drawing_key": "47",
+          "fam_full": "47",
+          "hint": "TOP_COVER",
+          "stem": "62178-47.00"
+        },
+        {
+          "proj": "62178",
+          "code": "48",
+          "sub": "00",
+          "drawing_key": "48",
+          "fam_full": "48",
+          "hint": "CASCO_SHELL",
+          "stem": "62178-48.00"
+        },
+        {
+          "proj": "62178",
+          "code": "49",
+          "sub": "00",
+          "drawing_key": "49",
+          "fam_full": "49",
+          "hint": "OTRO_O_DETALLE",
+          "stem": "62178-49.00"
+        },
+        {
+          "proj": "62178",
+          "code": "51",
+          "sub": "00",
+          "drawing_key": "51",
+          "fam_full": "51",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62178-51.00"
+        },
+        {
+          "proj": "62178",
+          "code": "52",
+          "sub": "00",
+          "drawing_key": "52",
+          "fam_full": "52",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62178-52.00"
+        },
+        {
+          "proj": "62178",
+          "code": "53",
+          "sub": "00",
+          "drawing_key": "53",
+          "fam_full": "53",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62178-53.00"
+        },
+        {
+          "proj": "62178",
+          "code": "54",
+          "sub": "00",
+          "drawing_key": "54",
+          "fam_full": "54",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62178-54.00"
+        },
+        {
+          "proj": "62178",
+          "code": "60",
+          "sub": "00",
+          "drawing_key": "60",
+          "fam_full": "60",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62178-60.00"
+        }
+      ],
+      "steps": [
+        {
+          "name": "62178-1246-A01 Step 3D.STEP",
+          "mb": 9.24,
+          "n_products": 61,
+          "error": null
+        }
+      ],
+      "iam_roles": {
+        "OTRO": 16,
+        "PIEZA_CASCO": 21,
+        "SUB_A_CASCO": 3,
+        "SEGM_WALL": 3,
+        "TOP": 2,
+        "PIEZA_TOP": 6,
+        "TANQUE": 1
+      },
+      "products_sample": [
+        "62178-1248-A06=SEGM_WALL",
+        "62178-1247-A01=TOP",
+        "62178-1247-A03=TOP",
+        "62178-1248-A03=SEGM_WALL",
+        "62178-1246-A01=TANQUE",
+        "62178-1248-A05=SEGM_WALL"
+      ]
+    },
+    {
+      "order": "2028 - OTC 62140 TANK",
+      "proyecto": "62140",
+      "planos_path": "Z:\\♦♦GRUPO ARGA CARPETAS COMPARTIDAS♦♦\\BIENVENIDO\\Departamentos _antes TIK\\ORDENES DE PRODUCCION\\2028 - OTC 62140 TANK\\4. Planos",
+      "pdfs": [
+        "62140 - Tank Manufacturing Rev.01.pdf",
+        "62140-46.00 Rev 00.PDF",
+        "62140-47.00 Rev 00.PDF",
+        "62140-48.00 Rev 01.PDF",
+        "62140-51.00 Rev 00.PDF",
+        "62140-52.00 Rev 00.PDF",
+        "62140-59.00 Rev 00.PDF",
+        "62140-60.00 Rev 00.PDF"
+      ],
+      "drawings": [
+        {
+          "proj": "62140",
+          "code": "46",
+          "sub": "00",
+          "drawing_key": "46",
+          "fam_full": "46",
+          "hint": "TANQUE_GENERAL",
+          "stem": "62140-46.00"
+        },
+        {
+          "proj": "62140",
+          "code": "47",
+          "sub": "00",
+          "drawing_key": "47",
+          "fam_full": "47",
+          "hint": "TOP_COVER",
+          "stem": "62140-47.00"
+        },
+        {
+          "proj": "62140",
+          "code": "48",
+          "sub": "00",
+          "drawing_key": "48",
+          "fam_full": "48",
+          "hint": "CASCO_SHELL",
+          "stem": "62140-48.00"
+        },
+        {
+          "proj": "62140",
+          "code": "51",
+          "sub": "00",
+          "drawing_key": "51",
+          "fam_full": "51",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62140-51.00"
+        },
+        {
+          "proj": "62140",
+          "code": "52",
+          "sub": "00",
+          "drawing_key": "52",
+          "fam_full": "52",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62140-52.00"
+        },
+        {
+          "proj": "62140",
+          "code": "59",
+          "sub": "00",
+          "drawing_key": "59",
+          "fam_full": "59",
+          "hint": "OTRO_O_DETALLE",
+          "stem": "62140-59.00"
+        },
+        {
+          "proj": "62140",
+          "code": "60",
+          "sub": "00",
+          "drawing_key": "60",
+          "fam_full": "60",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62140-60.00"
+        }
+      ],
+      "steps": [
+        {
+          "name": "62140-1248-A01.STEP",
+          "mb": 3.04,
+          "n_products": 87,
+          "error": null
+        }
+      ],
+      "iam_roles": {
+        "PIEZA_CASCO": 55,
+        "SUB_A_CASCO": 16,
+        "BASE": 1,
+        "SEGM_WALL": 3,
+        "CASCO_SHELL": 1
+      },
+      "products_sample": [
+        "62140-1248-A02=BASE",
+        "62140-1248-A03=SEGM_WALL",
+        "62140-1248-A01=CASCO_SHELL",
+        "62140-1248-A05=SEGM_WALL",
+        "62140-1248-A04=SEGM_WALL"
+      ]
+    },
+    {
+      "order": "2081 - OTC 62147 TANK",
+      "proyecto": "62147",
+      "planos_path": "Z:\\♦♦GRUPO ARGA CARPETAS COMPARTIDAS♦♦\\BIENVENIDO\\Departamentos _antes TIK\\ORDENES DE PRODUCCION\\2081 - OTC 62147 TANK\\4. Planos",
+      "pdfs": [
+        "62147- Tank Manufacturing Rev.00.pdf",
+        "62147-46.00 Rev 00.PDF",
+        "62147-47.00 Rev 00.PDF",
+        "62147-48.00 Rev 00.PDF",
+        "62147-49.00 Rev 00.PDF",
+        "62147-50.00 Rev 00.PDF",
+        "62147-51.00 Rev 00.PDF",
+        "62147-52.00 Rev 00.PDF",
+        "62147-53.00 Rev 00.PDF",
+        "62147-54.00 Rev 00.PDF",
+        "62147-60.00 Rev 00.PDF",
+        "SP-702  Rev 00.PDF",
+        "SP-736  Rev 00.pdf",
+        "SP-740 Rev 00.pdf",
+        "SP-741  Rev 00.pdf",
+        "SP-751  Rev 00.pdf",
+        "SP-752  Rev 00.pdf",
+        "SP-766  Rev 00.pdf",
+        "SP-771 Rev 00.PDF",
+        "SP-774.pdf",
+        "SP-779 Rev 00.pdf",
+        "SP-788  Rev 00.PDF",
+        "SP-792  Rev 00.PDF",
+        "SP-797  Rev 00.PDF",
+        "SP-798  Rev 00.PDF",
+        "SP-799  Rev 00.PDF",
+        "SP-800  Rev 00.PDF",
+        "SP-810 Rev 00.pdf",
+        "SP-851  Rev 00.PDF",
+        "SP-852  Rev 00.PDF",
+        "SP-855  Rev 00.PDF"
+      ],
+      "drawings": [
+        {
+          "proj": "62147",
+          "code": "46",
+          "sub": "00",
+          "drawing_key": "46",
+          "fam_full": "46",
+          "hint": "TANQUE_GENERAL",
+          "stem": "62147-46.00"
+        },
+        {
+          "proj": "62147",
+          "code": "47",
+          "sub": "00",
+          "drawing_key": "47",
+          "fam_full": "47",
+          "hint": "TOP_COVER",
+          "stem": "62147-47.00"
+        },
+        {
+          "proj": "62147",
+          "code": "48",
+          "sub": "00",
+          "drawing_key": "48",
+          "fam_full": "48",
+          "hint": "CASCO_SHELL",
+          "stem": "62147-48.00"
+        },
+        {
+          "proj": "62147",
+          "code": "49",
+          "sub": "00",
+          "drawing_key": "49",
+          "fam_full": "49",
+          "hint": "OTRO_O_DETALLE",
+          "stem": "62147-49.00"
+        },
+        {
+          "proj": "62147",
+          "code": "50",
+          "sub": "00",
+          "drawing_key": "50",
+          "fam_full": "50",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62147-50.00"
+        },
+        {
+          "proj": "62147",
+          "code": "51",
+          "sub": "00",
+          "drawing_key": "51",
+          "fam_full": "51",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62147-51.00"
+        },
+        {
+          "proj": "62147",
+          "code": "52",
+          "sub": "00",
+          "drawing_key": "52",
+          "fam_full": "52",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62147-52.00"
+        },
+        {
+          "proj": "62147",
+          "code": "53",
+          "sub": "00",
+          "drawing_key": "53",
+          "fam_full": "53",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62147-53.00"
+        },
+        {
+          "proj": "62147",
+          "code": "54",
+          "sub": "00",
+          "drawing_key": "54",
+          "fam_full": "54",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62147-54.00"
+        },
+        {
+          "proj": "62147",
+          "code": "60",
+          "sub": "00",
+          "drawing_key": "60",
+          "fam_full": "60",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62147-60.00"
+        }
+      ],
+      "steps": [
+        {
+          "name": "62147-1246-A01.STEP",
+          "mb": 25.09,
+          "n_products": 24,
+          "error": null
+        }
+      ],
+      "iam_roles": {
+        "OTRO": 6,
+        "PIEZA_CASCO": 7,
+        "SUB_A_CASCO": 2,
+        "PIEZA_TOP": 3
+      },
+      "products_sample": []
+    },
+    {
+      "order": "2082 - OTC 62154 TANK",
+      "proyecto": "62154",
+      "planos_path": "Z:\\♦♦GRUPO ARGA CARPETAS COMPARTIDAS♦♦\\BIENVENIDO\\Departamentos _antes TIK\\ORDENES DE PRODUCCION\\2082 - OTC 62154 TANK\\4. Planos",
+      "pdfs": [
+        "62154 - Tank Manufacturing Rev.04.pdf",
+        "62154-46.00 Rev 01.PDF",
+        "62154-47.00 Rev 02.PDF",
+        "62154-48.00 Rev 04.PDF",
+        "62154-49.00 Rev 01.PDF",
+        "62154-50.00 Rev 00.pdf",
+        "62154-51.00 Rev 00.PDF",
+        "62154-52.00 Rev 00.PDF",
+        "62154-53.00 Rev 00.PDF",
+        "62154-54.00 Rev 00.PDF",
+        "62154-60.00 Rev 01.PDF",
+        "FIN-10-C-Braces mal colocados 62154.pdf",
+        "SP-702  Rev 00.PDF",
+        "SP-707  Rev 00.PDF",
+        "SP-736  Rev 00.pdf",
+        "SP-740 Rev 00.pdf",
+        "SP-741  Rev 00.pdf",
+        "SP-742  Rev 00.PDF",
+        "SP-751 Rev 00.pdf",
+        "SP-752  Rev 00.pdf",
+        "SP-767  Rev 00.PDF",
+        "SP-771 Rev 00.PDF",
+        "SP-774.pdf",
+        "SP-788  Rev 00.PDF",
+        "SP-792  Rev 00.PDF",
+        "SP-799  Rev 00.PDF",
+        "SP-800  Rev 00.PDF",
+        "SP-810 Rev 00.pdf",
+        "SP-851  Rev 00.PDF",
+        "SP-852  Rev 00.PDF",
+        "SP-855  Rev 00.PDF",
+        "SP-865 Rev 00.pdf"
+      ],
+      "drawings": [
+        {
+          "proj": "62154",
+          "code": "46",
+          "sub": "00",
+          "drawing_key": "46",
+          "fam_full": "46",
+          "hint": "TANQUE_GENERAL",
+          "stem": "62154-46.00"
+        },
+        {
+          "proj": "62154",
+          "code": "47",
+          "sub": "00",
+          "drawing_key": "47",
+          "fam_full": "47",
+          "hint": "TOP_COVER",
+          "stem": "62154-47.00"
+        },
+        {
+          "proj": "62154",
+          "code": "48",
+          "sub": "00",
+          "drawing_key": "48",
+          "fam_full": "48",
+          "hint": "CASCO_SHELL",
+          "stem": "62154-48.00"
+        },
+        {
+          "proj": "62154",
+          "code": "49",
+          "sub": "00",
+          "drawing_key": "49",
+          "fam_full": "49",
+          "hint": "OTRO_O_DETALLE",
+          "stem": "62154-49.00"
+        },
+        {
+          "proj": "62154",
+          "code": "50",
+          "sub": "00",
+          "drawing_key": "50",
+          "fam_full": "50",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62154-50.00"
+        },
+        {
+          "proj": "62154",
+          "code": "51",
+          "sub": "00",
+          "drawing_key": "51",
+          "fam_full": "51",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62154-51.00"
+        },
+        {
+          "proj": "62154",
+          "code": "52",
+          "sub": "00",
+          "drawing_key": "52",
+          "fam_full": "52",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62154-52.00"
+        },
+        {
+          "proj": "62154",
+          "code": "53",
+          "sub": "00",
+          "drawing_key": "53",
+          "fam_full": "53",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62154-53.00"
+        },
+        {
+          "proj": "62154",
+          "code": "54",
+          "sub": "00",
+          "drawing_key": "54",
+          "fam_full": "54",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62154-54.00"
+        },
+        {
+          "proj": "62154",
+          "code": "60",
+          "sub": "00",
+          "drawing_key": "60",
+          "fam_full": "60",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62154-60.00"
+        }
+      ],
+      "steps": [
+        {
+          "name": "62154-1246-A01.STEP",
+          "mb": 24.26,
+          "n_products": 28,
+          "error": null
+        }
+      ],
+      "iam_roles": {
+        "OTRO": 7,
+        "TOP": 1,
+        "PIEZA_TOP": 4,
+        "PIEZA_CASCO": 10,
+        "SUB_A_CASCO": 2
+      },
+      "products_sample": [
+        "62154-1247-A01=TOP"
+      ]
+    },
+    {
+      "order": "2098 - OTC 62175 TANK",
+      "proyecto": "62175",
+      "planos_path": "Z:\\♦♦GRUPO ARGA CARPETAS COMPARTIDAS♦♦\\BIENVENIDO\\Departamentos _antes TIK\\ORDENES DE PRODUCCION\\2098 - OTC 62175 TANK\\4. Planos",
+      "pdfs": [
+        "62175 - Tank Manufacturing Rev.01.pdf",
+        "62175-46.00 Rev 00.pdf",
+        "62175-47.00 Rev 00.pdf",
+        "62175-48.00 Rev 01.PDF",
+        "62175-49.00 Rev 00.pdf",
+        "62175-51.00 Rev 00.pdf",
+        "62175-52.00 Rev 00.pdf",
+        "62175-53.00 Rev 00.pdf",
+        "62175-54.00 Rev 00.pdf",
+        "62175-59.00 Rev 00.pdf",
+        "62175-60.00 Rev 00.pdf",
+        "SP-702 Rev 00.pdf",
+        "SP-704  Rev 01.pdf",
+        "SP-736  Rev 00.pdf",
+        "SP-740 Rev 00.pdf",
+        "SP-741  Rev 00.pdf",
+        "SP-751 Rev 00.pdf",
+        "SP-752  Rev 00.pdf",
+        "SP-767  Rev 00.PDF",
+        "SP-779 Rev 00.pdf",
+        "SP-788  Rev 00.PDF",
+        "SP-792 Rev 00.pdf",
+        "SP-797  Rev 00.PDF",
+        "SP-798  Rev 00.PDF",
+        "SP-799  Rev 00.PDF",
+        "SP-800  Rev 00.PDF",
+        "SP-810 Rev 00.pdf",
+        "SP-851  Rev 00.PDF",
+        "SP-855  Rev 00.PDF"
+      ],
+      "drawings": [
+        {
+          "proj": "62175",
+          "code": "46",
+          "sub": "00",
+          "drawing_key": "46",
+          "fam_full": "46",
+          "hint": "TANQUE_GENERAL",
+          "stem": "62175-46.00"
+        },
+        {
+          "proj": "62175",
+          "code": "47",
+          "sub": "00",
+          "drawing_key": "47",
+          "fam_full": "47",
+          "hint": "TOP_COVER",
+          "stem": "62175-47.00"
+        },
+        {
+          "proj": "62175",
+          "code": "48",
+          "sub": "00",
+          "drawing_key": "48",
+          "fam_full": "48",
+          "hint": "CASCO_SHELL",
+          "stem": "62175-48.00"
+        },
+        {
+          "proj": "62175",
+          "code": "49",
+          "sub": "00",
+          "drawing_key": "49",
+          "fam_full": "49",
+          "hint": "OTRO_O_DETALLE",
+          "stem": "62175-49.00"
+        },
+        {
+          "proj": "62175",
+          "code": "51",
+          "sub": "00",
+          "drawing_key": "51",
+          "fam_full": "51",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62175-51.00"
+        },
+        {
+          "proj": "62175",
+          "code": "52",
+          "sub": "00",
+          "drawing_key": "52",
+          "fam_full": "52",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62175-52.00"
+        },
+        {
+          "proj": "62175",
+          "code": "53",
+          "sub": "00",
+          "drawing_key": "53",
+          "fam_full": "53",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62175-53.00"
+        },
+        {
+          "proj": "62175",
+          "code": "54",
+          "sub": "00",
+          "drawing_key": "54",
+          "fam_full": "54",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62175-54.00"
+        },
+        {
+          "proj": "62175",
+          "code": "59",
+          "sub": "00",
+          "drawing_key": "59",
+          "fam_full": "59",
+          "hint": "OTRO_O_DETALLE",
+          "stem": "62175-59.00"
+        },
+        {
+          "proj": "62175",
+          "code": "60",
+          "sub": "00",
+          "drawing_key": "60",
+          "fam_full": "60",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62175-60.00"
+        }
+      ],
+      "steps": [
+        {
+          "name": "62175-1246-A01 R1.STEP",
+          "mb": 8.56,
+          "n_products": 67,
+          "error": null
+        }
+      ],
+      "iam_roles": {
+        "PIEZA_CASCO": 22,
+        "PIEZA_TOP": 2,
+        "OTRO": 14,
+        "SUB_A_CASCO": 7,
+        "TOP": 1,
+        "SEGM_WALL": 2,
+        "BASE": 1,
+        "CASCO_SHELL": 1
+      },
+      "products_sample": [
+        "62175-1247-A01=TOP",
+        "62175-1248-A04=SEGM_WALL",
+        "62175-1248-A02=BASE",
+        "62175-1248-A06=SEGM_WALL",
+        "62175-1248-A01=CASCO_SHELL"
+      ]
+    },
+    {
+      "order": "2099 - OTC 62155 TANK",
+      "proyecto": "62155",
+      "planos_path": "Z:\\♦♦GRUPO ARGA CARPETAS COMPARTIDAS♦♦\\BIENVENIDO\\Departamentos _antes TIK\\ORDENES DE PRODUCCION\\2099 - OTC 62155 TANK\\4. Planos",
+      "pdfs": [
+        "62154 - TANK MANUFACTURING REV.04.pdf",
+        "62154-46.00 Rev 01.PDF",
+        "62154-47.00 Rev 02.PDF",
+        "62154-48.00 Rev 04.PDF",
+        "62154-49.00 Rev 01.PDF",
+        "62154-50.00 Rev 00.pdf",
+        "62154-51.00 Rev 00.PDF",
+        "62154-52.00 Rev 00.PDF",
+        "62154-53.00 Rev 00.PDF",
+        "62154-54.00 Rev 00.PDF",
+        "62154-60.00 Rev 01.PDF",
+        "SP-702  Rev 00.PDF",
+        "SP-707  Rev 00.PDF",
+        "SP-736  Rev 00.pdf",
+        "SP-740 Rev 00.pdf",
+        "SP-741  Rev 00.pdf",
+        "SP-742  Rev 00.PDF",
+        "SP-751 Rev 00.pdf",
+        "SP-752  Rev 00.pdf",
+        "SP-767  Rev 00.PDF",
+        "SP-771 Rev 00.PDF",
+        "SP-774.pdf",
+        "SP-788  Rev 00.PDF",
+        "SP-792  Rev 00.PDF",
+        "SP-799  Rev 00.PDF",
+        "SP-800  Rev 00.PDF",
+        "SP-810 Rev 00.pdf",
+        "SP-851  Rev 00.PDF",
+        "SP-852  Rev 00.PDF",
+        "SP-855  Rev 00.PDF",
+        "SP-865 Rev 00.pdf"
+      ],
+      "drawings": [
+        {
+          "proj": "62154",
+          "code": "46",
+          "sub": "00",
+          "drawing_key": "46",
+          "fam_full": "46",
+          "hint": "TANQUE_GENERAL",
+          "stem": "62154-46.00"
+        },
+        {
+          "proj": "62154",
+          "code": "47",
+          "sub": "00",
+          "drawing_key": "47",
+          "fam_full": "47",
+          "hint": "TOP_COVER",
+          "stem": "62154-47.00"
+        },
+        {
+          "proj": "62154",
+          "code": "48",
+          "sub": "00",
+          "drawing_key": "48",
+          "fam_full": "48",
+          "hint": "CASCO_SHELL",
+          "stem": "62154-48.00"
+        },
+        {
+          "proj": "62154",
+          "code": "49",
+          "sub": "00",
+          "drawing_key": "49",
+          "fam_full": "49",
+          "hint": "OTRO_O_DETALLE",
+          "stem": "62154-49.00"
+        },
+        {
+          "proj": "62154",
+          "code": "50",
+          "sub": "00",
+          "drawing_key": "50",
+          "fam_full": "50",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62154-50.00"
+        },
+        {
+          "proj": "62154",
+          "code": "51",
+          "sub": "00",
+          "drawing_key": "51",
+          "fam_full": "51",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62154-51.00"
+        },
+        {
+          "proj": "62154",
+          "code": "52",
+          "sub": "00",
+          "drawing_key": "52",
+          "fam_full": "52",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62154-52.00"
+        },
+        {
+          "proj": "62154",
+          "code": "53",
+          "sub": "00",
+          "drawing_key": "53",
+          "fam_full": "53",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62154-53.00"
+        },
+        {
+          "proj": "62154",
+          "code": "54",
+          "sub": "00",
+          "drawing_key": "54",
+          "fam_full": "54",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62154-54.00"
+        },
+        {
+          "proj": "62154",
+          "code": "60",
+          "sub": "00",
+          "drawing_key": "60",
+          "fam_full": "60",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62154-60.00"
+        }
+      ],
+      "steps": [
+        {
+          "name": "62154-1246-A01.STEP",
+          "mb": 24.26,
+          "n_products": 28,
+          "error": null
+        }
+      ],
+      "iam_roles": {
+        "OTRO": 7,
+        "TOP": 1,
+        "PIEZA_TOP": 4,
+        "PIEZA_CASCO": 10,
+        "SUB_A_CASCO": 2
+      },
+      "products_sample": [
+        "62154-1247-A01=TOP"
+      ]
+    },
+    {
+      "order": "2208 - OTC 62200 TANK",
+      "proyecto": "62200",
+      "planos_path": "Z:\\♦♦GRUPO ARGA CARPETAS COMPARTIDAS♦♦\\BIENVENIDO\\Departamentos _antes TIK\\ORDENES DE PRODUCCION\\2208 - OTC 62200 TANK\\4. Planos",
+      "pdfs": [
+        "62200 - Tank Manufacturing Rev.1.pdf",
+        "62200-46.00 Rev 00.PDF",
+        "62200-47.00 Rev 00.PDF",
+        "62200-48.00 Rev 01.PDF",
+        "62200-48.01 Rev 00.PDF",
+        "62200-50.00 Rev 00.PDF",
+        "62200-51.00 Rev 00.PDF",
+        "62200-52.00 Rev 00.PDF",
+        "62200-53.00 Rev 00.PDF",
+        "62200-54.00 Rev 00.PDF",
+        "62200-60.00 Rev 00.PDF"
+      ],
+      "drawings": [
+        {
+          "proj": "62200",
+          "code": "46",
+          "sub": "00",
+          "drawing_key": "46",
+          "fam_full": "46",
+          "hint": "TANQUE_GENERAL",
+          "stem": "62200-46.00"
+        },
+        {
+          "proj": "62200",
+          "code": "47",
+          "sub": "00",
+          "drawing_key": "47",
+          "fam_full": "47",
+          "hint": "TOP_COVER",
+          "stem": "62200-47.00"
+        },
+        {
+          "proj": "62200",
+          "code": "48",
+          "sub": "00",
+          "drawing_key": "48",
+          "fam_full": "48",
+          "hint": "CASCO_SHELL",
+          "stem": "62200-48.00"
+        },
+        {
+          "proj": "62200",
+          "code": "48",
+          "sub": "01",
+          "drawing_key": "48",
+          "fam_full": "48",
+          "hint": "CASCO_SHELL",
+          "stem": "62200-48.01"
+        },
+        {
+          "proj": "62200",
+          "code": "50",
+          "sub": "00",
+          "drawing_key": "50",
+          "fam_full": "50",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62200-50.00"
+        },
+        {
+          "proj": "62200",
+          "code": "51",
+          "sub": "00",
+          "drawing_key": "51",
+          "fam_full": "51",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62200-51.00"
+        },
+        {
+          "proj": "62200",
+          "code": "52",
+          "sub": "00",
+          "drawing_key": "52",
+          "fam_full": "52",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62200-52.00"
+        },
+        {
+          "proj": "62200",
+          "code": "53",
+          "sub": "00",
+          "drawing_key": "53",
+          "fam_full": "53",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62200-53.00"
+        },
+        {
+          "proj": "62200",
+          "code": "54",
+          "sub": "00",
+          "drawing_key": "54",
+          "fam_full": "54",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62200-54.00"
+        },
+        {
+          "proj": "62200",
+          "code": "60",
+          "sub": "00",
+          "drawing_key": "60",
+          "fam_full": "60",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62200-60.00"
+        }
+      ],
+      "steps": [
+        {
+          "name": "62200-1246-A01 Step 3D.STEP",
+          "mb": 4.75,
+          "n_products": 131,
+          "error": null
+        }
+      ],
+      "iam_roles": {
+        "OTRO": 32,
+        "PIEZA_CASCO": 43,
+        "PIEZA_TOP": 14,
+        "TOP": 6,
+        "SUB_A_CASCO": 12,
+        "TANQUE": 1,
+        "SEGM_WALL": 3,
+        "BASE": 1,
+        "CASCO_SHELL": 1
+      },
+      "products_sample": [
+        "62200-1247-A05=TOP",
+        "62200-1247-A01=TOP",
+        "62200-1247-A04=TOP",
+        "62200-1247-A06=TOP",
+        "62200-1247-A02=TOP",
+        "62200-1246-A01=TANQUE",
+        "62200-1248-A03=SEGM_WALL",
+        "62200-1247-A07=TOP",
+        "62200-1248-A04=SEGM_WALL",
+        "62200-1248-A02=BASE",
+        "62200-1248-A01=CASCO_SHELL",
+        "62200-1248-A06=SEGM_WALL"
+      ]
+    },
+    {
+      "order": "2211 - OTC 62201 TANK",
+      "proyecto": "62201",
+      "planos_path": "Z:\\♦♦GRUPO ARGA CARPETAS COMPARTIDAS♦♦\\BIENVENIDO\\Departamentos _antes TIK\\ORDENES DE PRODUCCION\\2211 - OTC 62201 TANK\\4. Planos",
+      "pdfs": [
+        "62201 - TANK MANUFACTURING REV.01.pdf",
+        "62201-46.00 Rev 00.PDF",
+        "62201-47.00 Rev 00.PDF",
+        "62201-47.01 Rev 00.PDF",
+        "62201-48.00 Rev 01.PDF",
+        "62201-50.00 Rev 00.PDF",
+        "62201-51.00 Rev 00.PDF",
+        "62201-52.00 Rev 00.PDF",
+        "62201-53.00 Rev 00.PDF",
+        "62201-54.00 Rev 00.PDF",
+        "62201-60.00 Rev 00.PDF",
+        "SP-703  Rev 00.PDF",
+        "SP-710  Rev 00.PDF",
+        "SP-736  Rev 00.pdf",
+        "SP-752  Rev 00.pdf",
+        "SP-767  Rev 00.PDF",
+        "SP-771 Rev 00.PDF",
+        "SP-772 Rev 01.pdf",
+        "SP-773 Rev 01.pdf",
+        "SP-774.pdf",
+        "SP-792  Rev 00.PDF",
+        "SP-799  Rev 00.PDF",
+        "SP-800  Rev 00.PDF",
+        "SP-851  Rev 00.PDF",
+        "SP-852  Rev 00.PDF",
+        "SP-855  Rev 00.PDF"
+      ],
+      "drawings": [
+        {
+          "proj": "62201",
+          "code": "46",
+          "sub": "00",
+          "drawing_key": "46",
+          "fam_full": "46",
+          "hint": "TANQUE_GENERAL",
+          "stem": "62201-46.00"
+        },
+        {
+          "proj": "62201",
+          "code": "47",
+          "sub": "00",
+          "drawing_key": "47",
+          "fam_full": "47",
+          "hint": "TOP_COVER",
+          "stem": "62201-47.00"
+        },
+        {
+          "proj": "62201",
+          "code": "47",
+          "sub": "01",
+          "drawing_key": "47",
+          "fam_full": "47",
+          "hint": "TOP_COVER",
+          "stem": "62201-47.01"
+        },
+        {
+          "proj": "62201",
+          "code": "48",
+          "sub": "00",
+          "drawing_key": "48",
+          "fam_full": "48",
+          "hint": "CASCO_SHELL",
+          "stem": "62201-48.00"
+        },
+        {
+          "proj": "62201",
+          "code": "50",
+          "sub": "00",
+          "drawing_key": "50",
+          "fam_full": "50",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62201-50.00"
+        },
+        {
+          "proj": "62201",
+          "code": "51",
+          "sub": "00",
+          "drawing_key": "51",
+          "fam_full": "51",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62201-51.00"
+        },
+        {
+          "proj": "62201",
+          "code": "52",
+          "sub": "00",
+          "drawing_key": "52",
+          "fam_full": "52",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62201-52.00"
+        },
+        {
+          "proj": "62201",
+          "code": "53",
+          "sub": "00",
+          "drawing_key": "53",
+          "fam_full": "53",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62201-53.00"
+        },
+        {
+          "proj": "62201",
+          "code": "54",
+          "sub": "00",
+          "drawing_key": "54",
+          "fam_full": "54",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62201-54.00"
+        },
+        {
+          "proj": "62201",
+          "code": "60",
+          "sub": "00",
+          "drawing_key": "60",
+          "fam_full": "60",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62201-60.00"
+        }
+      ],
+      "steps": [
+        {
+          "name": "62201-1246-A01 R1.STEP",
+          "mb": 8.94,
+          "n_products": 88,
+          "error": null
+        }
+      ],
+      "iam_roles": {
+        "PIEZA_CASCO": 29,
+        "OTRO": 19,
+        "PIEZA_TOP": 12,
+        "SUB_A_CASCO": 8,
+        "SEGM_WALL": 2,
+        "CASCO_SHELL": 1,
+        "TOP": 1
+      },
+      "products_sample": [
+        "62201-1248-A05=SEGM_WALL",
+        "62201-1248-A01=CASCO_SHELL",
+        "62201-1247-A01=TOP",
+        "62201-1248-A03=SEGM_WALL"
+      ]
+    },
+    {
+      "order": "2275 - OTC 62248 TANK",
+      "proyecto": "62248",
+      "planos_path": "Z:\\♦♦GRUPO ARGA CARPETAS COMPARTIDAS♦♦\\BIENVENIDO\\Departamentos _antes TIK\\ORDENES DE PRODUCCION\\2275 - OTC 62248 TANK\\4. Planos",
+      "pdfs": [
+        "62248 - Tank Manufacturing Rev.00.pdf",
+        "62248-46.00 Rev 00.PDF",
+        "62248-47.00 Rev 00.PDF",
+        "62248-48.00 Rev 00.PDF",
+        "62248-51.00 Rev 00.PDF",
+        "62248-58.00 Rev 00.PDF",
+        "62248-59.00 Rev 00.PDF",
+        "SP-700  Rev 00.pdf",
+        "SP-702  Rev 00.PDF",
+        "SP-736  Rev 00.pdf",
+        "SP-740  Rev 00.pdf",
+        "SP-741  Rev 00.pdf",
+        "SP-752  Rev 00.pdf",
+        "SP-766  Rev 00.pdf",
+        "SP-774 Rev 01.pdf",
+        "SP-788  Rev 00.PDF",
+        "SP-792  Rev 00.PDF",
+        "SP-799  Rev 00.pdf",
+        "SP-800  Rev 00.pdf",
+        "SP-851  Rev 00.pdf",
+        "SP-855  Rev 00.pdf"
+      ],
+      "drawings": [
+        {
+          "proj": "62248",
+          "code": "46",
+          "sub": "00",
+          "drawing_key": "46",
+          "fam_full": "46",
+          "hint": "TANQUE_GENERAL",
+          "stem": "62248-46.00"
+        },
+        {
+          "proj": "62248",
+          "code": "47",
+          "sub": "00",
+          "drawing_key": "47",
+          "fam_full": "47",
+          "hint": "TOP_COVER",
+          "stem": "62248-47.00"
+        },
+        {
+          "proj": "62248",
+          "code": "48",
+          "sub": "00",
+          "drawing_key": "48",
+          "fam_full": "48",
+          "hint": "CASCO_SHELL",
+          "stem": "62248-48.00"
+        },
+        {
+          "proj": "62248",
+          "code": "51",
+          "sub": "00",
+          "drawing_key": "51",
+          "fam_full": "51",
+          "hint": "DETALLE_O_SUB",
+          "stem": "62248-51.00"
+        },
+        {
+          "proj": "62248",
+          "code": "58",
+          "sub": "00",
+          "drawing_key": "58",
+          "fam_full": "58",
+          "hint": "OTRO_O_DETALLE",
+          "stem": "62248-58.00"
+        },
+        {
+          "proj": "62248",
+          "code": "59",
+          "sub": "00",
+          "drawing_key": "59",
+          "fam_full": "59",
+          "hint": "OTRO_O_DETALLE",
+          "stem": "62248-59.00"
+        }
+      ],
+      "steps": [],
+      "iam_roles": {},
+      "products_sample": []
+    }
+  ],
+  "drawing_key_c": {
+    "46": 11,
+    "47": 14,
+    "48": 12,
+    "49": 7,
+    "51": 11,
+    "52": 10,
+    "53": 9,
+    "54": 9,
+    "59": 5,
+    "60": 10,
+    "50": 5,
+    "58": 1
+  },
+  "drawing_hint_c": {
+    "TANQUE_GENERAL": 11,
+    "TOP_COVER": 14,
+    "CASCO_SHELL": 12,
+    "OTRO_O_DETALLE": 13,
+    "DETALLE_O_SUB": 54
+  },
+  "iam_role_c": {
+    "OTRO": 138,
+    "SUB_A_CASCO": 60,
+    "PIEZA_CASCO": 231,
+    "PIEZA_TOP": 55,
+    "SEGM_WALL": 17,
+    "TOP": 17,
+    "CASCO_SHELL": 5,
+    "TANQUE": 3,
+    "BASE": 4
+  },
+  "a48_nums": {
+    "21": 2,
+    "10": 4,
+    "8": 5,
+    "11": 4,
+    "9": 4,
+    "15": 6,
+    "4": 4,
+    "14": 6,
+    "1": 5,
+    "5": 4,
+    "3": 5,
+    "2": 4,
+    "6": 4,
+    "13": 2,
+    "19": 4,
+    "12": 2,
+    "25": 1,
+    "20": 1,
+    "16": 3,
+    "7": 2,
+    "41": 1,
+    "18": 4,
+    "22": 2,
+    "23": 1,
+    "26": 1,
+    "33": 1,
+    "34": 2,
+    "42": 1,
+    "17": 1
+  },
+  "a47_nums": {
+    "4": 2,
+    "2": 2,
+    "5": 2,
+    "1": 7,
+    "3": 2,
+    "6": 1,
+    "7": 1
+  },
+  "sp_codes": {
+    "SP-800": 7,
+    "L871.CT": 6,
+    "SF-HC-01": 6,
+    "SP-752": 6,
+    "SP-851": 6,
+    "SP-855": 5,
+    "SP-852": 5,
+    "SP-788": 4,
+    "L845.RADVLV": 4,
+    "SF-NP-03": 4,
+    "SP-736": 3,
+    "SP-741": 3,
+    "SF-NP-01": 3,
+    "SP-774": 3,
+    "SP-771": 3,
+    "SP-799": 3,
+    "SP-702": 3,
+    "SP-792": 3,
+    "SP-742": 2,
+    "SP-767": 2,
+    "SP-798": 2,
+    "SP-894": 1,
+    "SP-711": 1,
+    "SP-801": 1,
+    "SP-776": 1,
+    "FT-BOX-02": 1,
+    "SP-703": 1,
+    "SP-740": 1,
+    "SF-NP-04": 1,
+    "SP-710": 1,
+    "SP-766": 1,
+    "SP-751": 1,
+    "SF-CP-02": 1,
+    "L843.RAD": 1,
+    "SP-772": 1,
+    "SP-773": 1,
+    "FT-BOX-04": 1
+  },
+  "typ_suffix": {
+    "sin_sufijo": 644
+  },
+  "rules": {
+    "drawing_to_assembly": {
+      "46": "familia ...46 / tanque *-1246-A01 (o *-*46-A01)",
+      "47": "familia ...47 / TOP *-1247-A01",
+      "48": "familia ...48 / casco *-1248-A01 con A02=BASE, A03-A06=paredes"
+    },
+    "assembly_tree": {
+      "TANQUE": "*-*46-A01",
+      "TOP": "*-*47-A0N (casi siempre A01)",
+      "CASCO_SHELL": "*-*48-A01  (NO acotar como cara)",
+      "BASE": "*-*48-A02",
+      "SEGM": "*-*48-A03..A06 (4 paredes tipicas)",
+      "SUB": "*-*48-A07+  subensambles de pared"
+    },
+    "grouping": "mismo nombre hasta '_' (quitar _\\d+$)",
+    "nesting": "placas Pxx_1 / Pxx_2 = mitades; origen = placa madre completa"
+  },
+  "proyectos_46": [
+    "62140",
+    "62147",
+    "62154",
+    "62175",
+    "62176",
+    "62177",
+    "62178",
+    "62200",
+    "62201",
+    "62248"
+  ],
+  "proyectos_47": [
+    "62140",
+    "62147",
+    "62154",
+    "62175",
+    "62176",
+    "62177",
+    "62178",
+    "62200",
+    "62201",
+    "62248"
+  ],
+  "proyectos_48": [
+    "62140",
+    "62147",
+    "62154",
+    "62175",
+    "62176",
+    "62177",
+    "62178",
+    "62200",
+    "62201",
+    "62248"
+  ]
+}

@@ -49,10 +49,13 @@ Salida JPG: siempre relativa → `Planos\JPG\<tanque>\...`
 1. Abrir ensamble **nativo** (`.iam` / `.ipt`) con Colorimetria aplicada.
 2. Abrir / activar el machote de planos.
 3. Ejecutar la regla:
-   - `COTAS_CARAS_TANQUE` — caras + piezas
-   - `COTAS_POR_SUBENSAMBLE` — solo caras
+   - `COTAS_POR_SUBENSAMBLE` — mapa de caras (TOP/SEGM/BASE)
+   - `COTAS_POR_SEG` — una cara (prueba rápida)
    - `COTAS_ILOGIC_ABIGAIL` — solo piezas
+   - `COTAS_POR_SEG_PIEZAS` — piezas de una cara (prueba rápida)
+   - `COTAS_CARAS_TANQUE` — caras + piezas (flujo combinado legado)
 
+Estado del corte: [`ESTADO_ACTUAL.md`](ESTADO_ACTUAL.md).
 ## Qué NO copiar entre PCs
 
 - `Planos\ilogic\config_planos.txt` (local; regenerarlo con el instalador)

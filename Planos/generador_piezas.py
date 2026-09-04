@@ -5,14 +5,19 @@ Genera las cotas por pieza (largo/ancho/thk/diámetros). Con
 ``--seleccion seleccion_caras.json`` (Top Cover + SEGM1..4) organiza la
 salida en ``PIEZAS_ACOTADAS/<SEGM*|TOP>/<CLASIFICACIÓN>/<PIEZA>/``.
 
+Con ``--solo SEGM2`` (COTAS_POR_SEG_PIEZAS) solo acota las piezas del
+catálogo de esa cara — prueba rápida sin el tanque completo.
+
 Sin selección, conserva solo ``<CLASIFICACIÓN>/<PIEZA>/``.
 
-Se ejecuta desde la regla iLogic ``COTAS_ILOGIC_ABIGAIL``.
+Se ejecuta desde la regla iLogic ``COTAS_ILOGIC_ABIGAIL`` o
+``COTAS_POR_SEG_PIEZAS``.
 """
 
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 
 import pythoncom
@@ -25,6 +30,7 @@ from generador_caras_tanque import (
     _obtener_ensamble_principal,
     _obtener_plano_activo,
     _parse_ruta_seleccion,
+    _parse_solo,
     cargar_mapa_piezas_por_clasificacion,
     construir_mapa_piezas_desde_seleccion,
     detectar_mapa_piezas_por_clasificacion,
@@ -33,6 +39,7 @@ from generador_caras_tanque import (
 )
 from generador_tanque_completo import (
     CARPETA_PIEZAS_ACOTADAS,
+    SUBCARPETAS_CARA_SELECCION,
     _limpiar_exportacion_piezas,
     _recuperar_antes_de_piezas,
     _reorganizar_piezas_por_cara,
@@ -52,32 +59,41 @@ def _reactivar_machote(inv_app):
         pass
 
 
+def _limpiar_solo_cara_piezas(carpeta_piezas, cara):
+    """Vacía únicamente ``PIEZAS_ACOTADAS/<CARA>/`` (modo --solo)."""
+    os.makedirs(carpeta_piezas, exist_ok=True)
+    destino = os.path.join(carpeta_piezas, cara)
+    if os.path.isdir(destino):
+        try:
+            shutil.rmtree(destino)
+            print(f"  Limpieza modo --solo: vaciada {cara}/")
+        except OSError as err:
+            print(f"  AVISO: no se pudo vaciar {cara}/: {err}")
+    os.makedirs(destino, exist_ok=True)
+
+
 def _reorganizar_clasificacion_dentro_caras(carpeta_piezas, mapa_clasificacion):
     """
     Tras ``_reorganizar_piezas_por_cara``, anida cada JPG en
     ``<CARA>/<CLASIFICACIÓN>/<PIEZA>/``.
     """
-    import shutil
-
     from generador_tanque_completo import (
         SUBCARPETA_SIN_CLASIFICAR,
-        SUBCARPETAS_CARA_PIEZAS,
         SUBCARPETAS_CLASIFICACION_PIEZAS,
         SUBCARPETA_OTROS_PIEZAS,
         _clasificacion_para_pieza,
         _extraer_pieza_de_jpg,
+        _limpiar_carpetas_cara_vacias_y_legacy,
         _nombre_carpeta_pieza,
     )
 
-    caras = list(SUBCARPETAS_CARA_PIEZAS) + [SUBCARPETA_OTROS_PIEZAS]
+    caras = list(SUBCARPETAS_CARA_SELECCION) + [SUBCARPETA_OTROS_PIEZAS]
     clases_validas = {c.casefold() for c in SUBCARPETAS_CLASIFICACION_PIEZAS}
 
     for cara in caras:
         cara_dir = os.path.join(carpeta_piezas, cara)
         if not os.path.isdir(cara_dir):
             continue
-        # Recolectar JPGs en cualquier profundidad bajo la cara (plana o
-        # ya en <PIEZA>/).
         jpgs = []
         for root, _dirs, files in os.walk(cara_dir):
             for nombre in files:
@@ -111,7 +127,6 @@ def _reorganizar_clasificacion_dentro_caras(carpeta_piezas, mapa_clasificacion):
                     f"AVISO: no se pudo anidar '{nombre}' en "
                     f"{cara}/{destino_clase}/{pieza_folder}/: {err}"
                 )
-        # Limpiar carpetas de pieza vacías bajo la cara.
         for root, dirs, files in os.walk(cara_dir, topdown=False):
             if root == cara_dir:
                 continue
@@ -121,8 +136,10 @@ def _reorganizar_clasificacion_dentro_caras(carpeta_piezas, mapa_clasificacion):
             except OSError:
                 pass
 
+    _limpiar_carpetas_cara_vacias_y_legacy(carpeta_piezas)
 
-def ejecutar(ruta_seleccion=None):
+
+def ejecutar(ruta_seleccion=None, solo_cara=None):
     print("=" * 62)
     print(" COTAS ABIGAIL - SOLO PIEZAS (PIEZAS_ACOTADAS)")
     print("=" * 62)
@@ -148,6 +165,14 @@ def ejecutar(ruta_seleccion=None):
             "yes",
         )
 
+        solo = str(solo_cara or "").strip().upper() or None
+        if solo and solo not in SUBCARPETAS_CARA_SELECCION:
+            print(
+                f"ERROR: --solo {solo} no válido. "
+                f"Usa: {', '.join(SUBCARPETAS_CARA_SELECCION)}"
+            )
+            return False
+
         mapa_por_cara = {}
         if ruta_seleccion:
             if not os.path.isfile(ruta_seleccion):
@@ -155,6 +180,10 @@ def ejecutar(ruta_seleccion=None):
                 return False
             print(f"  Selección manual (Top+SEGM): {ruta_seleccion}")
             seleccion = _cargar_seleccion_caras(ruta_seleccion)
+            if not solo:
+                solo_json = str(seleccion.get("solo") or "").strip().upper()
+                if solo_json:
+                    solo = solo_json
             mapa_por_cara = construir_mapa_piezas_desde_seleccion(
                 ensamble, seleccion
             )
@@ -170,6 +199,25 @@ def ejecutar(ruta_seleccion=None):
                 "  AVISO: sin --seleccion; PIEZAS_ACOTADAS no se dividirá "
                 "por SEGM/TOP (solo clasificación)."
             )
+
+        catalogo_filtro = None
+        mapa_reorg = mapa_por_cara
+        if solo:
+            if not mapa_por_cara or solo not in mapa_por_cara:
+                print(
+                    f"ERROR: modo --solo {solo}: no hay catálogo de piezas "
+                    "para esa cara en la selección. Revisa el pick."
+                )
+                return False
+            catalogo_filtro = set(mapa_por_cara[solo] or set())
+            mapa_reorg = {solo: set(catalogo_filtro)}
+            print(
+                f"  Modo COTAS_POR_SEG_PIEZAS: solo {solo} "
+                f"({len(catalogo_filtro)} nombres en catálogo)"
+            )
+            if not catalogo_filtro:
+                print(f"ERROR: catálogo vacío para {solo}.")
+                return False
 
         print(
             "  Leyendo clasificación (iProperty) de cada pieza del ensamble..."
@@ -197,11 +245,16 @@ def ejecutar(ruta_seleccion=None):
                     "caerán en SIN CLASIFICACION/."
                 )
 
-        _limpiar_exportacion_piezas(carpeta_piezas, incremental=incremental)
+        if solo:
+            _limpiar_solo_cara_piezas(carpeta_piezas, solo)
+        else:
+            _limpiar_exportacion_piezas(carpeta_piezas, incremental=incremental)
         _recuperar_antes_de_piezas(inv_app, plano)
 
         print("Ejecutando cotas por pieza...")
         print(f"  Carpeta de piezas acotadas: {carpeta_piezas}")
+        if solo:
+            print(f"  Destino: {carpeta_piezas}\\{solo}\\")
         if incremental:
             print("  Modo incremental ACTIVO (PIEZAS_INCREMENTAL=1).")
 
@@ -212,13 +265,13 @@ def ejecutar(ruta_seleccion=None):
                 plano,
                 carpeta_salida=carpeta_piezas,
                 incremental=incremental,
+                catalogo_piezas=catalogo_filtro,
             )
         )
         if ok:
             try:
-                if mapa_por_cara:
-                    # Primero por cara (incluye TOP), luego clasificacion adentro.
-                    _reorganizar_piezas_por_cara(carpeta_piezas, mapa_por_cara)
+                if mapa_reorg:
+                    _reorganizar_piezas_por_cara(carpeta_piezas, mapa_reorg)
                     _reorganizar_clasificacion_dentro_caras(
                         carpeta_piezas,
                         dict(
@@ -241,17 +294,24 @@ def ejecutar(ruta_seleccion=None):
             _reactivar_machote(inv_app)
         pythoncom.CoUninitialize()
         if ok:
-            print("PROCESO COMPLETO: piezas acotadas exportadas.")
+            if solo:
+                print(
+                    f"PROCESO COMPLETO: piezas de {solo} acotadas "
+                    f"(PIEZAS_ACOTADAS\\{solo}\\)."
+                )
+            else:
+                print("PROCESO COMPLETO: piezas acotadas exportadas.")
 
 
 if __name__ == "__main__":
     ruta = _parse_ruta_seleccion(sys.argv[1:])
+    solo = _parse_solo(sys.argv[1:])
     if not ruta:
         print(
             "ERROR: Falta --seleccion <seleccion_caras.json>\n"
-            "Ejecuta la regla iLogic COTAS_ILOGIC_ABIGAIL para elegir "
-            "Top Cover + SEGM1..4.",
+            "Usa COTAS_ILOGIC_ABIGAIL (todas las caras) o "
+            "COTAS_POR_SEG_PIEZAS (una cara: --solo SEGM1|…|TOP|BASE).",
             flush=True,
         )
         sys.exit(1)
-    sys.exit(0 if ejecutar(ruta_seleccion=ruta) else 1)
+    sys.exit(0 if ejecutar(ruta_seleccion=ruta, solo_cara=solo) else 1)

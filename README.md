@@ -9,16 +9,18 @@ Repositorio de respaldo y versionado para trabajo en PC Windows y clonado en **N
 ## Qué hace
 
 1. Toma el **tanque completo** (ensamble) abierto en Inventor junto con el plano machote.
-2. Identifica segmentos / paredes (`FRONT`, `BACK`, `LEFT`, `RIGHT`).
-3. Genera vistas y cotas desde un origen **(0,0)** en la placa madre del segmento.
-4. Exporta JPG a `Planos/JPG/<nombre_ensamble>/COTAS_POR_REFERENCIA/...`
+2. Identifica caras de trabajo (`SEGM1`–`SEGM4`, `TOP`, `BASE`) mediante selección guiada.
+3. **Subensamble / caras:** cotas desde origen **(0,0)** en la silueta frontal del segmento; JPG por referencia.
+4. **Piezas (Abigail):** LARGO / ANCHO / THK / diámetros (ext-int y barrenos) / ALTO-pata en perfiles.
+5. Exporta a `Planos/JPG/<ensamble>/COTAS_POR_REFERENCIA/` y `.../PIEZAS_ACOTADAS/`.
 
-Documento de verdad del flujo (reglas de cotas, origen, salida):
+Estado consolidado del corte actual: [`ESTADO_ACTUAL.md`](ESTADO_ACTUAL.md).
+
+Documento de verdad del flujo de caras (reglas de cotas, origen, salida):
 
 - [`DEBER_SER_COTAS_CARAS.md`](DEBER_SER_COTAS_CARAS.md)
 
 Si el código y una conversación contradicen ese archivo, **gana el DEBER_SER**.
-
 ---
 
 ## Requisitos
@@ -74,9 +76,14 @@ Artefactos **no** versionados (regenerables / temporales): `Planos/dist/`, `Plan
    Planos\instalar_boton_inventor.bat
    ```
    (cierra y reabre Inventor después)
-4. Ejecuta la regla / botón (`COTAS_CARAS_TANQUE`, `COTAS_POR_SUBENSAMBLE` o `COTAS_ILOGIC_ABIGAIL`).
+4. Ejecuta la regla / botón:
+   - `COTAS_POR_SUBENSAMBLE` — mapa completo de caras
+   - `COTAS_POR_SEG` — una sola cara (prueba rápida)
+   - `COTAS_ILOGIC_ABIGAIL` — piezas acotadas
+   - `COTAS_POR_SEG_PIEZAS` — piezas de una sola cara (prueba rápida)
 5. Revisa salidas en `Planos/JPG/<ensamble>/` y el log `Planos/error_log_caras.txt`.
 
+Ver también [`ESTADO_ACTUAL.md`](ESTADO_ACTUAL.md) y [`DEPLOY.md`](DEPLOY.md).
 ### Opción B — Interfaz Python
 
 ```bat

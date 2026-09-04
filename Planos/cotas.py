@@ -506,7 +506,7 @@ def acotar_planos(nombres_permitidos=None, reset_diametro=True):
         plano = win32com.client.CastTo(inv_app.ActiveDocument, "DrawingDocument")
     except:
         print("❌ No hay un DrawingDocument activo.")
-        return
+        return []
 
     tg = inv_app.TransientGeometry
 
@@ -538,6 +538,7 @@ def acotar_planos(nombres_permitidos=None, reset_diametro=True):
         "sin_frente_match": 0,
         "excepciones": 0,
     }
+    hojas_frente_ok = []
 
     for i in range(1, plano.Sheets.Count + 1):
         hoja = plano.Sheets.Item(i)
@@ -593,6 +594,7 @@ def acotar_planos(nombres_permitidos=None, reset_diametro=True):
 
             if cota_ok:
                 contadores["frente1_ok"] += 1
+                hojas_frente_ok.append(nombre_completo)
             else:
                 print(f"↩️ {nombre_hoja}: intentando rescate legacy horizontal...")
                 try:
@@ -602,6 +604,7 @@ def acotar_planos(nombres_permitidos=None, reset_diametro=True):
                     _dbg(f"  excepción en _crear_cota_horizontal_legacy: {e}")
                 if cota_ok:
                     contadores["frente1_legacy"] += 1
+                    hojas_frente_ok.append(nombre_completo)
 
             if not cota_ok:
                 print(f"🧩 {nombre_hoja}: pasa a lineal_especial.py")
@@ -668,6 +671,20 @@ def acotar_planos(nombres_permitidos=None, reset_diametro=True):
         print(f"\n🔄 Llamando a diametro.py para {len(hojas_para_diametro)} hojas...")
         hojas_no_resueltas_diametro = diametro.acotar_diametros(hojas_para_diametro)
 
+    # Barrenos en placas que YA tienen LARGO (aristas circulares).
+    hojas_extra_barrenos = []
+    if hojas_frente_ok:
+        try:
+            print(
+                f"\n🕳️ Buscando barrenos en {len(hojas_frente_ok)} "
+                "hojas FRENTE_1 con cota lineal OK..."
+            )
+            resultado_barrenos = diametro.acotar_barrenos_placas(hojas_frente_ok)
+            if resultado_barrenos:
+                hojas_extra_barrenos = list(resultado_barrenos)
+        except Exception as e:
+            print(f"AVISO: barrenos en placas falló: {e}")
+
     # =====================================================
     # REPORTE FINAL
     # =====================================================
@@ -691,6 +708,8 @@ def acotar_planos(nombres_permitidos=None, reset_diametro=True):
             print(f"  {k}: {v}")
 
     print("\n🏁 Proceso terminado.")
+    return hojas_extra_barrenos
+
 
 if __name__ == "__main__":
     acotar_planos()

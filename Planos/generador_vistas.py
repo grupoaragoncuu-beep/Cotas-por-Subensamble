@@ -235,6 +235,9 @@ def _convertir_nombre_tecnico_hoja(
     elif "_LARGO_PATA" in base_up:
         pass  # ya es nombre final (nueva hoja del canal U/L/C)
 
+    elif "_DIAMETRO_H" in base_up:
+        pass  # barrenos de placa (DIAMETRO_H01, …)
+
     elif "_LADO" in base:
         # No renombramos a _THK cuando el resolver de THK falló para esta hoja.
         if base_up in hojas_lado_sin_thk_bases:
@@ -348,6 +351,7 @@ def renombrar_hojas_finales(doc, nombres_permitidos=None, hojas_lado_sin_thk=Non
 _SUFIJOS_JPG_PIEZA_EXPORTADA = (
     "DIAMETRO_EXTERIOR",
     "DIAMETRO_INTERIOR",
+    "DIAMETRO_H\\d{2}",
     "LARGO_PATA",
     "ANCHO",
     "LARGO",
@@ -892,6 +896,56 @@ def _limpiar_jpgs_diametro_interior_huerfanos(carpeta_salida, piezas_solidas):
     return borrados
 
 
+def _hoja_tiene_cota_asociativa(hoja):
+    """True si hay ≥1 GeneralDimension (notas GeneralNote no cuentan)."""
+    try:
+        return int(hoja.DrawingDimensions.GeneralDimensions.Count) >= 1
+    except Exception:
+        return False
+
+
+def _hoja_exportable(hoja, nombre_hoja):
+    """
+    Gate anti-JPG vacío / solo-nota.
+
+    Exige geometría 2D en la vista y al menos una cota asociativa para
+    hojas de cotas (LARGO/ANCHO/THK/ALTO/PATA/DIÁMETRO*).
+    """
+    nombre_up = str(nombre_hoja).upper()
+    try:
+        if int(hoja.DrawingViews.Count) < 1:
+            return False, "sin vistas"
+    except Exception:
+        return False, "sin acceso a vistas"
+
+    bbox = _obtener_bbox_pieza(hoja)
+    if bbox is None:
+        return False, "sin geometría 2D"
+    try:
+        minx, maxx, miny, maxy = bbox
+        if (maxx - minx) < 0.05 or (maxy - miny) < 0.05:
+            return False, "bbox 2D degenerado"
+    except Exception:
+        return False, "bbox inválido"
+
+    es_cota = any(
+        s in nombre_up
+        for s in (
+            "_LARGO",
+            "_ANCHO",
+            "_THK",
+            "_LADO",
+            "_ALTO",
+            "_LARGO_PATA",
+            "_DIAMETRO",
+            "_FRENTE",
+        )
+    )
+    if es_cota and not _hoja_tiene_cota_asociativa(hoja):
+        return False, "sin GeneralDimension (posible solo-nota)"
+    return True, ""
+
+
 def exportar_hojas_jpg(
     inv_app,
     doc,
@@ -1011,6 +1065,12 @@ def exportar_hojas_jpg(
                 continue
         except:
             print(f"⏭️ Omitiendo hoja sin acceso a vistas: {nombre_hoja}")
+            omitidas += 1
+            continue
+
+        ok_export, motivo = _hoja_exportable(hoja, nombre_hoja)
+        if not ok_export:
+            print(f"⏭️ Omitiendo '{nombre_hoja}': {motivo}")
             omitidas += 1
             continue
 
@@ -1145,6 +1205,7 @@ def ejecutar_flujo_desde_app(
     carpeta_salida=None,
     incremental=None,
     tam_lote=None,
+    catalogo_piezas=None,
 ):
     """
     Flujo por lotes (modo D + F):
@@ -1152,6 +1213,8 @@ def ejecutar_flujo_desde_app(
     - Recolecta piezas del ensamble.
     - Si `incremental` está activo (o env ``PIEZAS_INCREMENTAL=1``), salta
       piezas cuyos JPG ya existan en ``carpeta_salida``.
+    - Si ``catalogo_piezas`` (set de nombres) está definido, solo procesa
+      piezas que coincidan (modo COTAS_POR_SEG_PIEZAS / --solo).
     - Para cada lote de ``tam_lote`` piezas: crear vistas -> acotar -> renombrar
       -> exportar JPG -> borrar hojas del lote.
 
@@ -1161,6 +1224,8 @@ def ejecutar_flujo_desde_app(
         Si None, se toma de env ``PIEZAS_INCREMENTAL`` (default False).
     tam_lote : int | None
         Si None, se toma de env ``PIEZAS_TAM_LOTE`` (default ``TAM_LOTE_PIEZAS``).
+    catalogo_piezas : set[str] | None
+        Nombres del catálogo de una cara; limita el flujo a esas piezas.
     """
     import traceback
     # IMPORTANTE: usar _importar_modulo para forzar reload desde disco.
@@ -1291,6 +1356,24 @@ def ejecutar_flujo_desde_app(
             }
             log(f"Filtro de piezas activo (PIEZAS_FILTRO): {sorted(filtro_up)}")
 
+        catalogo = set()
+        claves_catalogo = []
+        if catalogo_piezas:
+            from generador_tanque_completo import _clave_pieza
+
+            for nombre in catalogo_piezas:
+                texto = str(nombre or "").strip()
+                if not texto:
+                    continue
+                catalogo.add(texto.upper())
+                clave = _clave_pieza(texto)
+                if clave:
+                    claves_catalogo.append(clave)
+            log(
+                f"Catalogo cara (--solo): {len(catalogo)} nombres "
+                f"({len(claves_catalogo)} claves)"
+            )
+
         piezas_pendientes = []
         for part_doc, part_name in piezas:
             base = creador_vistas.obtener_nombre_base_corto(part_name)
@@ -1298,6 +1381,21 @@ def ejecutar_flujo_desde_app(
                 pn_up = str(part_name or "").upper()
                 base_up = str(base or "").upper()
                 if not any(f in pn_up or f in base_up for f in filtro_up):
+                    continue
+            if catalogo:
+                from generador_tanque_completo import _clave_pieza
+
+                pn_up = str(part_name or "").upper()
+                clave_pn = _clave_pieza(part_name)
+                en_catalogo = False
+                if pn_up in catalogo or str(base or "").upper() in catalogo:
+                    en_catalogo = True
+                else:
+                    for clave in claves_catalogo:
+                        if clave in clave_pn or clave_pn in clave:
+                            en_catalogo = True
+                            break
+                if not en_catalogo:
                     continue
             if base in piezas_a_saltar:
                 log(f"  ⏭️ {part_name} (base={base}) — ya exportada, se salta.")
@@ -1354,14 +1452,19 @@ def ejecutar_flujo_desde_app(
             # Forzar computación de todas las hojas del lote antes de cotarlas.
             _forzar_compute_hojas(doc, inv_app, nombres_hojas, log_fn=log)
 
-            # 2) Cotas frentes
+            # 2) Cotas frentes (+ posibles hojas DIAMETRO_H* de barrenos)
             log(f"  [chk] LOTE {idx_lote}: iniciando cotas linales...")
+            hojas_extra_barrenos = set()
             try:
                 with capturar_stdout_a_log(prefix="  [cotas] "):
-                    cotas.acotar_planos(
+                    resultado_cotas = cotas.acotar_planos(
                         nombres_permitidos=nombres_hojas,
                         reset_diametro=primer_lote,
                     )
+                if resultado_cotas:
+                    hojas_extra_barrenos = {
+                        str(x).rsplit(":", 1)[0] for x in resultado_cotas
+                    }
                 _actualizar_inventor(inv_app)
                 time.sleep(0.3)
             except Exception as e:
@@ -1384,7 +1487,9 @@ def ejecutar_flujo_desde_app(
                 log(traceback.format_exc())
             log(f"  [chk] LOTE {idx_lote}: THK terminado.")
 
-            nombres_para_rename = set(nombres_hojas) | hojas_extra
+            nombres_para_rename = (
+                set(nombres_hojas) | hojas_extra | hojas_extra_barrenos
+            )
 
             # Snapshot de pendientes THK acumulados HASTA el lote actual, para
             # que el renombrado y la exportación conserven ``_LADO`` en las

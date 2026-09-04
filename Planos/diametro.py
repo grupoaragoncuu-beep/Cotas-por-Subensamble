@@ -67,6 +67,214 @@ def _clampear_punto_hoja(hoja, tg, x, y, margen=1.2):
     return tg.CreatePoint2d(x, y)
 
 
+def _anillos_en_vista(vista, min_tam=0.25, max_frac=0.55):
+    """
+    Círculos/arcos casi circulares (barrenos por arista circular).
+
+    Placas OTC (p.ej. P12_2) tienen aristas circulares sin HoleFeature ni
+    cara Cylinder: hay que detectarlas en el HLR 2D.
+    """
+    anillos = []
+    try:
+        n = int(vista.DrawingCurves.Count)
+    except Exception:
+        return anillos
+
+    minx = miny = None
+    maxx = maxy = None
+    for j in range(1, n + 1):
+        try:
+            caja = vista.DrawingCurves.Item(j).Evaluator2D.RangeBox
+            x0, x1 = float(caja.MinPoint.X), float(caja.MaxPoint.X)
+            y0, y1 = float(caja.MinPoint.Y), float(caja.MaxPoint.Y)
+            minx = x0 if minx is None else min(minx, x0)
+            maxx = x1 if maxx is None else max(maxx, x1)
+            miny = y0 if miny is None else min(miny, y0)
+            maxy = y1 if maxy is None else max(maxy, y1)
+        except Exception:
+            continue
+    if minx is None:
+        return anillos
+    span = max(maxx - minx, maxy - miny)
+    tope = span * max_frac if span > 0 else 1e9
+
+    for j in range(1, n + 1):
+        try:
+            curva = vista.DrawingCurves.Item(j)
+            caja = curva.Evaluator2D.RangeBox
+            ancho = abs(float(caja.MaxPoint.X) - float(caja.MinPoint.X))
+            alto = abs(float(caja.MaxPoint.Y) - float(caja.MinPoint.Y))
+            if ancho < min_tam or alto < min_tam:
+                continue
+            if abs(ancho - alto) > max(ancho, alto) * 0.18:
+                continue
+            tam = (ancho + alto) * 0.5
+            if tam > tope:
+                continue
+            anillos.append(
+                {
+                    "curva": curva,
+                    "tamaño": tam,
+                    "cx": (float(caja.MaxPoint.X) + float(caja.MinPoint.X)) / 2.0,
+                    "cy": (float(caja.MaxPoint.Y) + float(caja.MinPoint.Y)) / 2.0,
+                }
+            )
+        except Exception:
+            continue
+    return anillos
+
+
+def _agrupar_diametros_unicos(anillos, tol_frac=0.06, max_grupos=8):
+    if not anillos:
+        return []
+    ordenados = sorted(anillos, key=lambda a: a["tamaño"], reverse=True)
+    grupos = []
+    for a in ordenados:
+        colocado = False
+        for g in grupos:
+            ref = g[0]["tamaño"]
+            if abs(a["tamaño"] - ref) <= max(0.05, ref * tol_frac):
+                g.append(a)
+                colocado = True
+                break
+        if not colocado:
+            grupos.append([a])
+        if len(grupos) >= max_grupos:
+            break
+    return [max(g, key=lambda x: x["tamaño"]) for g in grupos]
+
+
+def acotar_barrenos_placas(nombres_frente_ok=None):
+    """
+    Tras LARGO/ANCHO, crea hojas ``*_DIAMETRO_Hnn`` por tamaño de barreno.
+    """
+    print("⭕ diametro.py: barrenos en placas (aristas circulares)...")
+    inv_app = conectar_inventor()
+    try:
+        plano = win32com.client.CastTo(inv_app.ActiveDocument, "DrawingDocument")
+    except Exception:
+        print("❌ Error: No hay un plano de Inventor abierto.")
+        return []
+
+    tg = inv_app.TransientGeometry
+    objetivo = None
+    if nombres_frente_ok is not None:
+        objetivo = {str(h).upper().rsplit(":", 1)[0] for h in nombres_frente_ok}
+
+    creadas = 0
+    creadas_nombres = []
+    for i in range(1, plano.Sheets.Count + 1):
+        try:
+            hoja = plano.Sheets.Item(i)
+        except Exception:
+            continue
+        nombre = str(hoja.Name)
+        nombre_up = nombre.upper()
+        if "_FRENTE_1" not in nombre_up:
+            continue
+        base_cmp = nombre_up.rsplit(":", 1)[0]
+        if objetivo is not None and base_cmp not in objetivo:
+            continue
+        if hoja.DrawingViews.Count < 1:
+            continue
+        vista = hoja.DrawingViews.Item(1)
+        unicos = _agrupar_diametros_unicos(_anillos_en_vista(vista))
+        if not unicos:
+            continue
+
+        base_nombre = nombre.rsplit(":", 1)[0]
+        base_nombre = re.sub(r"_FRENTE_1$", "", base_nombre, flags=re.IGNORECASE)
+
+        for idx, anillo in enumerate(unicos, start=1):
+            nombre_nueva = f"{base_nombre}_DIAMETRO_H{idx:02d}"
+            try:
+                for j in range(plano.Sheets.Count, 0, -1):
+                    try:
+                        h = plano.Sheets.Item(j)
+                        if str(h.Name).upper().startswith(nombre_nueva.upper()):
+                            h.Delete()
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
+            try:
+                nueva = hoja.CopyTo(plano)
+            except Exception as e:
+                print(f"⚠️ {nombre_nueva}: CopyTo falló ({e})")
+                continue
+            try:
+                nueva.Name = nombre_nueva
+            except Exception:
+                pass
+            try:
+                nueva.Activate()
+            except Exception:
+                pass
+            try:
+                dims = nueva.DrawingDimensions.GeneralDimensions
+                for k in range(dims.Count, 0, -1):
+                    try:
+                        dims.Item(k).Delete()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            if nueva.DrawingViews.Count < 1:
+                try:
+                    nueva.Delete()
+                except Exception:
+                    pass
+                continue
+            vista_n = nueva.DrawingViews.Item(1)
+            anillos_n = _anillos_en_vista(vista_n)
+            if not anillos_n:
+                try:
+                    nueva.Delete()
+                except Exception:
+                    pass
+                continue
+            objetivo_a = min(
+                anillos_n, key=lambda a: abs(a["tamaño"] - anillo["tamaño"])
+            )
+            if abs(objetivo_a["tamaño"] - anillo["tamaño"]) > max(
+                0.08, anillo["tamaño"] * 0.12
+            ):
+                try:
+                    nueva.Delete()
+                except Exception:
+                    pass
+                continue
+            try:
+                intent = nueva.CreateGeometryIntent(objetivo_a["curva"])
+                offset = (objetivo_a["tamaño"] / 2.0) + 1.0
+                pt = _clampear_punto_hoja(
+                    nueva, tg,
+                    objetivo_a["cx"] + offset,
+                    objetivo_a["cy"] + offset,
+                )
+                dim = nueva.DrawingDimensions.GeneralDimensions.AddDiameter(
+                    pt, intent
+                )
+                aplicar_estilo_cota(dim, hoja=nueva)
+                print(
+                    f"✅ {nombre_nueva}: barreno Ø "
+                    f"{objetivo_a['tamaño'] / 2.54:.3f} in"
+                )
+                creadas += 1
+                creadas_nombres.append(str(nueva.Name).rsplit(":", 1)[0])
+            except Exception as e:
+                print(f"⚠️ {nombre_nueva}: AddDiameter falló ({e})")
+                try:
+                    nueva.Delete()
+                except Exception:
+                    pass
+
+    print(f"✅ diametro.py barrenos: {creadas} hojas DIAMETRO_H* creadas")
+    return creadas_nombres
+
+
 def acotar_diametros(hojas_pendientes=None):
     print("⭕ diametro.py: Iniciando escáner de límites (Ext/Int)...")
     inv_app = conectar_inventor()
@@ -109,29 +317,7 @@ def acotar_diametros(hojas_pendientes=None):
             continue
 
         vista = hoja.DrawingViews.Item(1)
-        anillos = []
-
-        for j in range(1, vista.DrawingCurves.Count + 1):
-            curva = vista.DrawingCurves.Item(j)
-            try:
-                caja = curva.Evaluator2D.RangeBox
-                ancho = abs(caja.MaxPoint.X - caja.MinPoint.X)
-                alto = abs(caja.MaxPoint.Y - caja.MinPoint.Y)
-
-                if ancho < 0.1 or alto < 0.1:
-                    continue
-
-                if abs(ancho - alto) < (ancho * 0.15):
-                    cx = (caja.MaxPoint.X + caja.MinPoint.X) / 2.0
-                    cy = (caja.MaxPoint.Y + caja.MinPoint.Y) / 2.0
-                    anillos.append({
-                        'curva': curva,
-                        'tamaño': ancho,
-                        'cx': cx,
-                        'cy': cy
-                    })
-            except:
-                pass
+        anillos = _anillos_en_vista(vista, min_tam=0.1, max_frac=0.98)
 
         if not anillos:
             continue

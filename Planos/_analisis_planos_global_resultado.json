@@ -1,0 +1,636 @@
+{
+  "orders": 36,
+  "with_planos": 36,
+  "no_planos": [],
+  "empty_planos": [],
+  "ext": {
+    ".pdf": 856,
+    ".jpg": 8,
+    ".dwg": 11
+  },
+  "brand_ops": {
+    "PTT": 2,
+    "SWE": 13,
+    "OTC": 11,
+    "GIGA": 4,
+    "VANTRAN": 6
+  },
+  "brand_pdfs": {
+    "PTT": 172,
+    "SWE": 52,
+    "OTC": 305,
+    "GIGA": 314,
+    "VANTRAN": 32
+  },
+  "tipo_global": {
+    "TANQUE_COMPLETO": 148,
+    "FABRICACION": 43,
+    "CONTROL_REV": 348,
+    "ACCESORIO_NOZZLE": 2,
+    "SOLDADURA_WELD": 4,
+    "GA_ENSAMBLE": 51,
+    "SIN_CLASIFICAR": 394,
+    "ELECTRICO": 18,
+    "TAPA_TOP": 35,
+    "ACCESORIO_LUG_PAD": 2
+  },
+  "tipo_por_marca": {
+    "PTT": {
+      "TANQUE_COMPLETO": 79,
+      "FABRICACION": 43,
+      "CONTROL_REV": 10,
+      "ACCESORIO_NOZZLE": 2,
+      "SOLDADURA_WELD": 2,
+      "GA_ENSAMBLE": 4,
+      "SIN_CLASIFICAR": 69,
+      "ELECTRICO": 18,
+      "TAPA_TOP": 33
+    },
+    "SWE": {
+      "GA_ENSAMBLE": 30,
+      "TANQUE_COMPLETO": 38,
+      "CONTROL_REV": 31,
+      "SIN_CLASIFICAR": 7,
+      "TAPA_TOP": 1
+    },
+    "OTC": {
+      "TANQUE_COMPLETO": 11,
+      "CONTROL_REV": 294,
+      "SIN_CLASIFICAR": 11
+    },
+    "GIGA": {
+      "GA_ENSAMBLE": 17,
+      "TAPA_TOP": 1,
+      "ACCESORIO_LUG_PAD": 2,
+      "CONTROL_REV": 9,
+      "TANQUE_COMPLETO": 3,
+      "SIN_CLASIFICAR": 292,
+      "SOLDADURA_WELD": 2
+    },
+    "VANTRAN": {
+      "SIN_CLASIFICAR": 15,
+      "TANQUE_COMPLETO": 17,
+      "CONTROL_REV": 4
+    }
+  },
+  "scheme_global": {
+    "LIBRE_TEXTO": 172,
+    "ALFA_NUM": 486,
+    "DESCRIPCION_GA": 35,
+    "CODIGO_NUM_XX_YY": 131,
+    "SWE_TNK_1PH": 25,
+    "VANTRAN_O_NUMERICO": 26
+  },
+  "scheme_por_marca": {
+    "PTT": {
+      "LIBRE_TEXTO": 155,
+      "ALFA_NUM": 9,
+      "DESCRIPCION_GA": 4,
+      "CODIGO_NUM_XX_YY": 4
+    },
+    "SWE": {
+      "SWE_TNK_1PH": 25,
+      "DESCRIPCION_GA": 13,
+      "ALFA_NUM": 14
+    },
+    "OTC": {
+      "LIBRE_TEXTO": 11,
+      "CODIGO_NUM_XX_YY": 104,
+      "ALFA_NUM": 190
+    },
+    "GIGA": {
+      "DESCRIPCION_GA": 18,
+      "LIBRE_TEXTO": 6,
+      "ALFA_NUM": 273,
+      "CODIGO_NUM_XX_YY": 17
+    },
+    "VANTRAN": {
+      "VANTRAN_O_NUMERICO": 26,
+      "CODIGO_NUM_XX_YY": 6
+    }
+  },
+  "pdf_text_samples": [
+    {
+      "brand": "PTT",
+      "order": "1881 - PTT 22020A TANK (x3) 10-12",
+      "file": "PTT 22020A - Tank Manufacturing Rev. C 04-06.pdf",
+      "tipos_nombre": [
+        "TANQUE_COMPLETO",
+        "CONTROL_REV"
+      ],
+      "tipos_texto": [
+        "GA_ENSAMBLE",
+        "TANQUE_COMPLETO",
+        "TAPA_TOP",
+        "CASCO_SHELL",
+        "BASE_BOTTOM",
+        "SOLDADURA_WELD",
+        "MATERIALES_BOM",
+        "FABRICACION",
+        "CONTROL_REV",
+        "CERT_SPEC"
+      ],
+      "preview": "1 1 2 2 3 3 4 4 A A B B C C D D DESIGN NO. CHK. APP. COMP. NO. DWN. SCALE SPEC DATE DATE DATE Pennsylvania Transformer Technology, LLC. Distribution Transformer Division DESCRIPTION CUSTOMER CUSTOMER'S ORDERCONFIDENTIAL MUST NOT BE USED IN ANY WAY DETRIMENTAL TO Pennsylvania Tran"
+    },
+    {
+      "brand": "PTT",
+      "order": "1881 - PTT 22020A TANK (x3) 10-12",
+      "file": "PTT 22020A - Front ATC Manufacturing Rev.A.pdf",
+      "tipos_nombre": [
+        "CONTROL_REV"
+      ],
+      "tipos_texto": [
+        "CASCO_SHELL",
+        "MATERIALES_BOM",
+        "CONTROL_REV",
+        "CERT_SPEC"
+      ],
+      "preview": "1 1 2 2 3 3 4 4 5 5 6 6 7 7 8 8 A A B B C C D D B B DESIGN NO. CHK. APP. COMP.NO. DWN. SCALE SPEC DATE DATE DATE Pennsylvania Transformer Technology, LLC. Distribution Transformer Division DESCRIPTION CUSTOMER CUSTOMER'S ORDERCONFIDENTIAL MUST NOT BE USED IN ANY WAY DETRIMENTAL T"
+    },
+    {
+      "brand": "SWE",
+      "order": "1918 - SWE TNK.1PH-0093 x6",
+      "file": "29-1D20025DC009 TNK.1PH-0093 ARGA REV.1 NEW DESIGN.pdf",
+      "tipos_nombre": [
+        "GA_ENSAMBLE",
+        "TANQUE_COMPLETO",
+        "CONTROL_REV"
+      ],
+      "tipos_texto": [
+        "GA_ENSAMBLE",
+        "TANQUE_COMPLETO",
+        "TAPA_TOP",
+        "CASCO_SHELL",
+        "ACCESORIO_NOZZLE",
+        "ACCESORIO_LUG_PAD",
+        "INSTRUMENTOS",
+        "DETALLE",
+        "ELECTRICO",
+        "CONTROL_REV"
+      ],
+      "preview": "PARTS LIST DESCRIPTIONQTYPART NUMBERITEM SSTL41/2-13 HEX NUT1 A36 - THK 0.1881DOWN PLATE2 A36-THK 0.502Lifting Lug3 A36 - Cal 121Main Body4 A36 - Cal 0.251Cylinder Flange5 TYPE A1AHANGER UPPER1 W6 TYPE A1AHANGER UPPER17 ASSEMBLY1TOP COVER FINAL9 1 1 2 2 3 3 4 4 A A B B NAME DATE "
+    },
+    {
+      "brand": "SWE",
+      "order": "1918 - SWE TNK.1PH-0093 x6",
+      "file": "AC-SWE-01 GRUPO ARGA REV.2.pdf",
+      "tipos_nombre": [
+        "GA_ENSAMBLE",
+        "CONTROL_REV"
+      ],
+      "tipos_texto": [
+        "GA_ENSAMBLE",
+        "TANQUE_COMPLETO",
+        "TAPA_TOP",
+        "ACCESORIO_NOZZLE",
+        "SOLDADURA_WELD",
+        "MATERIALES_BOM",
+        "CONTROL_REV"
+      ],
+      "preview": "ACESS COVER ASSY MOUNTED ON TANK LID LISTA DE PIEZAS DESCRIPCIÓNNº DE PIEZACTDADELEMENTO Access Cover Flange67-TNK.1PH.B11 Door WeldmentHDW.TNK.ACE12 Access Cover GasketHDW.TNK.ACG13 Access Cover LockHDW.TNK.ACL14 Washer AASTM F436 - 1/215 Access Cover BraceHDW.TNK.ACX16 Hex Flan"
+    },
+    {
+      "brand": "SWE",
+      "order": "1919 - SWE Tank TNK.1PH.0114 (1D20037EC003) x10",
+      "file": "29-1D20037EC003-TNK.1PH-0114-REV1 NEW DESIGN.pdf",
+      "tipos_nombre": [
+        "TANQUE_COMPLETO",
+        "CONTROL_REV"
+      ],
+      "tipos_texto": [
+        "GA_ENSAMBLE",
+        "TANQUE_COMPLETO",
+        "TAPA_TOP",
+        "CASCO_SHELL",
+        "ACCESORIO_NOZZLE",
+        "ACCESORIO_LUG_PAD",
+        "DETALLE",
+        "ELECTRICO",
+        "CONTROL_REV"
+      ],
+      "preview": "PARTS LIST DESCRIPTIONQTYPART NUMBERITEM A3641/2-13 HEX NUT1 A36 - THK 0.1881DOWN PLATE2 A36-THK 0.502Lifting Lug3 A36 - Cal 121Main Body4 A36 - Cal 0.251Cylinder Flange5 TYPE C2SUPPORT6 ASSEMBLY1TOP COVER FINAL7 1 1 2 2 3 3 4 4 A A B B NAME DATE DRAWN CHECKED APPROVED CUSTOMER G"
+    },
+    {
+      "brand": "SWE",
+      "order": "1919 - SWE Tank TNK.1PH.0114 (1D20037EC003) x10",
+      "file": "AC-SWE-01 GRUPO ARGA REV.3.pdf",
+      "tipos_nombre": [
+        "GA_ENSAMBLE",
+        "CONTROL_REV"
+      ],
+      "tipos_texto": [
+        "GA_ENSAMBLE",
+        "TANQUE_COMPLETO",
+        "TAPA_TOP",
+        "ACCESORIO_NOZZLE",
+        "SOLDADURA_WELD",
+        "MATERIALES_BOM",
+        "CONTROL_REV"
+      ],
+      "preview": "ACESS COVER ASSY MOUNTED ON TANK LID LISTA DE PIEZAS DESCRIPCIÓNNº DE PIEZACTDADELEMENTO Access Cover Flange67-TNK.1PH.B11 Door WeldmentHDW.TNK.ACE12 Access Cover GasketHDW.TNK.ACG13 Access Cover LockHDW.TNK.ACL14 Washer AASTM F436 - 1/215 Access Cover BraceHDW.TNK.ACX16 Hex Flan"
+    },
+    {
+      "brand": "SWE",
+      "order": "1954 & 1955 - SWE 1PH.TNK-0134 x1 & 0135 x1",
+      "file": "29-1D20167FC013 TNK.1PH-0134 - GRUPO ARGA REV.2 NEW DESIGN.pdf",
+      "tipos_nombre": [
+        "GA_ENSAMBLE",
+        "TANQUE_COMPLETO",
+        "CONTROL_REV"
+      ],
+      "tipos_texto": [
+        "GA_ENSAMBLE",
+        "TANQUE_COMPLETO",
+        "TAPA_TOP",
+        "CASCO_SHELL",
+        "ACCESORIO_NOZZLE",
+        "ACCESORIO_LUG_PAD",
+        "INSTRUMENTOS",
+        "DETALLE",
+        "ELECTRICO",
+        "CONTROL_REV"
+      ],
+      "preview": "PARTS LIST DESCRIPTIONQTYPART NUMBERITEM SSTL71/2-13 HEX NUT1 A36 - THK 0.1881DOWN PLATE2 A36-THK 0.502Lifting Lug3 A36 - Cal 121MAIN BODY4 TYPE C2SUPPORT6 SSTL - THK 0.51Ground pad7 ASSEMBLY1TOP COVER FINAL7 A36 - Cal 0.251Cylinder Flange8 1 1 2 2 3 3 4 4 A A B B NAME DATE DRAWN"
+    },
+    {
+      "brand": "SWE",
+      "order": "1954 & 1955 - SWE 1PH.TNK-0134 x1 & 0135 x1",
+      "file": "29-1D20150FC001 TNK.1PH-0135 - GRUPO ARGA REV.2 NEW DESIGN.pdf",
+      "tipos_nombre": [
+        "GA_ENSAMBLE",
+        "TANQUE_COMPLETO",
+        "CONTROL_REV"
+      ],
+      "tipos_texto": [
+        "GA_ENSAMBLE",
+        "TANQUE_COMPLETO",
+        "TAPA_TOP",
+        "CASCO_SHELL",
+        "ACCESORIO_NOZZLE",
+        "ACCESORIO_LUG_PAD",
+        "INSTRUMENTOS",
+        "DETALLE",
+        "MATERIALES_BOM",
+        "ELECTRICO",
+        "CONTROL_REV"
+      ],
+      "preview": "LISTA DE PIEZAS DESCRIPTIONQTYPART NUMBERITEM A3671/2-13 HEX NUT1 A36 - THK 0.1881DOWN PLATE2 A36-THK 0.502Lifting Lug3 A36 - Cal 121MAIN BODY4 TYPE C2SUPPORT6 SSTL - THK 0.51Ground pad7 ASSEMBLY1TOP COVER FINAL8 A36 - Cal 0.251Cylinder Flange9 1 1 2 2 3 3 4 4 A A B B NAME DATE D"
+    },
+    {
+      "brand": "SWE",
+      "order": "1986 - SWE 1PH.TNK-0111",
+      "file": "1D20167EC002-  TNK.1PH-0111 GRUPO ARGA - Rev.1.pdf",
+      "tipos_nombre": [
+        "GA_ENSAMBLE",
+        "TANQUE_COMPLETO",
+        "CONTROL_REV"
+      ],
+      "tipos_texto": [
+        "GA_ENSAMBLE",
+        "TANQUE_COMPLETO",
+        "TAPA_TOP",
+        "CASCO_SHELL",
+        "ACCESORIO_NOZZLE",
+        "ACCESORIO_LUG_PAD",
+        "INSTRUMENTOS",
+        "DETALLE",
+        "SOLDADURA_WELD",
+        "ELECTRICO",
+        "CONTROL_REV"
+      ],
+      "preview": "PARTS LIST DESCRIPTIONQTYPART NUMBERITEM A3671/2-13 HEX NUT1 A36 - THK 0.1881DOWN PLATE2 A36-THK 0.502Lifting Lug3 A36 - Cal 121MAIN BODY4 TYPE C2SUPPORT6 SSTL - THK 0.51Ground pad7 ASSEMBLY1TOP COVER FINAL7 A36 - Cal 0.251Cylinder Flange8 1 1 2 2 3 3 4 4 A A B B NAME DATE DRAWN "
+    },
+    {
+      "brand": "SWE",
+      "order": "1986 - SWE 1PH.TNK-0111",
+      "file": "TANQUE 0111 - GRUPO ARGA.pdf",
+      "tipos_nombre": [
+        "GA_ENSAMBLE",
+        "TANQUE_COMPLETO"
+      ],
+      "tipos_texto": [
+        "GA_ENSAMBLE",
+        "TANQUE_COMPLETO",
+        "CONTROL_REV"
+      ],
+      "preview": "NAME DATE DRAWN CHECKED APPROVED CUSTOMER GENERAL TOLERANCES PROJECTION METHOD JOB PART NO SCALE SHEET REV 0"
+    },
+    {
+      "brand": "OTC",
+      "order": "1991 - OTC 62176 TANK",
+      "file": "62176 - Tank Manufacturing Rev.02.pdf",
+      "tipos_nombre": [
+        "TANQUE_COMPLETO",
+        "CONTROL_REV"
+      ],
+      "tipos_texto": [
+        "TANQUE_COMPLETO",
+        "TAPA_TOP",
+        "ACCESORIO_NOZZLE",
+        "ACCESORIO_LUG_PAD",
+        "INSTRUMENTOS",
+        "DETALLE",
+        "SOLDADURA_WELD",
+        "MATERIALES_BOM",
+        "FABRICACION",
+        "ELECTRICO",
+        "CONTROL_REV",
+        "CERT_SPEC"
+      ],
+      "preview": "146.463 MAX SHIPPING WIDTH 137.005 MAX SHIPPING HEIGHT FRONT VIEW BACK VIEW 68.000 122.500 27.00015.500 TOP VIEW ISO VIEW 1259-A01 1247-A01 1248-A01 SP-798 SP-800 SP-792 1248-P71 1247-A04 85.250 MAX SHIPPING DEPTH 123.500 INSIDE TANK HEIGHT (FRONT) 122.500 INSIDE TANK HEIGHT (BAC"
+    },
+    {
+      "brand": "OTC",
+      "order": "1991 - OTC 62176 TANK",
+      "file": "62176-48.00 Rev 02.pdf",
+      "tipos_nombre": [
+        "CONTROL_REV"
+      ],
+      "tipos_texto": [
+        "TANQUE_COMPLETO",
+        "CASCO_SHELL",
+        "BASE_BOTTOM",
+        "ACCESORIO_NOZZLE",
+        "ACCESORIO_LUG_PAD",
+        "SOLDADURA_WELD",
+        "MATERIALES_BOM",
+        "FABRICACION",
+        "CONTROL_REV",
+        "CERT_SPEC"
+      ],
+      "preview": "SHOP DWG: TITLE REV SIZE SCALE SHEET JWB 3/10/25 CMT 3/10/25 62176-1248-A01TANK COMPONENTS 62176-48.00 2 D 1:10 1/13 APP:DATE:DRAWN: DATE:Machined Parts:All operations= ±1/16\" OTC Services Inc.1776 Constitution Ave.Louisville, OH 44641PHONE: (330) 871-2444www.otcservices.com TOLE"
+    },
+    {
+      "brand": "OTC",
+      "order": "1992 - OTC 62177 TANK",
+      "file": "62177 - TANK MANUFACTURING REV.1.pdf",
+      "tipos_nombre": [
+        "TANQUE_COMPLETO",
+        "CONTROL_REV"
+      ],
+      "tipos_texto": [
+        "GA_ENSAMBLE",
+        "TANQUE_COMPLETO",
+        "TAPA_TOP",
+        "ACCESORIO_NOZZLE",
+        "ACCESORIO_LUG_PAD",
+        "INSTRUMENTOS",
+        "SOLDADURA_WELD",
+        "MATERIALES_BOM",
+        "FABRICACION",
+        "ELECTRICO",
+        "CONTROL_REV",
+        "CERT_SPEC"
+      ],
+      "preview": " 129.750 132.521 1248-A01 132.250 121.000 66.000 68.125 68.125 1253-A02 1253-A04 1253-A03 1248-A01 1X SP-800 8X 94.375 122.620 1248-A01 NOTES: 1. ALL SEAMS ARE TO BE WELDED INSIDE AND OUTSIDE. 2. TANK STIFFENERS SHALL BE CONTINOUSLY WELDED. 3. INSIDE TANK DIMENSIONS 121.00\"W X 66"
+    },
+    {
+      "brand": "OTC",
+      "order": "1992 - OTC 62177 TANK",
+      "file": "62177-48.00 Rev 01.PDF",
+      "tipos_nombre": [
+        "CONTROL_REV"
+      ],
+      "tipos_texto": [
+        "GA_ENSAMBLE",
+        "TANQUE_COMPLETO",
+        "CASCO_SHELL",
+        "BASE_BOTTOM",
+        "ACCESORIO_NOZZLE",
+        "ACCESORIO_LUG_PAD",
+        "INSTRUMENTOS",
+        "MATERIALES_BOM",
+        "ELECTRICO",
+        "CONTROL_REV"
+      ],
+      "preview": "1 REVISIONS REV. DESCRIPTION DATE APPROVED 1 UPDATED THICKNESS ITEM P49 8/13/2026 JVM 62177-1248-A01 - TANK ASSEMBLY ID # DESCRIPTION PART NUMBER WEIGHT QTY. TOTAL WEIGHT (LBS) MATERIAL REVISION 1248-P01 MAIN BASE PLATE 62177-1248-P01 2453.94 1 2453.94 ASTM A36 Steel 0 1248-P17 F"
+    },
+    {
+      "brand": "OTC",
+      "order": "2024 - OTC 62178 TANK",
+      "file": "62178 - Tank Manufacturing Rev.02.pdf",
+      "tipos_nombre": [
+        "TANQUE_COMPLETO",
+        "CONTROL_REV"
+      ],
+      "tipos_texto": [
+        "GA_ENSAMBLE",
+        "TANQUE_COMPLETO",
+        "TAPA_TOP",
+        "ACCESORIO_NOZZLE",
+        "ACCESORIO_LUG_PAD",
+        "INSTRUMENTOS",
+        "SOLDADURA_WELD",
+        "MATERIALES_BOM",
+        "FABRICACION",
+        "ELECTRICO",
+        "CONTROL_REV",
+        "CERT_SPEC"
+      ],
+      "preview": "SP-810 118.311 4.375 CL 74.925 MAX SHIPPING DEPTH 99.500 NSIDE TANK HEIGHT (BACK) 100.572 INSIDE TANK HEIGHT (FR0NT) 62178-1246-A01 MAIN TANK ASSEMBLY SP-800 SP-766 CL 119.000 MAX SHIPPING WIDTH 50.000 28.375 9.000 11.125 35.000 35.000 28.370 11.130 9.000 95.500 1253-A03 3X 1254-"
+    },
+    {
+      "brand": "OTC",
+      "order": "2024 - OTC 62178 TANK",
+      "file": "62178-48.00 Rev 01.PDF",
+      "tipos_nombre": [
+        "CONTROL_REV"
+      ],
+      "tipos_texto": [
+        "GA_ENSAMBLE",
+        "TANQUE_COMPLETO",
+        "CASCO_SHELL",
+        "BASE_BOTTOM",
+        "ACCESORIO_NOZZLE",
+        "ACCESORIO_LUG_PAD",
+        "INSTRUMENTOS",
+        "DETALLE",
+        "SOLDADURA_WELD",
+        "MATERIALES_BOM",
+        "ELECTRICO",
+        "CONTROL_REV"
+      ],
+      "preview": "DETAILED BOM CUTLIST 1 REVISIONS REV. DESCRIPTION DATE APPROVED 1 Removed Items 1248-P32 and 1248-P26 8/19/2026 JVM 62178-1248-A01 - TANK ASSEMBLY ID # DESCRIPTION PART NUMBER WEIGHT QTY. TOTAL WEIGHT (LBS) MATERIAL REVISION .5IN-01 1/2\" SQUARE HEAD PIPE PLUG SQH-.5IN-01 0.12 1 0"
+    },
+    {
+      "brand": "OTC",
+      "order": "2028 - OTC 62140 TANK",
+      "file": "62140 - Tank Manufacturing Rev.01.pdf",
+      "tipos_nombre": [
+        "TANQUE_COMPLETO",
+        "CONTROL_REV"
+      ],
+      "tipos_texto": [
+        "TANQUE_COMPLETO",
+        "TAPA_TOP",
+        "ACCESORIO_NOZZLE",
+        "ACCESORIO_LUG_PAD",
+        "INSTRUMENTOS",
+        "DETALLE",
+        "SOLDADURA_WELD",
+        "MATERIALES_BOM",
+        "FABRICACION",
+        "ELECTRICO",
+        "CONTROL_REV",
+        "CERT_SPEC"
+      ],
+      "preview": "147.250 MAX SHIPPING WIDTH 121.515 MAX SHIPPING HEIGHT FRONT VIEW BACK VIEW 55.000 112.500 TOP VIEW ISO VIEW 113.000 INSIDE TANK HEIGHT (FR0NT) 112.000 INSIDE TANK HEIGHT (BACK) 94.625 MAX SHIPPING DEPTH RIGHT VIEW NOTES: 1. ALL SEAMS ARE TO BE WELDED INSIDE AND OUTSIDE. 2. TANK "
+    },
+    {
+      "brand": "OTC",
+      "order": "2028 - OTC 62140 TANK",
+      "file": "62140-48.00 Rev 01.PDF",
+      "tipos_nombre": [
+        "CONTROL_REV"
+      ],
+      "tipos_texto": [
+        "TANQUE_COMPLETO",
+        "CASCO_SHELL",
+        "BASE_BOTTOM",
+        "ACCESORIO_NOZZLE",
+        "ACCESORIO_LUG_PAD",
+        "SOLDADURA_WELD",
+        "MATERIALES_BOM",
+        "CONTROL_REV"
+      ],
+      "preview": "EXTERIOR PAINT: 1st AND 2nd COAT, PRIMER- APPLY ON COAT OF HI-TEMP 884 AT 5 TO 6 MILS REVISIONS REV. DESCRIPTION DATE REVISED BY 1 PART 1248-P06 MODIFIED ON PAGE 9/14 8/21/26 CMT 62140-1248-A01 - TANK WELD ASSEMBLY ID # DESCRIPTION PART NUMBER WEIGHT QTY. TOTAL WEIGHT (LBS) MATER"
+    },
+    {
+      "brand": "SWE",
+      "order": "2058- SWE 1PH.TNK-0140(x1) & 0141 (x6)",
+      "file": "TNK.1PH-0141 GRUPO ARGA REV.2.pdf",
+      "tipos_nombre": [
+        "GA_ENSAMBLE",
+        "TANQUE_COMPLETO",
+        "CONTROL_REV"
+      ],
+      "tipos_texto": [
+        "GA_ENSAMBLE",
+        "TANQUE_COMPLETO",
+        "TAPA_TOP",
+        "CASCO_SHELL",
+        "ACCESORIO_NOZZLE",
+        "ACCESORIO_LUG_PAD",
+        "INSTRUMENTOS",
+        "DETALLE",
+        "SOLDADURA_WELD",
+        "MATERIALES_BOM",
+        "ELECTRICO",
+        "CONTROL_REV"
+      ],
+      "preview": "DETALLE BF LISTA DE PIEZAS DESCRIPTIONQTYPART NUMBERITEM SSTL41/2-13 HEX NUT1 A36-THK 0.502LIFTING LUG2 A36 - Cal 121MAIN BODY3 A36 - THK 0.1881DOWN PLATE4 13000 lbs Half Coupling 255 ASSEMBLY1TOP COVER FINAL6 A36 - Cal 0.251Cylinder Flange7 TYPE C2SUPPORT8 1Spin 9 BF 1 1 2 2 3 3"
+    },
+    {
+      "brand": "SWE",
+      "order": "2058- SWE 1PH.TNK-0140(x1) & 0141 (x6)",
+      "file": "TNK.1PH-0140 GRUPO ARGA REV.1.pdf",
+      "tipos_nombre": [
+        "GA_ENSAMBLE",
+        "TANQUE_COMPLETO",
+        "CONTROL_REV"
+      ],
+      "tipos_texto": [
+        "GA_ENSAMBLE",
+        "TANQUE_COMPLETO",
+        "TAPA_TOP",
+        "CASCO_SHELL",
+        "ACCESORIO_NOZZLE",
+        "ACCESORIO_LUG_PAD",
+        "INSTRUMENTOS",
+        "DETALLE",
+        "SOLDADURA_WELD",
+        "MATERIALES_BOM",
+        "ELECTRICO",
+        "CONTROL_REV"
+      ],
+      "preview": "DETALLE BD LISTA DE PIEZAS DESCRIPTIONQTYPART NUMBERITEM SSTL51/2-13 HEX NUT1 A36-THK 0.502LIFTING LUG2 A36 - Cal 121MAIN BODY3 A36 - THK 0.1881DOWN PLATE4 13000 lbs Half Coupling 255 ASSEMBLY1TOP COVER FINAL6 A36 - Cal 0.251Cylinder Flange7 TYPE C2SUPPORT8 1Spin 9 AC-SWE-011Acce"
+    },
+    {
+      "brand": "OTC",
+      "order": "2081 - OTC 62147 TANK",
+      "file": "62147- Tank Manufacturing Rev.00.pdf",
+      "tipos_nombre": [
+        "TANQUE_COMPLETO",
+        "CONTROL_REV"
+      ],
+      "tipos_texto": [
+        "TANQUE_COMPLETO",
+        "TAPA_TOP",
+        "ACCESORIO_NOZZLE",
+        "ACCESORIO_LUG_PAD",
+        "INSTRUMENTOS",
+        "DETALLE",
+        "SOLDADURA_WELD",
+        "MATERIALES_BOM",
+        "FABRICACION",
+        "ELECTRICO",
+        "CONTROL_REV",
+        "CERT_SPEC"
+      ],
+      "preview": "150.125 MAX SHIPPING WIDTH 130.374 MAX SHIPPING HEIGHT FRONT VIEW BACK VIEW 61.000 27.250 134.000 40.000 40.00010.46310.465 21.00021.000 TOP VIEW 1252-A01 1X ISO VIEW SP-810 1X 90.750 SHIPPING DEPTH 111.500 INSIDE TANK HEIGHT (BACK) 112.500 INSIDE TANK HEIGHT (FRONT) RIGHT VIEW N"
+    },
+    {
+      "brand": "OTC",
+      "order": "2081 - OTC 62147 TANK",
+      "file": "62147-48.00 Rev 00.PDF",
+      "tipos_nombre": [
+        "CONTROL_REV"
+      ],
+      "tipos_texto": [
+        "TANQUE_COMPLETO",
+        "CASCO_SHELL",
+        "BASE_BOTTOM",
+        "ACCESORIO_NOZZLE",
+        "ACCESORIO_LUG_PAD",
+        "SOLDADURA_WELD",
+        "MATERIALES_BOM",
+        "CONTROL_REV"
+      ],
+      "preview": "62147-1248-A01 - TANK WELD ASSEMBLY ID # DESCRIPTION PART NUMBER WEIGHT QTY. TOTAL WEIGHT (LBS) MATERIAL REVISION 1248-P01 MAIN BASE PLATE 62147-1248-P01 948.57 1 948.57 ASTM A36 Steel 0 1248-P06 FRONT TANK WALL 62147-1248-P06 1442.11 1 1442.11 ASTM - A36 Steel - 1248-P07 RIGHT T"
+    },
+    {
+      "brand": "OTC",
+      "order": "2082 - OTC 62154 TANK",
+      "file": "62154 - Tank Manufacturing Rev.04.pdf",
+      "tipos_nombre": [
+        "TANQUE_COMPLETO",
+        "CONTROL_REV"
+      ],
+      "tipos_texto": [
+        "GA_ENSAMBLE",
+        "TANQUE_COMPLETO",
+        "TAPA_TOP",
+        "ACCESORIO_NOZZLE",
+        "ACCESORIO_LUG_PAD",
+        "INSTRUMENTOS",
+        "SOLDADURA_WELD",
+        "MATERIALES_BOM",
+        "FABRICACION",
+        "CONTROL_REV",
+        "CERT_SPEC"
+      ],
+      "preview": "1248-A01 1253-A03 1254-A01 1252-P09 SP-810 1248-A01 1253-A03 1254-A01 SP-800 112.625 62154-1246-A01 MAIN TANK ASSEMBLY SP-800 185.750 SP-800 153.000 64.000 36.000 19.500 13.500 30.920 19.125 13.205 1252-A01 NOTES: 1. ALL SEAMS ARE TO BE WELDED INSIDE AND OUTSIDE. 2. TANK STIFFENE"
+    },
+    {
+      "brand": "OTC",
+      "order": "2082 - OTC 62154 TANK",
+      "file": "62154-48.00 Rev 04.PDF",
+      "tipos_nombre": [
+        "CONTROL_REV"
+      ],
+      "tipos_texto": [
+        "GA_ENSAMBLE",
+        "TANQUE_COMPLETO",
+        "CASCO_SHELL",
+        "BASE_BOTTOM",
+        "ACCESORIO_NOZZLE",
+        "ACCESORIO_LUG_PAD",
+        "DETALLE",
+        "MATERIALES_BOM",
+        "CONTROL_REV"
+      ],
+      "preview": "DETAILED BOM CUTLIST REVISIONS REV. DESCRIPTION DATE APPROVED 1 UPDATED MODEL 7/7/2026 HGB 2 ADDED SSTL ON SEG 1 7/29/2026 HGB 3 ADDED 1248-P76 DETAIL DWG 8/6/2026 HGB 4 DWG WAS PULLING BRACE MODEL INCORRECTLY 8/6/2026 HGB 62154-1248-A01 - TANK ASSEMBLY ID # DESCRIPTION PART NUMB"
+    }
+  ],
+  "records_n": 875
+}

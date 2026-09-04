@@ -5,7 +5,8 @@ Igual que COTAS_ILOGIC_ABIGAIL: abre CMD, trabaja por API COM y exporta JPG.
 
 Modo preferido (COTAS_POR_SUBENSAMBLE):
   Seleccion manual Top Cover + SEGM1..4 + BASE (JSON --seleccion).
-  Camara = normal de la cara elegida; up = normal del Top Cover.
+  Camara = normal de la cara elegida; up = opuesto a normal de BASE
+  (escuadra desde el piso/(0,0); NO Top Cover: OTC tiene inclinacion tipo tejado).
   (0,0) = esquina inferior-izquierda de la pared completa (mitades nesting).
   Carpetas SEGM1/SEGM2/SEGM3/SEGM4/TOP/BASE.
   1 JPG por tipo de pieza (mismas piezas agrupadas) con todas las X+Y.
@@ -18,10 +19,12 @@ Modo automatico (compat COTAS_CARAS_TANQUE sin JSON):
 Ver DEBER_SER_COTAS_CARAS.md en la raiz del proyecto.
 """
 
+import gc
 import json
 import math
 import os
 import re
+import shutil
 import sys
 import time
 import traceback
@@ -1608,7 +1611,13 @@ def _resolver_paneles_pared(paneles_segmento, base_pared=None):
 
 
 def _envolvente_union_en_hoja(envolventes):
-    """Unión de envolventes en hoja (esquina IL = min X / min Y global)."""
+    """
+    Unión de envolventes en hoja (esquina IL = min X / min Y global).
+
+    Crítico en paredes partidas (P13_1 + P13_2): hay que fusionar también
+    ``puntos_modelo``. Si solo queda la mitad superior, el refresco post-
+    encuadre mueve el (0,0) a la junta y todas las cotas Y quedan al revés.
+    """
     validas = [env for env in envolventes if env]
     if not validas:
         return None
@@ -1618,7 +1627,9 @@ def _envolvente_union_en_hoja(envolventes):
     maxx = max(env["maxx"] for env in validas)
     miny = min(env["miny"] for env in validas)
     maxy = max(env["maxy"] for env in validas)
-    union = dict(validas[0])
+    # Preferir como base la mitad inferior (miny real del muro).
+    base = min(validas, key=lambda env: float(env.get("miny", 0)))
+    union = dict(base)
     union.update(
         {
             "minx": minx,
@@ -1629,13 +1640,94 @@ def _envolvente_union_en_hoja(envolventes):
             "dy": maxy - miny,
             "cx": (minx + maxx) * 0.5,
             "cy": (miny + maxy) * 0.5,
+            "es_pared_partida": True,
+            "n_mitades": len(validas),
         }
     )
     curvas = []
+    puntos = []
     for env in validas:
         curvas.extend(env.get("curvas") or [])
+        puntos.extend(env.get("puntos_modelo") or [])
     if curvas:
         union["curvas"] = curvas
+    if puntos:
+        union["puntos_modelo"] = puntos
+    elif "puntos_modelo" in union:
+        # Evitar heredar solo los 8 vértices de una mitad.
+        del union["puntos_modelo"]
+    return union
+
+
+def _envolvente_hlr_de_datos(datos):
+    """
+    Silueta visible (HLR) de una placa en hoja.
+
+    El RangeBox 3D proyecta vértices traseros/espesor fuera de la cara
+    visible y desplaza el (0,0) varios cm (p. ej. 4.063 TYP a la izquierda).
+    Para el origen del segmento SOLO vale la silueta HLR de la placa.
+    """
+    if not datos:
+        return None
+    try:
+        curvas = list(datos)
+        minx = min(float(d["minx"]) for d in curvas)
+        maxx = max(float(d["maxx"]) for d in curvas)
+        miny = min(float(d["miny"]) for d in curvas)
+        maxy = max(float(d["maxy"]) for d in curvas)
+    except Exception:
+        return None
+    if maxx - minx < EPS and maxy - miny < EPS:
+        return None
+    return {
+        "curvas": curvas,
+        "minx": minx,
+        "maxx": maxx,
+        "miny": miny,
+        "maxy": maxy,
+        "dx": maxx - minx,
+        "dy": maxy - miny,
+        "cx": (minx + maxx) * 0.5,
+        "cy": (miny + maxy) * 0.5,
+    }
+
+
+def _origen_placa_segmento_en_hoja(paneles_pared, es_pared_partida=False):
+    """
+    (0,0) = esquina inferior-izquierda de la placa del segmento en hoja.
+
+    Une siluetas HLR de todas las mitades (_1/_2). NO usa BASE ni RangeBox 3D.
+    """
+    if not paneles_pared:
+        return None
+    envs = []
+    for nombre, datos, _huella in paneles_pared:
+        env = _envolvente_hlr_de_datos(datos)
+        if env is None:
+            continue
+        envs.append(env)
+        log(
+            f"    Mitad HLR {_nombre_final_componente(nombre)}: "
+            f"Y=[{env['miny']:.3f}..{env['maxy']:.3f}] "
+            f"X=[{env['minx']:.3f}..{env['maxx']:.3f}]"
+        )
+    if not envs:
+        return None
+    if len(envs) == 1:
+        env = dict(envs[0])
+        env["es_pared_partida"] = bool(es_pared_partida)
+        env["n_mitades"] = 1
+        env["origen_fuente"] = "hlr_placa"
+        return env
+    union = _envolvente_union_en_hoja(envs)
+    if union is None:
+        return None
+    # Unión HLR: sin puntos_modelo 3D; el refresco relee curvas HLR.
+    if "puntos_modelo" in union:
+        del union["puntos_modelo"]
+    union["es_pared_partida"] = True
+    union["n_mitades"] = len(envs)
+    union["origen_fuente"] = "hlr_placa_partida"
     return union
 
 
@@ -2087,6 +2179,7 @@ def _limpiar_machote(plano, inv_app=None):
                 continue
 
     try:
+        time.sleep(0.4)
         plano.Update()
     except Exception:
         pass
@@ -2094,18 +2187,6 @@ def _limpiar_machote(plano, inv_app=None):
     if inv_app is not None:
         try:
             inv_app.ScreenUpdating = True
-        except Exception:
-            pass
-        try:
-            _actualizar_inventor(inv_app)
-        except Exception:
-            pass
-        try:
-            inv_app.ActiveView.Update()
-        except Exception:
-            pass
-        try:
-            inv_app.ActiveView.Fit()
         except Exception:
             pass
 
@@ -2542,7 +2623,7 @@ def _direcciones_caras_pqart(tg, cover, face, right):
 def _crear_camara(ensamble, tg, to, bbox, eye_dir, up_hint):
     eye_dir = eye_dir.Copy()
     eye_dir.Normalize()
-    # Up = tapa (cover) del marco, no forzar XYZ mundo.
+    # Up = escuadra de la cara (BASE para paredes; no Top Cover inclinado).
     try:
         up_hint = up_hint.Copy()
         up_hint.Normalize()
@@ -4447,6 +4528,240 @@ def _origen_desde_vertices_seleccion(vista, tg, vertices_cm):
     return min(xs), min(ys)
 
 
+def _occurrence_desde_datos_placa(datos):
+    if not datos:
+        return None
+    try:
+        return datos[0]["curve"].ModelGeometry.ContainingOccurrence
+    except Exception:
+        return None
+
+
+def _puntos_cuerpo_placa_ensamble(occ, tg):
+    """
+    Vértices 3D (cm, espacio ensamble) del cuerpo de UNA placa.
+
+    Incluye el radio/pestaña: en vista de frente el min X / min Y es la
+    silueta exterior, no la tangencia del doblez (esa está en la cara plana).
+    No recorre otras piezas (boquillas, BASE, la otra mitad).
+    """
+    puntos = []
+    if occ is None:
+        return puntos
+    try:
+        xform = occ.Transformation
+        cuerpos = occ.Definition.Document.ComponentDefinition.SurfaceBodies
+    except Exception:
+        return puntos
+    for i in range(1, int(cuerpos.Count) + 1):
+        try:
+            verts = cuerpos.Item(i).Vertices
+            n_verts = int(verts.Count)
+        except Exception:
+            continue
+        for k in range(1, n_verts + 1):
+            try:
+                p0 = verts.Item(k).Point
+                pt = tg.CreatePoint(float(p0.X), float(p0.Y), float(p0.Z))
+                pt.TransformBy(xform)
+                puntos.append((float(pt.X), float(pt.Y), float(pt.Z)))
+            except Exception:
+                continue
+    return puntos
+
+
+def _proyectar_puntos_a_hoja(puntos, vista, tg):
+    xs, ys, validos = [], [], []
+    for vert in puntos or []:
+        try:
+            p2 = vista.ModelToSheetSpace(
+                tg.CreatePoint(float(vert[0]), float(vert[1]), float(vert[2]))
+            )
+            xy = (float(p2.X), float(p2.Y))
+            xs.append(xy[0])
+            ys.append(xy[1])
+            validos.append((float(vert[0]), float(vert[1]), float(vert[2]), xy[0], xy[1]))
+        except Exception:
+            continue
+    return xs, ys, validos
+
+
+def _puntos_borde_il(validos, minx, miny):
+    """Vértices 3D que forman el borde izquierdo e inferior en la vista."""
+    if not validos:
+        return []
+    span = max(abs(minx) + abs(miny), 1.0)
+    tol = max(0.04, span * 0.0004)
+    borde = []
+    for x, y, z, sx, sy in validos:
+        if sx <= minx + tol or sy <= miny + tol:
+            borde.append((x, y, z))
+    if len(borde) < 2:
+        return [(v[0], v[1], v[2]) for v in validos]
+    if len(borde) > 400:
+        paso = max(1, len(borde) // 400)
+        borde = borde[::paso]
+    return borde
+
+
+def _cuatro_esquinas_cara_frontal(puntos):
+    """
+    Recuadro de la cara plana (tangencia del doblez). Solo diagnóstico.
+
+    Esa cara termina donde empieza el radio: NO es la esquina que se ve
+    de frente (la silueta exterior del costado).
+    """
+    pts = []
+    for p in puntos or []:
+        try:
+            pts.append((float(p[0]), float(p[1]), float(p[2])))
+        except (TypeError, ValueError, IndexError):
+            continue
+    if len(pts) < 3:
+        return pts
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    zs = [p[2] for p in pts]
+    span = (
+        (max(xs) - min(xs), 0),
+        (max(ys) - min(ys), 1),
+        (max(zs) - min(zs), 2),
+    )
+    # Eje más delgado = normal de la cara (pestaña/doblez queda fuera).
+    _span_n, eje_n = min(span, key=lambda item: item[0])
+    eje_u, eje_v = [i for i in (0, 1, 2) if i != eje_n]
+    u0, u1 = min(p[eje_u] for p in pts), max(p[eje_u] for p in pts)
+    v0, v1 = min(p[eje_v] for p in pts), max(p[eje_v] for p in pts)
+    n_fijo = sum(p[eje_n] for p in pts) / len(pts)
+    esquinas = []
+    for u in (u0, u1):
+        for v in (v0, v1):
+            p = [0.0, 0.0, 0.0]
+            p[eje_n] = n_fijo
+            p[eje_u] = u
+            p[eje_v] = v
+            esquinas.append(tuple(p))
+    return esquinas
+
+
+def _puntos_piel_exterior_placa(datos, vista, tg):
+    """
+    Vértices de la cara plana EXTERIOR (la que ves de frente).
+
+    No usa el HLR ni el RangeBox: esos incluyen dobleces laterales y
+    desplazan el (0,0) varios cm (el 4.250 TYP típico).
+    """
+    occ = _occurrence_desde_datos_placa(datos)
+    if occ is None:
+        return []
+    look, _target = _vector_hacia_camara(vista)
+    caras = _caras_planas_alineadas(occ, look)
+    if not caras:
+        return []
+    area_max = max(float(c.get("area") or 0) for c in caras)
+    grandes = [
+        c for c in caras if float(c.get("area") or 0) >= area_max * 0.55
+    ]
+    if not grandes:
+        grandes = caras
+    # Piel más cercana a la cámara = cara frontal (no la trasera).
+    piel = max(grandes, key=lambda c: float(c.get("profundidad") or 0))
+    return _cuatro_esquinas_cara_frontal(piel.get("puntos_modelo") or [])
+
+
+def _origen_esquina_real_segmento(
+    paneles_pared, vista, tg, origen_vertices_cm=None
+):
+    """
+    (0,0) = esquina IL que se ve de FRENTE en la mitad de abajo.
+
+    No es la tangencia del doblez (borde de la cara plana) ni el extremo
+    3D de una pestaña si esa pestaña no forma la silueta frontal. Se toma
+    el min X / min Y en hoja de los vértices del cuerpo de P15_2 (etc.).
+    """
+    if not paneles_pared:
+        return None
+
+    mitades = []
+    for nombre, datos, huella in paneles_pared:
+        hlr = _envolvente_hlr_de_datos(datos)
+        if hlr is None:
+            continue
+        mitades.append((nombre, datos, hlr, huella))
+    if not mitades:
+        return None
+
+    # Mitad inferior = menor miny en hoja.
+    nombre, datos, hlr, _huella = min(
+        mitades, key=lambda item: float(item[2]["miny"])
+    )
+    occ = _occurrence_desde_datos_placa(datos)
+    etiqueta = _nombre_final_componente(nombre)
+
+    # Diagnóstico: dónde caería la tangencia (cara plana / pick).
+    try:
+        pts_tang = _cuatro_esquinas_cara_frontal(origen_vertices_cm or [])
+        if not pts_tang:
+            pts_tang = _puntos_piel_exterior_placa(datos, vista, tg)
+        xs_t, ys_t, _ = _proyectar_puntos_a_hoja(pts_tang, vista, tg)
+        if xs_t and ys_t:
+            log(
+                f"    Tangencia cara plana {etiqueta}: "
+                f"X={min(xs_t):.3f} Y={min(ys_t):.3f} "
+                "(NO es el (0,0); es el inicio del doblez)"
+            )
+    except Exception:
+        pass
+
+    puntos = _puntos_cuerpo_placa_ensamble(occ, tg)
+    xs, ys, validos = _proyectar_puntos_a_hoja(puntos, vista, tg)
+    fuente = "silueta_frontal_" + etiqueta
+
+    if not xs or not ys:
+        log(
+            f"    Origen: sin vértices 3D de {etiqueta}; "
+            "usa HLR solo de la mitad inferior"
+        )
+        env = dict(hlr)
+        env["es_pared_partida"] = len(mitades) >= 2
+        env["n_mitades"] = len(mitades)
+        env["origen_fuente"] = "hlr_mitad_inferior"
+        env["minx"] = float(hlr["minx"])
+        env["miny"] = float(hlr["miny"])
+        env["curvas"] = list(hlr.get("curvas") or [])
+        env["mitad_origen"] = etiqueta
+        return env
+
+    origen_x = min(xs)
+    origen_y = min(ys)
+    borde = _puntos_borde_il(validos, origen_x, origen_y)
+    env = dict(hlr)
+    env.update(
+        {
+            "minx": origen_x,
+            "miny": origen_y,
+            "maxx": max(xs),
+            "maxy": max(ys),
+            "dx": max(xs) - origen_x,
+            "dy": max(ys) - origen_y,
+            "cx": (origen_x + max(xs)) * 0.5,
+            "cy": (origen_y + max(ys)) * 0.5,
+            "puntos_modelo": borde,
+            "curvas": [],
+            "es_pared_partida": len(mitades) >= 2,
+            "n_mitades": len(mitades),
+            "origen_fuente": fuente,
+            "mitad_origen": etiqueta,
+        }
+    )
+    log(
+        f"    Esquina IL silueta frontal {etiqueta} "
+        f"({len(puntos)} verts cuerpo, {len(borde)} borde IL): "
+        f"X={origen_x:.3f} Y={origen_y:.3f} fuente={fuente}"
+    )
+    return env
+
+
 def _construir_grupos_por_tipo(
     posiciones_x,
     posiciones_y,
@@ -4873,14 +5188,52 @@ def _acotar_vista(
     else:
         log("    AVISO: no se identificó placa madre; se incluirán todas las piezas.")
 
-    envolventes_pared = [
-        _envolvente_occurrence_en_hoja(datos, vista, tg)
-        for _nombre, datos, _huella in paneles_pared
-    ]
-    envolvente_panel = _envolvente_union_en_hoja(envolventes_pared)
-    nombre_panel = (
-        max(paneles_pared, key=lambda item: item[2])[0] if paneles_pared else None
+    # (0,0) = silueta IL de frente de la mitad de ABAJO (no tangencia).
+    envolvente_panel = _origen_esquina_real_segmento(
+        paneles_pared,
+        vista,
+        tg,
+        origen_vertices_cm=origen_vertices_cm,
     )
+    if envolvente_panel is None and origen_vertices_cm:
+        origen_xy = _origen_desde_vertices_seleccion(
+            vista, tg, origen_vertices_cm
+        )
+        if origen_xy is not None:
+            envolvente_panel = {
+                "minx": origen_xy[0],
+                "miny": origen_xy[1],
+                "maxx": origen_xy[0],
+                "maxy": origen_xy[1],
+                "dx": 0.0,
+                "dy": 0.0,
+                "cx": origen_xy[0],
+                "cy": origen_xy[1],
+                "puntos_modelo": [
+                    (float(v[0]), float(v[1]), float(v[2]))
+                    for v in origen_vertices_cm
+                ],
+                "origen_fuente": "pick_cara",
+                "n_mitades": 1,
+            }
+            log(
+                f"    Origen (0,0) pick de cara: "
+                f"X={origen_xy[0]:.3f} Y={origen_xy[1]:.3f}"
+            )
+
+    nombre_panel = None
+    if paneles_pared:
+        mejores = []
+        for nombre, datos, _huella in paneles_pared:
+            env = _envolvente_hlr_de_datos(datos)
+            if env is not None:
+                mejores.append((nombre, env))
+        if mejores:
+            nombre_panel = min(
+                mejores, key=lambda item: float(item[1]["miny"])
+            )[0]
+    if nombre_panel is None and paneles_pared:
+        nombre_panel = max(paneles_pared, key=lambda item: item[2])[0]
     datos_panel = next(
         (
             datos
@@ -4889,22 +5242,21 @@ def _acotar_vista(
         ),
         paneles_pared[0][1] if paneles_pared else [],
     )
+    if envolvente_panel is not None:
+        # No adjuntar HLR de toda la placa (dobleces) al dato de origen.
+        envolvente_panel["curvas"] = []
 
     origen_forzado = None
     if envolvente_panel is not None:
         origen_x = float(envolvente_panel["minx"])
         origen_y = float(envolvente_panel["miny"])
         origen_forzado = (origen_x, origen_y)
-        if es_pared_partida:
-            log(
-                f"    Origen (0,0) pared completa (partida): X={origen_x:.3f} "
-                f"Y={origen_y:.3f}"
-            )
-        else:
-            log(
-                f"    Origen (0,0) placa segmento: X={origen_x:.3f} "
-                f"Y={origen_y:.3f}"
-            )
+        fuente = envolvente_panel.get("origen_fuente") or "placa"
+        mitad = envolvente_panel.get("mitad_origen") or "-"
+        log(
+            f"    Origen (0,0) esquina IL REAL: X={origen_x:.3f} "
+            f"Y={origen_y:.3f} fuente={fuente} mitad={mitad}"
+        )
     elif origen_vertices_cm:
         origen_forzado = _origen_desde_vertices_seleccion(
             vista, tg, origen_vertices_cm
@@ -5367,6 +5719,11 @@ def _cargar_seleccion_caras(ruta):
             segs[0] = dict(segs[0])
             segs[0]["etiqueta"] = solo
             data["segmentos"] = segs[:1]
+            if not data.get("base"):
+                raise ValueError(
+                    f"JSON --solo {solo} requiere pick de BASE: "
+                    "escuadra la cámara desde el piso (OTC con tejado)"
+                )
         elif solo == "BASE":
             if not data.get("base"):
                 if data.get("cara"):
@@ -5376,12 +5733,20 @@ def _cargar_seleccion_caras(ruta):
             data["segmentos"] = list(data.get("segmentos") or [])
         else:  # TOP
             data["segmentos"] = list(data.get("segmentos") or [])
+            # BASE opcional en solo TOP, pero recomendada para coherencia.
         return data
 
     if "segmentos" not in data:
         raise ValueError("JSON debe incluir 'segmentos'")
     if len(data.get("segmentos") or []) != 4:
-        raise ValueError("Se requieren exactamente 4 segmentos en la selección")
+        raise ValueError(
+            "Se requieren exactamente 4 segmentos (SEGM1..4) en la selección"
+        )
+    if not data.get("base"):
+        raise ValueError(
+            "JSON debe incluir 'base': up de paredes se escuadra desde el "
+            "piso/(0,0). Top Cover NO sirve (inclinación tipo tejado OTC)."
+        )
     return data
 
 
@@ -5852,8 +6217,28 @@ def _crear_caras_desde_seleccion(inv_app, plano, ensamble, seleccion):
     for etiqueta, seg in mapa.items():
         LAST_PIEZAS_POR_CARA[etiqueta] = set(seg.get("piezas", set()))
 
-    # Up de paredes = tapa; para TOP el "arriba de foto" = normal SEGM1 (o la SEGM del solo).
-    up_pared = cover
+    # Up de paredes = escuadra desde BASE (piso/(0,0)), NO Top Cover.
+    # OTC tiene inclinación tipo tejado: si up = cover, las Y se descuadran
+    # y cotas que deberían ser TYP dejan de coincidir.
+    if "BASE" in mapa and mapa["BASE"].get("normal") is not None:
+        base_n = mapa["BASE"]["normal"]
+        # Normal BASE sale hacia afuera (abajo). Up de foto = hacia el tanque.
+        up_pared = _norm(_scale(base_n, -1.0))
+        if _dot(up_pared, up_pared) < 0.5:
+            up_pared = cover
+            log("  AVISO: normal BASE inválida; up cae a Top Cover")
+        else:
+            log(
+                "  Up de paredes: opuesto a normal BASE "
+                "(escuadra desde piso/(0,0); no Top Cover)"
+            )
+    else:
+        up_pared = cover
+        log(
+            "  AVISO: sin BASE en mapa; up = Top Cover "
+            "(riesgo de inclinación OTC / TYP rotos)"
+        )
+
     if "SEGM1" in mapa:
         face_ref = mapa["SEGM1"]["normal"]
     else:
@@ -5863,12 +6248,12 @@ def _crear_caras_desde_seleccion(inv_app, plano, ensamble, seleccion):
                 face_ref = mapa[key]["normal"]
                 break
         if face_ref is None:
-            face_ref = _norm(_cross(cover, (1.0, 0.0, 0.0)))
+            face_ref = _norm(_cross(up_pared, (1.0, 0.0, 0.0)))
             if _dot(face_ref, face_ref) < 0.5:
-                face_ref = _norm(_cross(cover, (0.0, 0.0, 1.0)))
-    right_ref = _norm(_cross(cover, face_ref))
+                face_ref = _norm(_cross(up_pared, (0.0, 0.0, 1.0)))
+    right_ref = _norm(_cross(up_pared, face_ref))
     if _dot(right_ref, right_ref) < 0.5:
-        right_ref = _norm(_cross(face_ref, cover))
+        right_ref = _norm(_cross(face_ref, up_pared))
 
     orden = ["SEGM1", "SEGM2", "SEGM3", "SEGM4", "TOP", "BASE"]
     if solo:
@@ -5995,7 +6380,6 @@ def _crear_caras_desde_seleccion(inv_app, plano, ensamble, seleccion):
                 cam,
             )
             vista.Name = "TANQUE_" + nombre
-            plano.Update()
             visibles = _aplicar_visibilidad_vista_cara(
                 vista,
                 ensamble,
@@ -6003,12 +6387,10 @@ def _crear_caras_desde_seleccion(inv_app, plano, ensamble, seleccion):
                 extras_raiz,
             )
             log(f"    Vista aislada: {visibles} ocurrencias visibles")
-            plano.Update()
             _enderezar_vista_en_hoja(vista)
-            plano.Update()
             _ajustar_vista(vista, hoja, tg)
-            plano.Update()
             _limpiar_bolitas(hoja, vista)
+            plano.Update()
 
             plan_cotas = _acotar_vista(
                 hoja,
@@ -6201,7 +6583,6 @@ def _crear_caras(inv_app, plano, ensamble):
                 cam,
             )
             vista.Name = "TANQUE_" + nombre
-            plano.Update()
             visibles = _aplicar_visibilidad_vista_cara(
                 vista,
                 ensamble,
@@ -6209,12 +6590,10 @@ def _crear_caras(inv_app, plano, ensamble):
                 extras_raiz,
             )
             log(f"    Vista aislada: {visibles} ocurrencias visibles")
-            plano.Update()
             _enderezar_vista_en_hoja(vista)
-            plano.Update()
             _ajustar_vista(vista, hoja, tg)
-            plano.Update()
             _limpiar_bolitas(hoja, vista)
+            plano.Update()
 
             plan_cotas = _acotar_vista(
                 hoja,
@@ -6241,12 +6620,6 @@ def _crear_caras(inv_app, plano, ensamble):
             except Exception:
                 pass
             plano.Update()
-            _limpiar_bolitas(hoja, vista)
-            try:
-                if vista.HasOriginIndicator:
-                    vista.OriginIndicator.Visible = False
-            except Exception:
-                pass
             log(
                 f"  OK {nombre_hoja}: vista lista "
                 f"({componentes} piezas, {n_grupos} grupos, {cotas} refs)"
@@ -6605,15 +6978,115 @@ def _nombre_archivo_grupo(indice, grupo):
 
 
 def _limpiar_exportaciones_cara(carpeta):
-    """La carpeta es exclusiva de fotos por grupo generadas por esta regla."""
-    os.makedirs(carpeta, exist_ok=True)
-    for nombre in os.listdir(carpeta):
-        if not nombre.lower().endswith(".jpg"):
-            continue
+    """Vacía la carpeta de cara (incl. subcarpetas por pieza/clasificación)."""
+    if os.path.isdir(carpeta):
         try:
-            os.remove(os.path.join(carpeta, nombre))
+            shutil.rmtree(carpeta)
         except OSError:
-            pass
+            # Fallback: borrar JPG sueltos si rmtree falla parcialmente.
+            for root, _dirs, files in os.walk(carpeta):
+                for nombre in files:
+                    if nombre.lower().endswith(".jpg"):
+                        try:
+                            os.remove(os.path.join(root, nombre))
+                        except OSError:
+                            pass
+    os.makedirs(carpeta, exist_ok=True)
+
+
+_RE_JPG_REFERENCIA = re.compile(
+    r"^\d{3}_(?:p\d+of\d+_)?QTY\d+(?:of\d+)?_(?P<pieza>.+)$",
+    re.IGNORECASE,
+)
+
+
+def _extraer_pieza_de_jpg_referencia(nombre_archivo):
+    """
+    `001_QTY4_SP-852_2.jpg` → `SP-852_2`
+    `001_p1of2_QTY2of4_PIEZA.jpg` → `PIEZA`
+    """
+    base = os.path.splitext(os.path.basename(nombre_archivo))[0]
+    match = _RE_JPG_REFERENCIA.match(base)
+    if match:
+        return match.group("pieza")
+    return base
+
+
+def _reorganizar_referencia_por_pieza(carpeta_raiz, mapa_clasificacion=None):
+    """
+    Anida JPG de COTAS_POR_REFERENCIA como Abigail:
+
+        <CARA>/<CLASIFICACIÓN>/<PIEZA>/<archivo>.jpg
+    o, sin clasificación:
+        <CARA>/<PIEZA>/<archivo>.jpg
+
+    Cada cara ya exporta por separado; si la pieza aparece en SEGM1 y SEGM3
+    cada carpeta de cara conserva su propia foto.
+    """
+    from generador_tanque_completo import (
+        SUBCARPETA_SIN_CLASIFICAR,
+        SUBCARPETAS_CARA_SELECCION,
+        SUBCARPETAS_CLASIFICACION_PIEZAS,
+        _clasificacion_para_pieza,
+        _nombre_carpeta_pieza,
+    )
+
+    if not os.path.isdir(carpeta_raiz):
+        return
+    clases_validas = {c.casefold() for c in SUBCARPETAS_CLASIFICACION_PIEZAS}
+    total = 0
+    for cara in list(SUBCARPETAS_CARA_SELECCION) + ["OTROS"]:
+        cara_dir = os.path.join(carpeta_raiz, cara)
+        if not os.path.isdir(cara_dir):
+            continue
+        jpgs = []
+        for root, _dirs, files in os.walk(cara_dir):
+            for nombre in files:
+                if nombre.lower().endswith(".jpg") and not nombre.startswith("_tmp"):
+                    jpgs.append(os.path.join(root, nombre))
+        for ruta in jpgs:
+            nombre = os.path.basename(ruta)
+            pieza = _extraer_pieza_de_jpg_referencia(nombre)
+            pieza_folder = _nombre_carpeta_pieza(pieza)
+            if mapa_clasificacion:
+                clase = _clasificacion_para_pieza(nombre, mapa_clasificacion)
+                if clase and clase.casefold() in clases_validas:
+                    destino_clase = next(
+                        s
+                        for s in SUBCARPETAS_CLASIFICACION_PIEZAS
+                        if s.casefold() == clase.casefold()
+                    )
+                else:
+                    destino_clase = SUBCARPETA_SIN_CLASIFICAR
+                destino_dir = os.path.join(
+                    cara_dir, destino_clase, pieza_folder
+                )
+            else:
+                destino_dir = os.path.join(cara_dir, pieza_folder)
+            try:
+                os.makedirs(destino_dir, exist_ok=True)
+                destino = os.path.join(destino_dir, nombre)
+                if os.path.abspath(ruta) == os.path.abspath(destino):
+                    continue
+                if os.path.exists(destino):
+                    os.remove(destino)
+                shutil.move(ruta, destino)
+                total += 1
+            except OSError as err:
+                log(
+                    f"  AVISO: no se pudo anidar referencia '{nombre}' "
+                    f"en {cara}/{pieza_folder}/: {err}"
+                )
+        # Limpiar carpetas vacías residuales bajo la cara.
+        for root, _dirs, _files in os.walk(cara_dir, topdown=False):
+            if root == cara_dir:
+                continue
+            try:
+                if not os.listdir(root):
+                    os.rmdir(root)
+            except OSError:
+                pass
+    log(f"  COTAS_POR_REFERENCIA anidada por pieza: {total} JPG")
 
 
 def _exportar_caras_jpg(inv_app, plano, ensamble, planes_cotas):
@@ -6667,13 +7140,42 @@ def _exportar_caras_jpg(inv_app, plano, ensamble, planes_cotas):
         origen_x = float(plan["origen_x"])
         origen_y = float(plan["origen_y"])
         try:
-            # Refrescar origen (0,0) desde la placa madre con la nueva escala.
-            envolvente_panel = _envolvente_visible_refrescada(
-                plan["dato_panel"], vista, tg
-            )
-            if envolvente_panel is not None:
-                origen_x = float(envolvente_panel["minx"])
-                origen_y = float(envolvente_panel["miny"])
+            # Refrescar origen (0,0) desde la placa del segmento (HLR).
+            # BASE no interviene: solo orienta la cámara.
+            dato_panel = plan.get("dato_panel") or {}
+            # Origen: reproyectar la silueta IL del cuerpo (no tangencia).
+            pts_origen = dato_panel.get("puntos_modelo") or []
+            if pts_origen:
+                xs, ys = [], []
+                for vert in pts_origen:
+                    p2 = vista.ModelToSheetSpace(
+                        tg.CreatePoint(
+                            float(vert[0]), float(vert[1]), float(vert[2])
+                        )
+                    )
+                    xs.append(float(p2.X))
+                    ys.append(float(p2.Y))
+                if xs and ys:
+                    origen_x = min(xs)
+                    origen_y = min(ys)
+                    log(
+                        f"  Origen post-encuadre {cara}: "
+                        f"({origen_x:.3f},{origen_y:.3f}) "
+                        f"fuente={dato_panel.get('origen_fuente', '?')} "
+                        f"mitad={dato_panel.get('mitad_origen', '-')} "
+                        f"pts_cara={len(pts_origen)}"
+                    )
+            elif dato_panel:
+                envolvente_panel = _envolvente_visible_refrescada(
+                    dato_panel, vista, tg
+                )
+                if envolvente_panel is not None:
+                    origen_x = float(envolvente_panel["minx"])
+                    origen_y = float(envolvente_panel["miny"])
+                    log(
+                        f"  Origen post-encuadre {cara} (respaldo): "
+                        f"({origen_x:.3f},{origen_y:.3f})"
+                    )
 
             # Refrescar CADA posición de CADA grupo directamente (no vía mapa
             # indirecto, que falla cuando _agrupar_referencias_typ elige un
@@ -6918,6 +7420,18 @@ def ejecutar(gestionar_com=True, ruta_seleccion=None):
         if exportadas != esperadas:
             return False
 
+        # Anidar JPG en <CARA>/<CLASIFICACIÓN>/<PIEZA>/ (mismo esquema Abigail).
+        try:
+            carpeta_tanque = _carpeta_salida_tanque(plano, ensamble)
+            mapa_cls = detectar_mapa_piezas_por_clasificacion(inv_app, ensamble)
+            if mapa_cls:
+                guardar_mapa_piezas_por_clasificacion(carpeta_tanque, mapa_cls)
+            else:
+                mapa_cls = cargar_mapa_piezas_por_clasificacion(carpeta_tanque)
+            _reorganizar_referencia_por_pieza(carpeta, mapa_cls or None)
+        except Exception as err:
+            log(f"  AVISO al anidar COTAS_POR_REFERENCIA por pieza: {err}")
+
         log("")
         log("PROCESO COMPLETO:")
         if solo_cara:
@@ -6927,7 +7441,7 @@ def ejecutar(gestionar_com=True, ruta_seleccion=None):
         else:
             log(f"  1) {len(creadas)} caras del tanque (mapeo automático)")
         log("  2) 1 JPG por tipo de pieza con cotas X+Y desde (0,0)")
-        log(f"  3) {exportadas} JPG en: {carpeta}")
+        log(f"  3) {exportadas} JPG en: {carpeta} (por cara/pieza)")
         log("  4) Machote limpiado para reutilizar")
         return True
 
@@ -6939,6 +7453,7 @@ def ejecutar(gestionar_com=True, ruta_seleccion=None):
         # Siempre dejar el machote limpio (exito o error a media corrida).
         try:
             if plano is not None:
+                time.sleep(0.5)
                 _limpiar_machote(plano, inv_app)
         except Exception as error:
             log(f"AVISO: no se pudo limpiar el machote: {error}")
@@ -6946,6 +7461,15 @@ def ejecutar(gestionar_com=True, ruta_seleccion=None):
             if inv_app is not None:
                 inv_app.SilentOperation = silent_prev
                 inv_app.ScreenUpdating = screen_prev
+        except Exception:
+            pass
+        # Soltar proxies COM antes de CoUninitialize: si no, Inventor
+        # puede crashear al cerrar el canal RPC al final de la corrida.
+        plano = None
+        inv_app = None
+        try:
+            gc.collect()
+            time.sleep(0.3)
         except Exception:
             pass
         if gestionar_com:

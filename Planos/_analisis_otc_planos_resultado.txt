@@ -1,0 +1,487 @@
+OP root: Z:\♦♦GRUPO ARGA CARPETAS COMPARTIDAS♦♦\BIENVENIDO\Departamentos _antes TIK\ORDENES DE PRODUCCION
+OPs OTC encontradas: 11
+  - 1991 - OTC 62176 TANK
+  - 1992 - OTC 62177 TANK
+  - 2024 - OTC 62178 TANK
+  - 2028 - OTC 62140 TANK
+  - 2081 - OTC 62147 TANK
+  - 2082 - OTC 62154 TANK
+  - 2098 - OTC 62175 TANK
+  - 2099 - OTC 62155 TANK
+  - 2208 - OTC 62200 TANK
+  - 2211 - OTC 62201 TANK
+  - 2275 - OTC 62248 TANK
+
+=== [1/11] 1991 - OTC 62176 TANK ===
+  Planos: 4. Planos
+  Archivos planos (.pdf/.dwg/.idw): 32
+    PDF 62176 - Tank Manufacturing Rev.02.pdf -> (sin codigo tipico)
+    PDF 62176-46.00 Rev 00.PDF -> 62176-46.00 [TANQUE_GENERAL]
+    PDF 62176-47.00 Rev 00.PDF -> 62176-47.00 [TOP_COVER]
+    PDF 62176-47.01 Rev 00.PDF -> 62176-47.01 [TOP_COVER]
+    PDF 62176-48.00 Rev 02.pdf -> 62176-48.00 [CASCO_SHELL]
+    PDF 62176-49.00 Rev 00.PDF -> 62176-49.00 [OTRO_O_DETALLE]
+    PDF 62176-51.00 Rev 00.PDF -> 62176-51.00 [DETALLE_O_SUB]
+    PDF 62176-52.00 Rev 00.PDF -> 62176-52.00 [DETALLE_O_SUB]
+    PDF 62176-53.00 Rev 00.PDF -> 62176-53.00 [DETALLE_O_SUB]
+    PDF 62176-54.00 Rev 00.PDF -> 62176-54.00 [DETALLE_O_SUB]
+    PDF 62176-59.00 Rev 00.PDF -> 62176-59.00 [OTRO_O_DETALLE]
+    PDF 62176-59.01 Rev 00.PDF -> 62176-59.01 [OTRO_O_DETALLE]
+    PDF 62176-60.00 Rev 00.PDF -> 62176-60.00 [DETALLE_O_SUB]
+    PDF SP-702  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-710  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-736  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-740 Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-741  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-742  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-752  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-767  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-771 Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-774.pdf -> (sin codigo tipico)
+    PDF SP-776.pdf -> (sin codigo tipico)
+    PDF SP-788  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-792  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-797  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-798  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-799  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-800  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-852  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-855  Rev 00.PDF -> (sin codigo tipico)
+  STEP 62176-1246-A01.STEP (83.4MB) products=11
+  roles IAM: {'OTRO': 6, 'SUB_A_CASCO': 1}
+  contenedores: []
+  STEP 62176-1246-A01 LIMPIO Y MARCADO.stp (6.9MB) products=0
+  roles IAM: {}
+  contenedores: []
+
+=== [2/11] 1992 - OTC 62177 TANK ===
+  Planos: 4. Planos
+  Archivos planos (.pdf/.dwg/.idw): 29
+    PDF 62177 - TANK MANUFACTURING REV.1.pdf -> (sin codigo tipico)
+    PDF 62177-46.00 Rev 01.PDF -> 62177-46.00 [TANQUE_GENERAL]
+    PDF 62177-47.00 Rev 00.PDF -> 62177-47.00 [TOP_COVER]
+    PDF 62177-47.01 Rev 00.PDF -> 62177-47.01 [TOP_COVER]
+    PDF 62177-48.00 Rev 01.PDF -> 62177-48.00 [CASCO_SHELL]
+    PDF 62177-49.00 Rev 00.PDF -> 62177-49.00 [OTRO_O_DETALLE]
+    PDF 62177-51.00 Rev 00.PDF -> 62177-51.00 [DETALLE_O_SUB]
+    PDF 62177-52.00 Rev 00.PDF -> 62177-52.00 [DETALLE_O_SUB]
+    PDF 62177-53.00 Rev 00.PDF -> 62177-53.00 [DETALLE_O_SUB]
+    PDF 62177-54.00 Rev 00.PDF -> 62177-54.00 [DETALLE_O_SUB]
+    PDF 62177-60.00 Rev 00.PDF -> 62177-60.00 [DETALLE_O_SUB]
+    PDF SP-702  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-736  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-740 Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-741  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-742  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-752  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-767  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-771 Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-776.pdf -> (sin codigo tipico)
+    PDF SP-779  Rev 01.PDF -> (sin codigo tipico)
+    PDF SP-788  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-792  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-799  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-800  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-801 Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-851  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-852  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-855  Rev 00.PDF -> (sin codigo tipico)
+  STEP 62177-1246-A01 Step 3D.STEP (4.3MB) products=119
+  roles IAM: {'SUB_A_CASCO': 7, 'PIEZA_CASCO': 34, 'PIEZA_TOP': 10, 'OTRO': 31, 'SEGM_WALL': 4, 'TOP': 5, 'CASCO_SHELL': 1, 'TANQUE': 1, 'BASE': 1}
+  contenedores: ['62177-1248-A04=SEGM_WALL', '62177-1247-A04=TOP', '62177-1247-A02=TOP', '62177-1247-A05=TOP', '62177-1248-A01=CASCO_SHELL', '62177-1248-A05=SEGM_WALL', '62177-1246-A01=TANQUE', '62177-1248-A03=SEGM_WALL', '62177-1247-A01=TOP', '62177-1247-A03=TOP', '62177-1248-A02=BASE', '62177-1248-A06=SEGM_WALL']
+
+=== [3/11] 2024 - OTC 62178 TANK ===
+  Planos: 4. Planos
+  Archivos planos (.pdf/.dwg/.idw): 28
+    PDF 62178 - Tank Manufacturing Rev.02.pdf -> (sin codigo tipico)
+    PDF 62178-46.00 Rev 02.PDF -> 62178-46.00 [TANQUE_GENERAL]
+    PDF 62178-47.00 Rev 00.PDF -> 62178-47.00 [TOP_COVER]
+    PDF 62178-48.00 Rev 01.PDF -> 62178-48.00 [CASCO_SHELL]
+    PDF 62178-49.00 Rev 00.PDF -> 62178-49.00 [OTRO_O_DETALLE]
+    PDF 62178-51.00 Rev 00.PDF -> 62178-51.00 [DETALLE_O_SUB]
+    PDF 62178-52.00 Rev 00.PDF -> 62178-52.00 [DETALLE_O_SUB]
+    PDF 62178-53.00 Rev 00.PDF -> 62178-53.00 [DETALLE_O_SUB]
+    PDF 62178-54.00 Rev 00.PDF -> 62178-54.00 [DETALLE_O_SUB]
+    PDF 62178-60.00 Rev 00.PDF -> 62178-60.00 [DETALLE_O_SUB]
+    PDF SP-702  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-736  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-740 Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-741  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-742  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-751 Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-752  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-766 Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-774.pdf -> (sin codigo tipico)
+    PDF SP-779 Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-788  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-792  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-799  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-800  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-810 Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-851  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-852  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-855  Rev 00.PDF -> (sin codigo tipico)
+  STEP 62178-1246-A01 Step 3D.STEP (9.2MB) products=61
+  roles IAM: {'OTRO': 16, 'PIEZA_CASCO': 21, 'SUB_A_CASCO': 3, 'SEGM_WALL': 3, 'TOP': 2, 'PIEZA_TOP': 6, 'TANQUE': 1}
+  contenedores: ['62178-1248-A06=SEGM_WALL', '62178-1247-A01=TOP', '62178-1247-A03=TOP', '62178-1248-A03=SEGM_WALL', '62178-1246-A01=TANQUE', '62178-1248-A05=SEGM_WALL']
+
+=== [4/11] 2028 - OTC 62140 TANK ===
+  Planos: 4. Planos
+  Archivos planos (.pdf/.dwg/.idw): 8
+    PDF 62140 - Tank Manufacturing Rev.01.pdf -> (sin codigo tipico)
+    PDF 62140-46.00 Rev 00.PDF -> 62140-46.00 [TANQUE_GENERAL]
+    PDF 62140-47.00 Rev 00.PDF -> 62140-47.00 [TOP_COVER]
+    PDF 62140-48.00 Rev 01.PDF -> 62140-48.00 [CASCO_SHELL]
+    PDF 62140-51.00 Rev 00.PDF -> 62140-51.00 [DETALLE_O_SUB]
+    PDF 62140-52.00 Rev 00.PDF -> 62140-52.00 [DETALLE_O_SUB]
+    PDF 62140-59.00 Rev 00.PDF -> 62140-59.00 [OTRO_O_DETALLE]
+    PDF 62140-60.00 Rev 00.PDF -> 62140-60.00 [DETALLE_O_SUB]
+  STEP 62140-1248-A01.STEP (3.0MB) products=87
+  roles IAM: {'PIEZA_CASCO': 55, 'SUB_A_CASCO': 16, 'BASE': 1, 'SEGM_WALL': 3, 'CASCO_SHELL': 1}
+  contenedores: ['62140-1248-A02=BASE', '62140-1248-A03=SEGM_WALL', '62140-1248-A01=CASCO_SHELL', '62140-1248-A05=SEGM_WALL', '62140-1248-A04=SEGM_WALL']
+
+=== [5/11] 2081 - OTC 62147 TANK ===
+  Planos: 4. Planos
+  Archivos planos (.pdf/.dwg/.idw): 31
+    PDF 62147- Tank Manufacturing Rev.00.pdf -> (sin codigo tipico)
+    PDF 62147-46.00 Rev 00.PDF -> 62147-46.00 [TANQUE_GENERAL]
+    PDF 62147-47.00 Rev 00.PDF -> 62147-47.00 [TOP_COVER]
+    PDF 62147-48.00 Rev 00.PDF -> 62147-48.00 [CASCO_SHELL]
+    PDF 62147-49.00 Rev 00.PDF -> 62147-49.00 [OTRO_O_DETALLE]
+    PDF 62147-50.00 Rev 00.PDF -> 62147-50.00 [DETALLE_O_SUB]
+    PDF 62147-51.00 Rev 00.PDF -> 62147-51.00 [DETALLE_O_SUB]
+    PDF 62147-52.00 Rev 00.PDF -> 62147-52.00 [DETALLE_O_SUB]
+    PDF 62147-53.00 Rev 00.PDF -> 62147-53.00 [DETALLE_O_SUB]
+    PDF 62147-54.00 Rev 00.PDF -> 62147-54.00 [DETALLE_O_SUB]
+    PDF 62147-60.00 Rev 00.PDF -> 62147-60.00 [DETALLE_O_SUB]
+    PDF SP-702  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-736  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-740 Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-741  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-751  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-752  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-766  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-771 Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-774.pdf -> (sin codigo tipico)
+    PDF SP-779 Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-788  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-792  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-797  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-798  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-799  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-800  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-810 Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-851  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-852  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-855  Rev 00.PDF -> (sin codigo tipico)
+  STEP 62147-1246-A01.STEP (25.1MB) products=24
+  roles IAM: {'OTRO': 6, 'PIEZA_CASCO': 7, 'SUB_A_CASCO': 2, 'PIEZA_TOP': 3}
+  contenedores: []
+
+=== [6/11] 2082 - OTC 62154 TANK ===
+  Planos: 4. Planos
+  Archivos planos (.pdf/.dwg/.idw): 32
+    PDF 62154 - Tank Manufacturing Rev.04.pdf -> (sin codigo tipico)
+    PDF 62154-46.00 Rev 01.PDF -> 62154-46.00 [TANQUE_GENERAL]
+    PDF 62154-47.00 Rev 02.PDF -> 62154-47.00 [TOP_COVER]
+    PDF 62154-48.00 Rev 04.PDF -> 62154-48.00 [CASCO_SHELL]
+    PDF 62154-49.00 Rev 01.PDF -> 62154-49.00 [OTRO_O_DETALLE]
+    PDF 62154-50.00 Rev 00.pdf -> 62154-50.00 [DETALLE_O_SUB]
+    PDF 62154-51.00 Rev 00.PDF -> 62154-51.00 [DETALLE_O_SUB]
+    PDF 62154-52.00 Rev 00.PDF -> 62154-52.00 [DETALLE_O_SUB]
+    PDF 62154-53.00 Rev 00.PDF -> 62154-53.00 [DETALLE_O_SUB]
+    PDF 62154-54.00 Rev 00.PDF -> 62154-54.00 [DETALLE_O_SUB]
+    PDF 62154-60.00 Rev 01.PDF -> 62154-60.00 [DETALLE_O_SUB]
+    PDF FIN-10-C-Braces mal colocados 62154.pdf -> (sin codigo tipico)
+    PDF SP-702  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-707  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-736  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-740 Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-741  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-742  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-751 Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-752  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-767  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-771 Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-774.pdf -> (sin codigo tipico)
+    PDF SP-788  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-792  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-799  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-800  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-810 Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-851  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-852  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-855  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-865 Rev 00.pdf -> (sin codigo tipico)
+  STEP 62154-1246-A01.STEP (24.3MB) products=28
+  roles IAM: {'OTRO': 7, 'TOP': 1, 'PIEZA_TOP': 4, 'PIEZA_CASCO': 10, 'SUB_A_CASCO': 2}
+  contenedores: ['62154-1247-A01=TOP']
+
+=== [7/11] 2098 - OTC 62175 TANK ===
+  Planos: 4. Planos
+  Archivos planos (.pdf/.dwg/.idw): 29
+    PDF 62175 - Tank Manufacturing Rev.01.pdf -> (sin codigo tipico)
+    PDF 62175-46.00 Rev 00.pdf -> 62175-46.00 [TANQUE_GENERAL]
+    PDF 62175-47.00 Rev 00.pdf -> 62175-47.00 [TOP_COVER]
+    PDF 62175-48.00 Rev 01.PDF -> 62175-48.00 [CASCO_SHELL]
+    PDF 62175-49.00 Rev 00.pdf -> 62175-49.00 [OTRO_O_DETALLE]
+    PDF 62175-51.00 Rev 00.pdf -> 62175-51.00 [DETALLE_O_SUB]
+    PDF 62175-52.00 Rev 00.pdf -> 62175-52.00 [DETALLE_O_SUB]
+    PDF 62175-53.00 Rev 00.pdf -> 62175-53.00 [DETALLE_O_SUB]
+    PDF 62175-54.00 Rev 00.pdf -> 62175-54.00 [DETALLE_O_SUB]
+    PDF 62175-59.00 Rev 00.pdf -> 62175-59.00 [OTRO_O_DETALLE]
+    PDF 62175-60.00 Rev 00.pdf -> 62175-60.00 [DETALLE_O_SUB]
+    PDF SP-702 Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-704  Rev 01.pdf -> (sin codigo tipico)
+    PDF SP-736  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-740 Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-741  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-751 Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-752  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-767  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-779 Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-788  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-792 Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-797  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-798  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-799  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-800  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-810 Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-851  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-855  Rev 00.PDF -> (sin codigo tipico)
+  STEP 62175-1246-A01 R1.STEP (8.6MB) products=67
+  roles IAM: {'PIEZA_CASCO': 22, 'PIEZA_TOP': 2, 'OTRO': 14, 'SUB_A_CASCO': 7, 'TOP': 1, 'SEGM_WALL': 2, 'BASE': 1, 'CASCO_SHELL': 1}
+  contenedores: ['62175-1247-A01=TOP', '62175-1248-A04=SEGM_WALL', '62175-1248-A02=BASE', '62175-1248-A06=SEGM_WALL', '62175-1248-A01=CASCO_SHELL']
+
+=== [8/11] 2099 - OTC 62155 TANK ===
+  Planos: 4. Planos
+  Archivos planos (.pdf/.dwg/.idw): 31
+    PDF 62154 - TANK MANUFACTURING REV.04.pdf -> (sin codigo tipico)
+    PDF 62154-46.00 Rev 01.PDF -> 62154-46.00 [TANQUE_GENERAL]
+    PDF 62154-47.00 Rev 02.PDF -> 62154-47.00 [TOP_COVER]
+    PDF 62154-48.00 Rev 04.PDF -> 62154-48.00 [CASCO_SHELL]
+    PDF 62154-49.00 Rev 01.PDF -> 62154-49.00 [OTRO_O_DETALLE]
+    PDF 62154-50.00 Rev 00.pdf -> 62154-50.00 [DETALLE_O_SUB]
+    PDF 62154-51.00 Rev 00.PDF -> 62154-51.00 [DETALLE_O_SUB]
+    PDF 62154-52.00 Rev 00.PDF -> 62154-52.00 [DETALLE_O_SUB]
+    PDF 62154-53.00 Rev 00.PDF -> 62154-53.00 [DETALLE_O_SUB]
+    PDF 62154-54.00 Rev 00.PDF -> 62154-54.00 [DETALLE_O_SUB]
+    PDF 62154-60.00 Rev 01.PDF -> 62154-60.00 [DETALLE_O_SUB]
+    PDF SP-702  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-707  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-736  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-740 Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-741  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-742  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-751 Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-752  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-767  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-771 Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-774.pdf -> (sin codigo tipico)
+    PDF SP-788  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-792  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-799  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-800  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-810 Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-851  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-852  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-855  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-865 Rev 00.pdf -> (sin codigo tipico)
+  STEP 62154-1246-A01.STEP (24.3MB) products=28
+  roles IAM: {'OTRO': 7, 'TOP': 1, 'PIEZA_TOP': 4, 'PIEZA_CASCO': 10, 'SUB_A_CASCO': 2}
+  contenedores: ['62154-1247-A01=TOP']
+
+=== [9/11] 2208 - OTC 62200 TANK ===
+  Planos: 4. Planos
+  Archivos planos (.pdf/.dwg/.idw): 11
+    PDF 62200 - Tank Manufacturing Rev.1.pdf -> (sin codigo tipico)
+    PDF 62200-46.00 Rev 00.PDF -> 62200-46.00 [TANQUE_GENERAL]
+    PDF 62200-47.00 Rev 00.PDF -> 62200-47.00 [TOP_COVER]
+    PDF 62200-48.00 Rev 01.PDF -> 62200-48.00 [CASCO_SHELL]
+    PDF 62200-48.01 Rev 00.PDF -> 62200-48.01 [CASCO_SHELL]
+    PDF 62200-50.00 Rev 00.PDF -> 62200-50.00 [DETALLE_O_SUB]
+    PDF 62200-51.00 Rev 00.PDF -> 62200-51.00 [DETALLE_O_SUB]
+    PDF 62200-52.00 Rev 00.PDF -> 62200-52.00 [DETALLE_O_SUB]
+    PDF 62200-53.00 Rev 00.PDF -> 62200-53.00 [DETALLE_O_SUB]
+    PDF 62200-54.00 Rev 00.PDF -> 62200-54.00 [DETALLE_O_SUB]
+    PDF 62200-60.00 Rev 00.PDF -> 62200-60.00 [DETALLE_O_SUB]
+  STEP 62200-1246-A01 Step 3D.STEP (4.7MB) products=131
+  roles IAM: {'OTRO': 32, 'PIEZA_CASCO': 43, 'PIEZA_TOP': 14, 'TOP': 6, 'SUB_A_CASCO': 12, 'TANQUE': 1, 'SEGM_WALL': 3, 'BASE': 1, 'CASCO_SHELL': 1}
+  contenedores: ['62200-1247-A05=TOP', '62200-1247-A01=TOP', '62200-1247-A04=TOP', '62200-1247-A06=TOP', '62200-1247-A02=TOP', '62200-1246-A01=TANQUE', '62200-1248-A03=SEGM_WALL', '62200-1247-A07=TOP', '62200-1248-A04=SEGM_WALL', '62200-1248-A02=BASE', '62200-1248-A01=CASCO_SHELL', '62200-1248-A06=SEGM_WALL']
+
+=== [10/11] 2211 - OTC 62201 TANK ===
+  Planos: 4. Planos
+  Archivos planos (.pdf/.dwg/.idw): 26
+    PDF 62201 - TANK MANUFACTURING REV.01.pdf -> (sin codigo tipico)
+    PDF 62201-46.00 Rev 00.PDF -> 62201-46.00 [TANQUE_GENERAL]
+    PDF 62201-47.00 Rev 00.PDF -> 62201-47.00 [TOP_COVER]
+    PDF 62201-47.01 Rev 00.PDF -> 62201-47.01 [TOP_COVER]
+    PDF 62201-48.00 Rev 01.PDF -> 62201-48.00 [CASCO_SHELL]
+    PDF 62201-50.00 Rev 00.PDF -> 62201-50.00 [DETALLE_O_SUB]
+    PDF 62201-51.00 Rev 00.PDF -> 62201-51.00 [DETALLE_O_SUB]
+    PDF 62201-52.00 Rev 00.PDF -> 62201-52.00 [DETALLE_O_SUB]
+    PDF 62201-53.00 Rev 00.PDF -> 62201-53.00 [DETALLE_O_SUB]
+    PDF 62201-54.00 Rev 00.PDF -> 62201-54.00 [DETALLE_O_SUB]
+    PDF 62201-60.00 Rev 00.PDF -> 62201-60.00 [DETALLE_O_SUB]
+    PDF SP-703  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-710  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-736  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-752  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-767  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-771 Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-772 Rev 01.pdf -> (sin codigo tipico)
+    PDF SP-773 Rev 01.pdf -> (sin codigo tipico)
+    PDF SP-774.pdf -> (sin codigo tipico)
+    PDF SP-792  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-799  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-800  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-851  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-852  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-855  Rev 00.PDF -> (sin codigo tipico)
+  STEP 62201-1246-A01 R1.STEP (8.9MB) products=88
+  roles IAM: {'PIEZA_CASCO': 29, 'OTRO': 19, 'PIEZA_TOP': 12, 'SUB_A_CASCO': 8, 'SEGM_WALL': 2, 'CASCO_SHELL': 1, 'TOP': 1}
+  contenedores: ['62201-1248-A05=SEGM_WALL', '62201-1248-A01=CASCO_SHELL', '62201-1247-A01=TOP', '62201-1248-A03=SEGM_WALL']
+
+=== [11/11] 2275 - OTC 62248 TANK ===
+  Planos: 4. Planos
+  Archivos planos (.pdf/.dwg/.idw): 21
+    PDF 62248 - Tank Manufacturing Rev.00.pdf -> (sin codigo tipico)
+    PDF 62248-46.00 Rev 00.PDF -> 62248-46.00 [TANQUE_GENERAL]
+    PDF 62248-47.00 Rev 00.PDF -> 62248-47.00 [TOP_COVER]
+    PDF 62248-48.00 Rev 00.PDF -> 62248-48.00 [CASCO_SHELL]
+    PDF 62248-51.00 Rev 00.PDF -> 62248-51.00 [DETALLE_O_SUB]
+    PDF 62248-58.00 Rev 00.PDF -> 62248-58.00 [OTRO_O_DETALLE]
+    PDF 62248-59.00 Rev 00.PDF -> 62248-59.00 [OTRO_O_DETALLE]
+    PDF SP-700  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-702  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-736  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-740  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-741  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-752  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-766  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-774 Rev 01.pdf -> (sin codigo tipico)
+    PDF SP-788  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-792  Rev 00.PDF -> (sin codigo tipico)
+    PDF SP-799  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-800  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-851  Rev 00.pdf -> (sin codigo tipico)
+    PDF SP-855  Rev 00.pdf -> (sin codigo tipico)
+  SIN STEP grande en 10. Solidos
+
+============================================================
+RESUMEN GLOBAL OTC
+============================================================
+Tanques OTC: 11
+Con 4. Planos: 11 | con PDF/DWG: 11 | con STEP: 10
+
+--- Codigos de dibujo (ultimos 2 digitos) ---
+  *-47.xx : 14 archivos  [TOP_COVER]
+  *-48.xx : 12 archivos  [CASCO_SHELL]
+  *-46.xx : 11 archivos  [TANQUE_GENERAL]
+  *-51.xx : 11 archivos  [DETALLE_O_SUB]
+  *-52.xx : 10 archivos  [DETALLE_O_SUB]
+  *-60.xx : 10 archivos  [DETALLE_O_SUB]
+  *-53.xx : 9 archivos  [DETALLE_O_SUB]
+  *-54.xx : 9 archivos  [DETALLE_O_SUB]
+  *-49.xx : 7 archivos  [OTRO]
+  *-59.xx : 5 archivos  [OTRO]
+  *-50.xx : 5 archivos  [DETALLE_O_SUB]
+  *-58.xx : 1 archivos  [OTRO]
+
+--- Roles IAM en STEPs ---
+  PIEZA_CASCO: 231
+  OTRO: 138
+  SUB_A_CASCO: 60
+  PIEZA_TOP: 55
+  SEGM_WALL: 17
+  TOP: 17
+  CASCO_SHELL: 5
+  BASE: 4
+  TANQUE: 3
+
+--- Ensamble *-xx48-A0N (casco) ---
+  A01: 5 menciones  [CASCO_SHELL]
+  A02: 4 menciones  [BASE]
+  A03: 5 menciones  [SEGM]
+  A04: 4 menciones  [SEGM]
+  A05: 4 menciones  [SEGM]
+  A06: 4 menciones  [SEGM]
+  A07: 2 menciones  [SUB_A]
+  A08: 5 menciones  [SUB_A]
+  A09: 4 menciones  [SUB_A]
+  A10: 4 menciones  [SUB_A]
+  A11: 4 menciones  [SUB_A]
+  A12: 2 menciones  [SUB_A]
+  A13: 2 menciones  [SUB_A]
+  A14: 6 menciones  [SUB_A]
+  A15: 6 menciones  [SUB_A]
+  A16: 3 menciones  [SUB_A]
+  A17: 1 menciones  [SUB_A]
+  A18: 4 menciones  [SUB_A]
+  A19: 4 menciones  [SUB_A]
+  A20: 1 menciones  [SUB_A]
+  A21: 2 menciones  [SUB_A]
+  A22: 2 menciones  [SUB_A]
+  A23: 1 menciones  [SUB_A]
+  A25: 1 menciones  [SUB_A]
+  A26: 1 menciones  [SUB_A]
+  A33: 1 menciones  [SUB_A]
+  A34: 2 menciones  [SUB_A]
+  A41: 1 menciones  [SUB_A]
+  A42: 1 menciones  [SUB_A]
+
+--- Ensamble *-xx47-A0N (tapa) ---
+  A01: 7
+  A02: 2
+  A03: 2
+  A04: 2
+  A05: 2
+  A06: 1
+  A07: 1
+
+--- Codigos estandar frecuentes (SP/SF/L...) ---
+  SP-800: 7
+  L871.CT: 6
+  SF-HC-01: 6
+  SP-752: 6
+  SP-851: 6
+  SP-855: 5
+  SP-852: 5
+  SP-788: 4
+  L845.RADVLV: 4
+  SF-NP-03: 4
+  SP-736: 3
+  SP-741: 3
+  SF-NP-01: 3
+  SP-774: 3
+  SP-771: 3
+  SP-799: 3
+  SP-702: 3
+  SP-792: 3
+  SP-742: 2
+  SP-767: 2
+  SP-798: 2
+  SP-894: 1
+  SP-711: 1
+  SP-801: 1
+  SP-776: 1
+  FT-BOX-02: 1
+  SP-703: 1
+  SP-740: 1
+  SF-NP-04: 1
+  SP-710: 1
+  SP-766: 1
+  SP-751: 1
+  SF-CP-02: 1
+  L843.RAD: 1
+  SP-772: 1
+  SP-773: 1
+  FT-BOX-04: 1
+
+--- Sufijos _NNN ---
+  sin_sufijo: 644
+
+--- Cobertura de planos 46/47/48 por proyecto ---
+  con *-46.xx: ['62140', '62147', '62154', '62175', '62176', '62177', '62178', '62200', '62201', '62248']
+  con *-47.xx: ['62140', '62147', '62154', '62175', '62176', '62177', '62178', '62200', '62201', '62248']
+  con *-48.xx: ['62140', '62147', '62154', '62175', '62176', '62177', '62178', '62200', '62201', '62248']
