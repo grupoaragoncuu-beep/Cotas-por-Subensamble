@@ -5,7 +5,8 @@
 '   1) Barrenos TYP en X e Y  →  XCENTRO / YCENTRO (+ _TYP)  [centro circulo/ovalo H|V]
 '   2) Ø por tipo de tamaño   →  HOLE## (circulo y ovalo separados; mm exactos ≥6 dec)
 '   3) Espesor               →  THK
-'   4) Auditoría COM al final → repara cotas malas (p.ej. paso entre barrenos)
+'   4) Auditoría COM al final → revalida XY/HOLE/THK; repara desfazadas
+'      y THK no desdoblados (recrea DESPLIEGUE_LADO flat + reacota)
 '
 ' NO genera LENGTH, WIDTH, Doblado ni Estañado.
 ' Lanza: Planos\_reacotar_barrenos_flat_corte.py

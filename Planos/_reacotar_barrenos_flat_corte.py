@@ -18,6 +18,7 @@ Inventor: machote activo + ensamble Board abierto.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import sys
 
@@ -362,8 +363,9 @@ def main() -> int:
         )
         print(f"    flujo ok={ok}")
 
-        # Auditoría COM: cotas malas (paso entre barrenos / redondeo) → reparar
-        print("[4b] auditoria COM XY + reparacion")
+        # Auditoría COM final: TODAS las cotas (XY + HOLE + THK).
+        # Revalida contra Inventor; repara desfazadas / THK no desdoblados.
+        print("[4b] auditoria COM completa (XY + HOLE + THK) + reparacion")
         try:
             from auditoria_cotas_flat_com import auditar_y_reparar_plano
             from generador_vistas import exportar_hojas_jpg
@@ -371,12 +373,33 @@ def main() -> int:
             audit_ok, reparadas = auditar_y_reparar_plano(inv, plano)
             print(f"    audit_ok={audit_ok} reparadas={len(reparadas)}")
             if reparadas:
-                print("    re-export JPG de hojas reparadas...")
+                print("    re-export JPG de hojas reparadas (y relacionadas)...")
+                # Match exacto por nombre de hoja base; incluir todas las
+                # DESPLIEGUE_* actuales de piezas tocadas.
+                permitidos = {str(r).upper() for r in reparadas}
+                piezas_tocadas = set()
+                for r in reparadas:
+                    u = str(r).upper()
+                    piezas_tocadas.add(
+                        re.sub(r"_DESPLIEGUE_.*$", "", u, flags=re.I)
+                    )
+                try:
+                    for i in range(1, int(plano.Sheets.Count) + 1):
+                        nom = str(plano.Sheets.Item(i).Name)
+                        up = nom.upper().rsplit(":", 1)[0]
+                        if "_DESPLIEGUE_" not in up:
+                            continue
+                        for p in piezas_tocadas:
+                            if p and p in up:
+                                permitidos.add(up)
+                                break
+                except Exception:
+                    pass
                 exportar_hojas_jpg(
                     inv,
                     plano,
                     carpeta_salida=carpeta_piezas,
-                    nombres_permitidos={r.upper() for r in reparadas},
+                    nombres_permitidos=permitidos,
                     nombre_job=JOB,
                 )
             if not audit_ok:
