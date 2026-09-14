@@ -81,6 +81,11 @@ Sub Main()
         Exit Sub
     End If
 
+    If EsProductoBoard(asmDoc) Then
+        LanzarFlujoBoard(invApp, planosDirFinal, titulo)
+        Exit Sub
+    End If
+
     Dim caraElegida As String = InputBox( _
         "Cara a procesar (prueba rapida de UNA etapa):" & vbCrLf & vbCrLf & _
         "  SEGM1  SEGM2  SEGM3  SEGM4" & vbCrLf & _
@@ -712,3 +717,72 @@ Function ResolverPythonExe(planosDir As String) As String
     If Not String.IsNullOrWhiteSpace(valor) Then Return valor
     Return "python"
 End Function
+
+' ------------------------------------------------------------
+' Desvío BOARD / GIGA tablero (sin picks de tanque)
+' ------------------------------------------------------------
+
+Function EsProductoBoard(asmDoc As AssemblyDocument) As Boolean
+    Try
+        Dim u As String =
+            ("" & asmDoc.DisplayName & " " & asmDoc.FullFileName).ToUpperInvariant()
+        If u.Contains("BOARD") Then Return True
+        If System.Text.RegularExpressions.Regex.IsMatch(
+            u, "\d{3,5}\s*[-_]?\s*BOARD") Then
+            Return True
+        End If
+    Catch
+    End Try
+    Return False
+End Function
+
+Sub LanzarFlujoBoard( _
+    invApp As Inventor.Application, _
+    planosDirFinal As String, _
+    titulo As String)
+
+    Dim scriptPath As String =
+        System.IO.Path.Combine(planosDirFinal, "generador_board.py")
+    If Not System.IO.File.Exists(scriptPath) Then
+        System.Windows.Forms.MessageBox.Show(
+            "No se encontro generador_board.py en:" & vbCrLf & planosDirFinal,
+            titulo,
+            System.Windows.Forms.MessageBoxButtons.OK,
+            System.Windows.Forms.MessageBoxIcon.Error)
+        Exit Sub
+    End If
+
+    Dim pythonExeFinal As String = ResolverPythonExe(planosDirFinal)
+    Dim psi As New System.Diagnostics.ProcessStartInfo()
+    psi.FileName = pythonExeFinal
+    psi.Arguments = """" & scriptPath & """"
+    psi.WorkingDirectory = planosDirFinal
+    psi.UseShellExecute = False
+    psi.CreateNoWindow = False
+
+    Try
+        Dim proc As System.Diagnostics.Process =
+            System.Diagnostics.Process.Start(psi)
+        proc.WaitForExit()
+        If proc.ExitCode = 0 Then
+            System.Windows.Forms.MessageBox.Show(
+                "Producto BOARD detectado: flujo tablero exportado." & vbCrLf &
+                "Revisa Planos\JPG\<job>\BOARD\<kit>\FRONT|BACK|TOP|BOTTOM|RIGHT|LEFT\.",
+                titulo,
+                System.Windows.Forms.MessageBoxButtons.OK,
+                System.Windows.Forms.MessageBoxIcon.Information)
+        Else
+            System.Windows.Forms.MessageBox.Show(
+                "El flujo BOARD termino con errores. Revisa la ventana CMD.",
+                titulo,
+                System.Windows.Forms.MessageBoxButtons.OK,
+                System.Windows.Forms.MessageBoxIcon.Warning)
+        End If
+    Catch ex As Exception
+        System.Windows.Forms.MessageBox.Show(
+            "No se pudo lanzar generador_board.py:" & vbCrLf & ex.Message,
+            titulo,
+            System.Windows.Forms.MessageBoxButtons.OK,
+            System.Windows.Forms.MessageBoxIcon.Error)
+    End Try
+End Sub

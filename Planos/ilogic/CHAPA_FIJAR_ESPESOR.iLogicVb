@@ -1,0 +1,158 @@
+' COTAS ABIGAIL - Fijar espesor Sheet Metal (prueba THK)
+' Regla externa: CHAPA_FIJAR_ESPESOR
+'
+' Uso:
+'   1) Abre la pieza (.ipt), p. ej. VT-5676-HV Parking Stands.
+'   2) Ejecuta esta regla.
+'   3) Confirma / escribe el espesor real en pulgadas (ej. 0.067).
+'   4) Guarda la pieza.
+'   5) Vuelve a correr COTAS_POR_SEG_PIEZAS en el segmento.
+'
+' Efecto: convierte a Sheet Metal si hace falta y fija Thickness
+' para que THK.py lea sm_def.Thickness (ya no invente THK desde bbox).
+
+Imports System.Windows.Forms
+
+Sub Main()
+    Const kPartDocumentObject As Integer = 12290
+    Dim titulo As String = "COTAS ABIGAIL - Fijar espesor CHAPA"
+
+    Dim invApp As Inventor.Application = ThisApplication
+    If invApp.ActiveDocument Is Nothing OrElse
+       invApp.ActiveDocument.DocumentType <> kPartDocumentObject Then
+        MessageBox.Show(
+            "Abre una PIEZA (.ipt) y dejala como ventana activa." & vbCrLf &
+            "Ejemplo: VT-5676-HV Parking Stands.ipt",
+            titulo, MessageBoxButtons.OK, MessageBoxIcon.Warning)
+        Exit Sub
+    End If
+
+    Dim partDoc As PartDocument = invApp.ActiveDocument
+    Dim nombrePieza As String = partDoc.DisplayName
+
+    ' --- Convertir a Sheet Metal si aun es pieza estandar ---
+    Dim yaEsChapa As Boolean = False
+    Try
+        Dim prueba As SheetMetalComponentDefinition =
+            CType(partDoc.ComponentDefinition, SheetMetalComponentDefinition)
+        yaEsChapa = (prueba IsNot Nothing)
+    Catch
+        yaEsChapa = False
+    End Try
+
+    If Not yaEsChapa Then
+        Dim rConv As DialogResult = MessageBox.Show(
+            "La pieza NO es Sheet Metal:" & vbCrLf &
+            "  " & nombrePieza & vbCrLf & vbCrLf &
+            "¿Convertir a Chapa (Sheet Metal) ahora?",
+            titulo, MessageBoxButtons.YesNo, MessageBoxIcon.Question)
+        If rConv <> DialogResult.Yes Then Exit Sub
+
+        Try
+            ' SubType Sheet Metal (GUID estandar de Inventor)
+            partDoc.SubType = "{9C464203-9BAE-11D3-8BAD-0060B0CE6BB4}"
+        Catch ex As Exception
+            MessageBox.Show(
+                "No se pudo convertir a Sheet Metal:" & vbCrLf & ex.Message & vbCrLf & vbCrLf &
+                "Alternativa manual:" & vbCrLf &
+                "  Cinta Chapa → Convertir a chapa / Valores por defecto.",
+                titulo, MessageBoxButtons.OK, MessageBoxIcon.Error)
+            Exit Sub
+        End Try
+    End If
+
+    Dim smDef As SheetMetalComponentDefinition = Nothing
+    Try
+        smDef = CType(partDoc.ComponentDefinition, SheetMetalComponentDefinition)
+    Catch ex As Exception
+        MessageBox.Show(
+            "Sigue sin ser SheetMetalComponentDefinition:" & vbCrLf & ex.Message,
+            titulo, MessageBoxButtons.OK, MessageBoxIcon.Error)
+        Exit Sub
+    End Try
+
+    ' --- Espesor actual ---
+    Dim actualIn As Double = 0
+    Try
+        actualIn = smDef.Thickness.Value / 2.54
+    Catch
+        actualIn = 0
+    End Try
+
+    Dim sugerido As String = "0.067"
+    If actualIn > 0.0001 AndAlso actualIn < 0.45 Then
+        sugerido = Format(actualIn, "0.###")
+    End If
+
+    Dim entrada As String = InputBox(
+        "Pieza: " & nombrePieza & vbCrLf & vbCrLf &
+        "Espesor actual (Thickness): " & Format(actualIn, "0.####") & " in" & vbCrLf & vbCrLf &
+        "Escribe el espesor REAL de pared / chapa en pulgadas." & vbCrLf &
+        "Parking Stands tipico: 0.067" & vbCrLf & vbCrLf &
+        "NO uses el alto del doblez (0.875) — ese es ALTO, no THK.",
+        titulo,
+        sugerido)
+
+    If String.IsNullOrWhiteSpace(entrada) Then Exit Sub
+    entrada = entrada.Trim().Replace(",", ".")
+
+    Dim espesorIn As Double
+    If Not Double.TryParse(
+            entrada,
+            System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture,
+            espesorIn) Then
+        MessageBox.Show(
+            "Valor no numerico: " & entrada,
+            titulo, MessageBoxButtons.OK, MessageBoxIcon.Warning)
+        Exit Sub
+    End If
+
+    If espesorIn <= 0 OrElse espesorIn > 2.0 Then
+        MessageBox.Show(
+            "Espesor fuera de rango tipico (0 .. 2 in): " & espesorIn.ToString(),
+            titulo, MessageBoxButtons.OK, MessageBoxIcon.Warning)
+        Exit Sub
+    End If
+
+    If espesorIn >= 0.5 Then
+        Dim rWarn As DialogResult = MessageBox.Show(
+            "AVISO: " & Format(espesorIn, "0.###") & " in parece ALTO de perfil," & vbCrLf &
+            "no espesor de pared (THK suele ser < 0.5 in)." & vbCrLf & vbCrLf &
+            "¿Seguro que quieres fijar ese valor como Thickness?",
+            titulo, MessageBoxButtons.YesNo, MessageBoxIcon.Warning)
+        If rWarn <> DialogResult.Yes Then Exit Sub
+    End If
+
+    Try
+        ' Expression en pulgadas: Inventor lo convierte a unidades internas.
+        smDef.Thickness.Expression = espesorIn.ToString(
+            "0.####", System.Globalization.CultureInfo.InvariantCulture) & " in"
+        partDoc.Update()
+    Catch ex As Exception
+        MessageBox.Show(
+            "No se pudo fijar Thickness:" & vbCrLf & ex.Message,
+            titulo, MessageBoxButtons.OK, MessageBoxIcon.Error)
+        Exit Sub
+    End Try
+
+    Dim leidoIn As Double = 0
+    Try
+        leidoIn = smDef.Thickness.Value / 2.54
+    Catch
+    End Try
+
+    Dim msg As String =
+        "Thickness fijado." & vbCrLf & vbCrLf &
+        "Pieza: " & nombrePieza & vbCrLf &
+        "THK (Thickness): " & Format(leidoIn, "0.####") & " in" & vbCrLf & vbCrLf &
+        "Siguiente:" & vbCrLf &
+        "  1) Guarda la pieza (Ctrl+S)." & vbCrLf &
+        "  2) Si el .ipt vive en el tanque, actualiza el ensamble." & vbCrLf &
+        "  3) Corre COTAS_POR_SEG_PIEZAS en el segmento." & vbCrLf & vbCrLf &
+        "Nota: si el solido no es chapa nativa (solo Sólido1)," & vbCrLf &
+        "Thickness sirve como ancla para Abigail; el desarrollo" & vbCrLf &
+        "plano puede no desplegar hasta modelar Face/Flange."
+
+    MessageBox.Show(msg, titulo, MessageBoxButtons.OK, MessageBoxIcon.Information)
+End Sub

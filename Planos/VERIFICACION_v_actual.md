@@ -79,14 +79,14 @@ Comportamiento **esperado** por tanque (base contra la que comparar el log real)
 | `SUNBELT TANK 3,750KVA.stp` | SUNBELT | Contenedor geométrico de 4 paredes + tapa por nombre; hay `Tapa trasera ATC` que NO es superior — la selección por altura (+cover) debe elegir la correcta | **SÍ** | Universalidad no-Vantran, español. Si TOP sale con "Tapa trasera", es bug: revisar `_detectar_tapa_como_segmento`. |
 | `62154-1246-A01.step` | OTC 62154 | Contenedor geométrico + tapa por nombre débil (`AC-CG-02_COVER ON`) o fallback +Y | **SÍ** | OTC con match tenue por nombre. |
 | `62176-1246-A01 LIMPIO Y MARCADO.iam` | OTC 62176 | Contenedor geométrico + **fallback geométrico +Y** (la tapa `62176-1247-A01.iam` no tiene keyword) | **SÍ** (crítico) | Caso crítico del fallback geométrico. Si TOP se omite aquí, el fallback no funciona y hay que ajustarlo. |
-| `9919-Board 1.STEP` | BOARD (tablero) | Debe fallar en "no se detectaron cuatro paredes reales" | **N/A** | Edge case. Confirmar que el flujo rechaza correctamente y no exporta basura. |
+| `9919-Board 1.STEP` | BOARD (tablero) | Gate → flujo `generador_board.py` (`JPG/.../BOARD/`) | **BOARD** | Ya no se espera rechazo ciego: debe desviarse al flujo tablero. |
 
 Checklist:
 - [ ] Vantran corrido y aprobado como caso de oro.
 - [ ] Sunbelt: TOP corresponde a la tapa superior real (no a `Tapa trasera`).
 - [ ] OTC 62154: TOP generado.
 - [ ] **OTC 62176: TOP generado por fallback geométrico** (verificar log: debe decir `TOP <- ... (por geometría (+cover), ...)`).
-- [ ] Board 9919: rechazado con mensaje claro, sin JPG parciales.
+- [ ] Board 9919: desviado a `BOARD/` con JPG de kits (raíz + paneles), sin cotas de tanque.
 
 ### D. Higiene del machote
 - [ ] Al terminar, la hoja plantilla del machote es la activa.

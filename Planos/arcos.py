@@ -1,7 +1,11 @@
 import math
 import win32com.client
 from inventor_com import conectar_inventor
-from cota_estilo import aplicar_estilo_texto_cota, texto_cota_limpio
+from cota_estilo import (
+    aplicar_estilo_texto_cota,
+    asegurar_unidad_pulgadas,
+    texto_cota_limpio,
+)
 
 EPS = 0.0001
 
@@ -73,8 +77,8 @@ def _texto_valor(hoja, valor_modelo):
         elif texto.startswith("."):
             texto = "0" + texto
 
-        return texto
-    except:
+        return asegurar_unidad_pulgadas(texto)
+    except Exception:
         texto = f"{valor_modelo:.2f}".strip()
 
         if texto.startswith("-."):
@@ -82,7 +86,7 @@ def _texto_valor(hoja, valor_modelo):
         elif texto.startswith("."):
             texto = "0" + texto
 
-        return texto
+        return asegurar_unidad_pulgadas(texto)
 
 
 def _obtener_o_crear_sketch(hoja, nombre="__AUTO_ARCOS_SKETCH__"):

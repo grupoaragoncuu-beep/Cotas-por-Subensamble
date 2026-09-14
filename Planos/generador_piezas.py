@@ -1,9 +1,14 @@
 """
-Flujo de PIEZAS_ACOTADAS únicamente.
+Flujo de PIEZAS_ACOTADAS (+ ensambles independientes en corrida completa).
 
 Genera las cotas por pieza (largo/ancho/thk/diámetros). Con
 ``--seleccion seleccion_caras.json`` (Top Cover + SEGM1..4) organiza la
 salida en ``PIEZAS_ACOTADAS/<SEGM*|TOP>/<CLASIFICACIÓN>/<PIEZA>/``.
+
+Tras las piezas (solo corrida completa, sin ``--solo``), el MVP bbox de
+kits en ``ENSAMBLES_INDEPENDIENTES/`` queda **apagado por defecto**
+(activar con ``ENSAMBLES_INDEPENDIENTES=1``). El instructivo de armado
+irá en regla iLogic propia.
 
 Con ``--solo SEGM2`` (COTAS_POR_SEG_PIEZAS) solo acota las piezas del
 catálogo de esa cara — prueba rápida sin el tanque completo.
@@ -75,16 +80,17 @@ def _limpiar_solo_cara_piezas(carpeta_piezas, cara):
 def _reorganizar_clasificacion_dentro_caras(carpeta_piezas, mapa_clasificacion):
     """
     Tras ``_reorganizar_piezas_por_cara``, anida cada JPG en
-    ``<CARA>/<CLASIFICACIÓN>/<PIEZA>/``.
+    ``<CARA>/<CLASIFICACIÓN>/<PIEZA>/`` (Corte anida Corte/Doblado/Estañado).
     """
     from generador_tanque_completo import (
         SUBCARPETA_SIN_CLASIFICAR,
         SUBCARPETAS_CLASIFICACION_PIEZAS,
         SUBCARPETA_OTROS_PIEZAS,
         _clasificacion_para_pieza,
-        _extraer_pieza_de_jpg,
+        _destino_dirs_clasificacion,
         _limpiar_carpetas_cara_vacias_y_legacy,
-        _nombre_carpeta_pieza,
+        STAGING_DESPLIEGUE,
+        STAGING_ESTANIADO,
     )
 
     caras = list(SUBCARPETAS_CARA_SELECCION) + [SUBCARPETA_OTROS_PIEZAS]
@@ -99,8 +105,20 @@ def _reorganizar_clasificacion_dentro_caras(carpeta_piezas, mapa_clasificacion):
             for nombre in files:
                 if nombre.lower().endswith(".jpg"):
                     jpgs.append(os.path.join(root, nombre))
+        # Staging bajo la cara (si exportó ahí).
+        for staging in (STAGING_DESPLIEGUE, STAGING_ESTANIADO):
+            staging_dir = os.path.join(cara_dir, staging)
+            if os.path.isdir(staging_dir):
+                for nombre in os.listdir(staging_dir):
+                    if nombre.lower().endswith(".jpg"):
+                        jpgs.append(os.path.join(staging_dir, nombre))
+
         for ruta in jpgs:
             nombre = os.path.basename(ruta)
+            staging = None
+            parent = os.path.basename(os.path.dirname(ruta))
+            if parent in (STAGING_DESPLIEGUE, STAGING_ESTANIADO):
+                staging = parent
             clase = _clasificacion_para_pieza(nombre, mapa_clasificacion)
             if clase and clase.casefold() in clases_validas:
                 destino_clase = next(
@@ -110,9 +128,9 @@ def _reorganizar_clasificacion_dentro_caras(carpeta_piezas, mapa_clasificacion):
                 )
             else:
                 destino_clase = SUBCARPETA_SIN_CLASIFICAR
-            pieza_folder = _nombre_carpeta_pieza(_extraer_pieza_de_jpg(nombre))
-            destino_dir = os.path.join(
-                cara_dir, destino_clase, pieza_folder
+            # Destino relativo a cara_dir (no a PIEZAS_ACOTADAS raíz).
+            destino_dir, _clave, _ = _destino_dirs_clasificacion(
+                cara_dir, destino_clase, nombre, staging
             )
             try:
                 os.makedirs(destino_dir, exist_ok=True)
@@ -124,17 +142,16 @@ def _reorganizar_clasificacion_dentro_caras(carpeta_piezas, mapa_clasificacion):
                 shutil.move(ruta, destino)
             except OSError as err:
                 print(
-                    f"AVISO: no se pudo anidar '{nombre}' en "
-                    f"{cara}/{destino_clase}/{pieza_folder}/: {err}"
+                    f"AVISO: no se pudo mover '{nombre}' en {cara}/: {err}"
                 )
-        for root, dirs, files in os.walk(cara_dir, topdown=False):
-            if root == cara_dir:
-                continue
-            try:
-                if not os.listdir(root):
-                    os.rmdir(root)
-            except OSError:
-                pass
+
+        for staging in (STAGING_DESPLIEGUE, STAGING_ESTANIADO):
+            staging_dir = os.path.join(cara_dir, staging)
+            if os.path.isdir(staging_dir):
+                try:
+                    shutil.rmtree(staging_dir, ignore_errors=True)
+                except OSError:
+                    pass
 
     _limpiar_carpetas_cara_vacias_y_legacy(carpeta_piezas)
 
@@ -155,8 +172,39 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
             print("ERROR: no se pudo recuperar el plano o ensamble activo.")
             return False
 
+        # BOARD: Abigail acota TODAS las piezas (cara mayor → L/A; SM → THK).
+        # Cobre ABB/GENE/RLG: además 1× captura SIN_COTA desde FRENTE.
+        # El desvío a kits ViewCube es solo para reglas de caras.
+        es_board = False
+        try:
+            from producto_tipo import clasificar_producto, aplicar_unidad_producto
+
+            info = clasificar_producto(ensamble)
+            print(
+                f"  Producto: {info.get('tipo')} / {info.get('familia')} "
+                f"— {info.get('motivo')}"
+            )
+            aplicar_unidad_producto(ensamble=ensamble, info=info)
+            if info.get("tipo") == "BOARD":
+                es_board = True
+                print(
+                    "  BOARD: flujo PIEZAS completo; "
+                    "ABB/GENE/RLG → cota + SIN_COTA."
+                )
+        except Exception as exc_cls:
+            print(f"  AVISO clasificar producto: {exc_cls}")
+
         carpeta_tanque = _carpeta_salida_tanque(plano, ensamble)
         carpeta_piezas = os.path.join(carpeta_tanque, CARPETA_PIEZAS_ACOTADAS)
+
+        try:
+            from cotas_dossier_registro import iniciar_sesion_dossier
+            from nomenclatura_capturas import nombre_job_desde_ensamble
+
+            job_tok = nombre_job_desde_ensamble(ensamble)
+            iniciar_sesion_dossier(job_tok)
+        except Exception as exc_dos:
+            print(f"  AVISO dossier sesión: {exc_dos}")
 
         incremental = os.environ.get("PIEZAS_INCREMENTAL", "").strip() in (
             "1",
@@ -219,6 +267,14 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
                 print(f"ERROR: catálogo vacío para {solo}.")
                 return False
 
+        # BOARD: acota TODAS las piezas únicas. Cobre (ABB/GENE/RLG) = solo
+        # doble captura SIN_COTA al exportar; no limita qué se procesa.
+        if es_board and catalogo_filtro is None:
+            print(
+                "  BOARD: alcance completo (todas las piezas únicas). "
+                "Cobre ABB/GENE/RLG → JPG + SIN_COTA."
+            )
+
         print(
             "  Leyendo clasificación (iProperty) de cada pieza del ensamble..."
         )
@@ -231,6 +287,21 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
             )
             if ruta_mapa:
                 print(f"  Mapa por clasificación persistido en: {ruta_mapa}")
+            try:
+                import creador_vistas as _cv_corte
+
+                nombres_corte = set()
+                for clase, piezas_c in (mapa_clasificacion or {}).items():
+                    if str(clase).casefold() == "corte":
+                        nombres_corte.update(piezas_c or [])
+                _cv_corte.configurar_piezas_corte(nombres_corte)
+                if nombres_corte:
+                    print(
+                        f"  Corte anidado: {len(nombres_corte)} piezas → "
+                        "flat + Doblado (+ Estañado cobre)."
+                    )
+            except Exception as exc_corte:
+                print(f"  AVISO configurar piezas Corte: {exc_corte}")
         else:
             print(
                 "  AVISO: la detección de clasificación devolvió mapa vacío. "
@@ -288,8 +359,50 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
                     )
             except Exception as err:
                 print(f"AVISO: fallo en reorganización de PIEZAS_ACOTADAS: {err}")
+
+            try:
+                from cotas_dossier_registro import publicar_y_sincronizar_dossier
+
+                publicar_y_sincronizar_dossier(carpeta_piezas)
+            except Exception as err_dos:
+                print(f"AVISO dossier sync post-reorg: {err_dos}")
+
+        # Kits OTC: solo en tanque completo. En BOARD no aplica.
+        if not solo and not es_board:
+            try:
+                from ensambles_independientes import (
+                    ejecutar_ensambles_independientes,
+                )
+
+                ok_ens = ejecutar_ensambles_independientes(
+                    inv_app,
+                    ensamble,
+                    plano,
+                    carpeta_tanque,
+                    incremental=incremental,
+                )
+                if not ok_ens:
+                    print(
+                        "AVISO: ensambles independientes terminó con errores "
+                        "(las piezas pueden estar OK)."
+                    )
+            except Exception as err:
+                print(f"AVISO: ensambles independientes no ejecutado: {err}")
+
         return ok
     finally:
+        try:
+            from cota_estilo import set_unidad_cota
+
+            set_unidad_cota("in")
+        except Exception:
+            pass
+        try:
+            from creador_vistas import set_nombre_pieza_completo
+
+            set_nombre_pieza_completo(False)
+        except Exception:
+            pass
         if inv_app is not None:
             _reactivar_machote(inv_app)
         pythoncom.CoUninitialize()
@@ -300,18 +413,21 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
                     f"(PIEZAS_ACOTADAS\\{solo}\\)."
                 )
             else:
-                print("PROCESO COMPLETO: piezas acotadas exportadas.")
+                print(
+                    "PROCESO COMPLETO: piezas acotadas exportadas "
+                    "(+ ENSAMBLES_INDEPENDIENTES si hubo kits)."
+                )
 
 
 if __name__ == "__main__":
     ruta = _parse_ruta_seleccion(sys.argv[1:])
     solo = _parse_solo(sys.argv[1:])
+    # BOARD / cobre: iLogic lanza sin --seleccion (sin picks TOP/SEGM).
+    # Tanque: la regla pasa --seleccion <json> como siempre.
     if not ruta:
         print(
-            "ERROR: Falta --seleccion <seleccion_caras.json>\n"
-            "Usa COTAS_ILOGIC_ABIGAIL (todas las caras) o "
-            "COTAS_POR_SEG_PIEZAS (una cara: --solo SEGM1|…|TOP|BASE).",
+            "AVISO: sin --seleccion; se acotan piezas del ensamble abierto "
+            "(sin mapa SEGM/TOP). Uso típico: BOARD / GIGA.",
             flush=True,
         )
-        sys.exit(1)
-    sys.exit(0 if ejecutar(ruta_seleccion=ruta, solo_cara=solo) else 1)
+    sys.exit(0 if ejecutar(ruta_seleccion=ruta or None, solo_cara=solo) else 1)

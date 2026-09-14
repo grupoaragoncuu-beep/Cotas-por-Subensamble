@@ -238,6 +238,30 @@ def _convertir_nombre_tecnico_hoja(
     elif "_DIAMETRO_H" in base_up:
         pass  # barrenos de placa (DIAMETRO_H01, …)
 
+    elif "_XCENTRO" in base_up or "_YCENTRO" in base_up:
+        pass  # barrenos flat X/Y (+ TYP) desde esquina IL
+
+    elif "_DESPLIEGUE_LADO" in base:
+        if base_up in hojas_lado_sin_thk_bases:
+            pass
+        else:
+            base = base.replace("_DESPLIEGUE_LADO", "_DESPLIEGUE_THK")
+
+    elif es_diametro and "_DESPLIEGUE_FRENTE_1" in base:
+        base = base.replace("_DESPLIEGUE_FRENTE_1", "_DESPLIEGUE_DIAMETRO_EXTERIOR")
+
+    elif es_diametro and "_DESPLIEGUE_FRENTE_2" in base:
+        base = base.replace("_DESPLIEGUE_FRENTE_2", "_DESPLIEGUE_DIAMETRO_INTERIOR")
+
+    elif "_DESPLIEGUE_FRENTE_1" in base:
+        base = base.replace("_DESPLIEGUE_FRENTE_1", "_DESPLIEGUE_LARGO")
+
+    elif "_DESPLIEGUE_FRENTE_2" in base:
+        base = base.replace("_DESPLIEGUE_FRENTE_2", "_DESPLIEGUE_ANCHO")
+
+    elif "_ESTANIADO" in base_up:
+        pass  # captura SIN_COTA isométrica; no renombrar
+
     elif "_LADO" in base:
         # No renombramos a _THK cuando el resolver de THK falló para esta hoja.
         if base_up in hojas_lado_sin_thk_bases:
@@ -349,20 +373,38 @@ def renombrar_hojas_finales(doc, nombres_permitidos=None, hojas_lado_sin_thk=Non
 # Sufijos técnicos que pueden aparecer en JPGs ya exportados. Usado para el
 # modo incremental (F) que detecta piezas ya listas.
 _SUFIJOS_JPG_PIEZA_EXPORTADA = (
+    "LENGTH",
+    "WIDTH",
+    "BROAD",  # legacy
+    "THK",
+    "HEIGHT",
+    "LEG",
+    "OD",
+    "ID",
+    "XCENTRO_TYP",
+    "YCENTRO_TYP",
+    "XCENTRO",
+    "YCENTRO",
+    r"HOLE\d{2}",
     "DIAMETRO_EXTERIOR",
     "DIAMETRO_INTERIOR",
     "DIAMETRO_H\\d{2}",
     "LARGO_PATA",
     "ANCHO",
     "LARGO",
-    "THK",
     "ALTO",
     "FRENTE_1",
     "FRENTE_2",
     "LADO",
 )
 _RE_JPG_PIEZA = re.compile(
-    r"^(?P<pieza>.+?)_(?:" + "|".join(_SUFIJOS_JPG_PIEZA_EXPORTADA) + r")(?:_\d+)?$",
+    r"^(?P<pieza>.+?)_(?:" + "|".join(_SUFIJOS_JPG_PIEZA_EXPORTADA) + r")(?:_\d+(?:\.\d+)?)?$",
+    re.IGNORECASE,
+)
+_RE_JPG_PIEZA_JOB = re.compile(
+    r"^.+?__(?P<pieza>.+?)__(?:"
+    + "|".join(_SUFIJOS_JPG_PIEZA_EXPORTADA)
+    + r")_\d+(?:\.\d+)?$",
     re.IGNORECASE,
 )
 
@@ -371,6 +413,10 @@ def _acumular_pieza_desde_archivo(nombre_archivo, out):
     if not nombre_archivo.lower().endswith(".jpg"):
         return
     base = os.path.splitext(os.path.basename(nombre_archivo))[0]
+    m = _RE_JPG_PIEZA_JOB.match(base)
+    if m:
+        out.add(m.group("pieza"))
+        return
     m = _RE_JPG_PIEZA.match(base)
     if m:
         out.add(m.group("pieza"))
@@ -920,6 +966,129 @@ def _hoja_tiene_nota_thk(hoja):
     return False
 
 
+def _leer_valor_cota_hoja(hoja):
+    """
+    Valor numérico de la cota principal de la hoja (como se ve en el JPG).
+
+    Prioridad: GeneralDimension.ModelValue → texto de la cota → nota THK=.
+    Devuelve string limpio listo para el sufijo del archivo (p. ej. '82', '0.5').
+    """
+    try:
+        from cota_estilo import texto_cota_limpio
+    except Exception:
+        texto_cota_limpio = None
+    try:
+        from nomenclatura_capturas import formatear_valor_en_nombre
+    except Exception:
+        formatear_valor_en_nombre = None
+
+    def _fmt(texto_o_num):
+        if formatear_valor_en_nombre is not None:
+            return formatear_valor_en_nombre(texto_o_num)
+        return str(texto_o_num).strip() or None
+
+    # 1) Dimensiones asociativas: tomar la de mayor ModelValue (cota principal).
+    mejor_cm = None
+    mejor_txt = None
+    try:
+        dims = hoja.DrawingDimensions.GeneralDimensions
+        for i in range(1, int(dims.Count) + 1):
+            dim = dims.Item(i)
+            try:
+                mv = abs(float(dim.ModelValue))
+            except Exception:
+                mv = None
+            txt = None
+            if mv is not None and texto_cota_limpio is not None:
+                try:
+                    txt = texto_cota_limpio(mv, hoja)
+                except Exception:
+                    txt = None
+            if not txt:
+                try:
+                    txt = str(dim.Text.Text or "").strip()
+                except Exception:
+                    try:
+                        txt = str(getattr(dim.Text, "FormattedText", "") or "")
+                    except Exception:
+                        txt = None
+            if mv is not None and (mejor_cm is None or mv > mejor_cm):
+                mejor_cm = mv
+                mejor_txt = txt or mv
+    except Exception:
+        pass
+
+    if mejor_txt is not None:
+        out = _fmt(mejor_txt)
+        if out and out != "0":
+            return out
+
+    # 2) Nota tipográfica THK = X.XXX in  /  XY=valor (barrenos sketch)
+    try:
+        notes = hoja.DrawingNotes.GeneralNotes
+        for i in range(1, int(notes.Count) + 1):
+            try:
+                txt = str(notes.Item(i).Text or "")
+            except Exception:
+                continue
+            up = txt.upper()
+            if "THK" in up and any(ch.isdigit() for ch in txt):
+                out = _fmt(txt)
+                if out and out != "0":
+                    return out
+            if up.startswith("XY=") and any(ch.isdigit() for ch in txt):
+                out = _fmt(txt.split("=", 1)[-1])
+                if out and out != "0":
+                    return out
+    except Exception:
+        pass
+
+    # 3) Texto de sketch (método subensamble / barrenos XCENTRO-YCENTRO)
+    try:
+        sketches = hoja.Sketches
+    except Exception:
+        sketches = None
+    if sketches is None:
+        try:
+            sketches = hoja.DrawingSketches
+        except Exception:
+            sketches = None
+    if sketches is not None:
+        mejor_len = -1
+        mejor_sk = None
+        try:
+            for i in range(1, int(sketches.Count) + 1):
+                sk = sketches.Item(i)
+                try:
+                    boxes = sk.TextBoxes
+                except Exception:
+                    continue
+                for j in range(1, int(boxes.Count) + 1):
+                    try:
+                        raw = str(boxes.Item(j).Text or "").strip()
+                    except Exception:
+                        try:
+                            raw = str(
+                                getattr(boxes.Item(j), "FormattedText", "") or ""
+                            )
+                        except Exception:
+                            continue
+                    if not raw or not any(ch.isdigit() for ch in raw):
+                        continue
+                    # Quitar sufijo TYP para el nombre de archivo
+                    limpio = raw.upper().replace("TYP", " ").strip()
+                    out = _fmt(limpio)
+                    if out and out != "0" and len(out) >= mejor_len:
+                        mejor_len = len(out)
+                        mejor_sk = out
+        except Exception:
+            pass
+        if mejor_sk:
+            return mejor_sk
+
+    return None
+
+
 def _hoja_exportable(hoja, nombre_hoja):
     """
     Gate anti-JPG vacío / solo-nota.
@@ -927,8 +1096,9 @@ def _hoja_exportable(hoja, nombre_hoja):
     Exige geometría 2D en la vista y al menos una cota asociativa para
     hojas de cotas (LARGO/ANCHO/THK/ALTO/PATA/DIÁMETRO*).
 
-    Excepción: hojas ``_THK`` pueden exportarse con nota ``THK = …``
-    cuando el espesor solo existe en el modelo (Parking / Tierra cara).
+    Excepción: hojas ``_THK`` con nota ``THK = …`` solo si el valor es
+    espesor plausible (Sheet Metal / pared). Notas que son ALTO de U
+    (p. ej. 0.875) no se exportan como THK.
     """
     nombre_up = str(nombre_hoja).upper()
     try:
@@ -942,10 +1112,36 @@ def _hoja_exportable(hoja, nombre_hoja):
         return False, "sin geometría 2D"
     try:
         minx, maxx, miny, maxy = bbox
-        if (maxx - minx) < 0.05 or (maxy - miny) < 0.05:
+        bw = maxx - minx
+        bh = maxy - miny
+        if bw < 0.05 or bh < 0.05:
             return False, "bbox 2D degenerado"
     except Exception:
         return False, "bbox inválido"
+
+    # HEIGHT/LEG clonados: rechazar si la pieza ocupa < 3 % del sheet
+    # (JPG puntito / solo cota desfasada).
+    if any(s in nombre_up for s in ("_ALTO", "_LARGO_PATA", "_HEIGHT", "_LEG")):
+        try:
+            sw = float(hoja.Width)
+            sh = float(hoja.Height)
+            if sw > 0 and sh > 0:
+                cob = (bw * bh) / (sw * sh)
+                if cob < 0.03:
+                    return False, f"pieza demasiado pequeña en sheet ({cob:.4f})"
+        except Exception:
+            pass
+        # Si hay cotas pero la pieza es << bbox de cotas, el crop saldrá
+        # solo con líneas de cota.
+        try:
+            bc = _obtener_bbox_cotas(hoja)
+            if bc is not None:
+                cw = max(1e-6, bc[1] - bc[0])
+                ch = max(1e-6, bc[3] - bc[2])
+                if (bw * bh) < 0.04 * (cw * ch):
+                    return False, "pieza << cotas (encuadre inválido)"
+        except Exception:
+            pass
 
     es_cota = any(
         s in nombre_up
@@ -962,9 +1158,77 @@ def _hoja_exportable(hoja, nombre_hoja):
     )
     if es_cota and not _hoja_tiene_cota_asociativa(hoja):
         if "_THK" in nombre_up and _hoja_tiene_nota_thk(hoja):
+            valor = _leer_valor_cota_hoja(hoja)
+            try:
+                v = float(str(valor).replace(",", "."))
+            except Exception:
+                v = None
+            # Sin cota asociativa, rechazar notas tipo ALTO de perfil U.
+            if v is not None and v >= 0.5:
+                return False, "nota THK sospechosa (>=0.5 in sin cota asociativa)"
             return True, ""
         return False, "sin GeneralDimension (posible solo-nota)"
     return True, ""
+
+
+def _borrar_cotas_visibles_hoja(hoja):
+    """
+    Elimina cotas/notas de la hoja para la 2ª captura COBRE (SIN_COTA).
+
+    La hoja del lote se borra después del export; no hace falta restaurar.
+    """
+    borradas = 0
+    # DrawingDimensions (lineales, diámetro, etc.)
+    try:
+        dims = hoja.DrawingDimensions
+        for i in range(int(dims.Count), 0, -1):
+            try:
+                dims.Item(i).Delete()
+                borradas += 1
+            except Exception:
+                continue
+    except Exception:
+        pass
+    # Centros / ordinate si existen como colección aparte
+    for attr in (
+        "CentermarkStyles",  # no borrar estilos
+    ):
+        pass
+    try:
+        cms = hoja.Centermarks
+        for i in range(int(cms.Count), 0, -1):
+            try:
+                cms.Item(i).Delete()
+                borradas += 1
+            except Exception:
+                continue
+    except Exception:
+        pass
+    try:
+        notes = hoja.DrawingNotes
+        for i in range(int(notes.Count), 0, -1):
+            try:
+                notes.Item(i).Delete()
+                borradas += 1
+            except Exception:
+                continue
+    except Exception:
+        pass
+    # Sketches de cotas dibujadas a mano (prefijo típico Abigail).
+    try:
+        sketches = hoja.Sketches
+        for i in range(int(sketches.Count), 0, -1):
+            try:
+                sk = sketches.Item(i)
+                nom = str(getattr(sk, "Name", "") or "")
+                if nom.upper().startswith("COTA") or "COTA" in nom.upper():
+                    sk.Delete()
+                    borradas += 1
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return borradas
 
 
 def exportar_hojas_jpg(
@@ -973,6 +1237,7 @@ def exportar_hojas_jpg(
     carpeta_salida=None,
     nombres_permitidos=None,
     hojas_lado_sin_thk=None,
+    nombre_job=None,
 ):
     """
     Exporta cada hoja con vistas a JPG, excluyendo hojas vacías.
@@ -985,8 +1250,24 @@ def exportar_hojas_jpg(
     `hojas_lado_sin_thk` (opcional): lista de hojas ``_LADO`` cuyo THK no se
     pudo cotar. Se usa para NO renombrar el archivo a ``_THK``; conserva el
     sufijo ``_LADO`` para evitar dar la falsa impresión de que la cota existe.
+
+    `nombre_job` (opcional): nombre del ensamble (JOB) para nomenclatura
+    ``{JOB}__{ITEM}__{LENGTH|WIDTH|THK|…}_{N}.jpg``.
     """
     print("⏳ Paso 4/4: Exportando hojas a JPG...")
+
+    try:
+        from nomenclatura_capturas import (
+            armar_nombre_captura_pieza,
+            limpiar_token_archivo,
+            medida_export_desde_hoja,
+            nombre_job_desde_ensamble,
+        )
+    except Exception:
+        armar_nombre_captura_pieza = None
+        medida_export_desde_hoja = None
+        limpiar_token_archivo = None
+        nombre_job_desde_ensamble = None
 
     try:
         draw_doc = win32com.client.CastTo(doc, "DrawingDocument")
@@ -1033,6 +1314,7 @@ def exportar_hojas_jpg(
 
     exportadas = 0
     omitidas = 0
+    contador_medida = 0
 
     try:
         total_hojas = draw_doc.Sheets.Count
@@ -1057,6 +1339,68 @@ def exportar_hojas_jpg(
     if nombres_permitidos is not None:
         permitidos_up = {str(x).upper() for x in nombres_permitidos}
 
+    # Una SIN_COTA por item cobre en esta corrida de exportación.
+    exportar_hojas_jpg._sin_cota_hechos = set()
+
+    # Items con hoja ESTANIADO (Corte cobre): SIN_COTA solo desde esa hoja.
+    items_con_estanado = set()
+    try:
+        for _si in range(1, draw_doc.Sheets.Count + 1):
+            _sn = str(draw_doc.Sheets.Item(_si).Name)
+            if "_ESTANIADO" not in _sn.upper():
+                continue
+            if medida_export_desde_hoja:
+                _it, _m, _n = medida_export_desde_hoja(_sn)
+                if _it:
+                    items_con_estanado.add(str(_it).strip().upper())
+            else:
+                _base_e = _sn.rsplit("_ESTANIADO", 1)[0]
+                if _base_e:
+                    items_con_estanado.add(_base_e.strip().upper())
+    except Exception:
+        items_con_estanado = set()
+
+    try:
+        from generador_tanque_completo import (
+            STAGING_DESPLIEGUE as _ST_DESP,
+            STAGING_ESTANIADO as _ST_EST,
+        )
+    except Exception:
+        _ST_DESP = "_STAGING_DESPLIEGUE"
+        _ST_EST = "_STAGING_ESTANIADO"
+
+    job_token = None
+    if limpiar_token_archivo is not None:
+        override_job = os.environ.get("COTAS_JOB_OVERRIDE", "").strip()
+        if override_job:
+            job_token = limpiar_token_archivo(override_job)
+        elif nombre_job:
+            job_token = (
+                nombre_job_desde_ensamble(nombre_job)
+                if nombre_job_desde_ensamble
+                else limpiar_token_archivo(nombre_job)
+            )
+        else:
+            try:
+                job_token = limpiar_token_archivo(
+                    os.path.basename(os.path.abspath(carpeta_salida))
+                )
+            except Exception:
+                job_token = "JOB"
+        if not job_token or job_token.upper() in (
+            "JPG",
+            "PIEZAS_ACOTADAS",
+            "COTAS_POR_REFERENCIA",
+        ):
+            # Si la carpeta es PIEZAS_ACOTADAS, el JOB está un nivel arriba.
+            try:
+                padre = os.path.basename(
+                    os.path.dirname(os.path.abspath(carpeta_salida))
+                )
+                job_token = limpiar_token_archivo(padre) or "JOB"
+            except Exception:
+                job_token = "JOB"
+
     for i in range(1, total_hojas + 1):
         try:
             hoja = draw_doc.Sheets.Item(i)
@@ -1077,6 +1421,7 @@ def exportar_hojas_jpg(
             )
         except:
             nombre_hoja = f"Hoja_{i}"
+            nombre_hoja_actual_visible = nombre_hoja
 
         # Excluir hojas vacías / machote sin vistas
         try:
@@ -1095,6 +1440,29 @@ def exportar_hojas_jpg(
             omitidas += 1
             continue
 
+        # Corrida rápida flat: X/Y (+TYP), Ø por tipo (HOLE/DIAMETRO_H) y THK.
+        if os.environ.get("SOLO_FLAT_CORTE", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        ):
+            nu = str(nombre_hoja).upper()
+            es_xy = ("XCENTRO" in nu) or ("YCENTRO" in nu)
+            es_hole = ("DIAMETRO_H" in nu) or ("_HOLE" in nu)
+            es_thk = (
+                "_THK" in nu
+                or "_LADO" in nu
+                or "DESPLIEGUE_THK" in nu
+                or "DESPLIEGUE_LADO" in nu
+            )
+            if not (es_xy or es_hole or es_thk):
+                print(
+                    f"SOLO_FLAT: omitiendo '{nombre_hoja}' "
+                    f"(no es XCENTRO/YCENTRO/HOLE/THK)"
+                )
+                omitidas += 1
+                continue
+
         try:
             # Un solo ciclo Activate + Update + sleep breve (antes había dos
             # rondas de 0.3s y un Fit() innecesario para vistas ya escaladas).
@@ -1105,11 +1473,54 @@ def exportar_hojas_jpg(
                 pass
             time.sleep(0.15)
 
-            nombre_archivo = _limpiar_nombre_archivo(nombre_hoja) + ".jpg"
-            ruta_jpg_final = os.path.join(carpeta_salida, nombre_archivo)
+            contador_medida += 1
+            valor_cota = None
+            nombre_hoja_src = str(nombre_hoja_actual_visible)
+            es_despliegue = (
+                "_DESPLIEGUE_" in nombre_hoja_src.upper()
+                or "_DESPLIEGUE_" in str(nombre_hoja).upper()
+            )
+            es_estanado = (
+                "_ESTANIADO" in nombre_hoja_src.upper()
+                or "_ESTANIADO" in str(nombre_hoja).upper()
+            )
+            if armar_nombre_captura_pieza and medida_export_desde_hoja and job_token:
+                item, medida, num_hoja = medida_export_desde_hoja(nombre_hoja)
+                if es_estanado:
+                    try:
+                        from piezas_cobre import medida_con_sin_cota as _mcs
 
-            nombre_temporal = "_tmp_" + _limpiar_nombre_archivo(nombre_hoja) + ".jpg"
-            ruta_jpg_temporal = os.path.join(carpeta_salida, nombre_temporal)
+                        medida = _mcs("LENGTH")
+                    except Exception:
+                        medida = "LENGTH_SIN_COTA"
+                # Sufijo = valor real de la cota (82, 0.5…), no el :N de Inventor.
+                valor_cota = _leer_valor_cota_hoja(hoja)
+                if not valor_cota:
+                    valor_cota = num_hoja if num_hoja else contador_medida
+                nombre_base_archivo = armar_nombre_captura_pieza(
+                    job_token, item, medida, valor_cota
+                )
+            else:
+                nombre_base_archivo = _limpiar_nombre_archivo(nombre_hoja)
+                if es_estanado and not nombre_base_archivo.upper().endswith(
+                    "_SIN_COTA"
+                ):
+                    nombre_base_archivo = nombre_base_archivo + "_SIN_COTA"
+                valor_cota = _leer_valor_cota_hoja(hoja) or contador_medida
+
+            sub_out = carpeta_salida
+            if es_despliegue:
+                sub_out = os.path.join(carpeta_salida, _ST_DESP)
+                os.makedirs(sub_out, exist_ok=True)
+            elif es_estanado:
+                sub_out = os.path.join(carpeta_salida, _ST_EST)
+                os.makedirs(sub_out, exist_ok=True)
+
+            nombre_archivo = nombre_base_archivo + ".jpg"
+            ruta_jpg_final = os.path.join(sub_out, nombre_archivo)
+
+            nombre_temporal = "_tmp_" + nombre_base_archivo + ".jpg"
+            ruta_jpg_temporal = os.path.join(sub_out, nombre_temporal)
 
             inv_app.ActiveView.Camera.SaveAsBitmap(
                 ruta_jpg_temporal,
@@ -1122,6 +1533,124 @@ def exportar_hojas_jpg(
 
             print(f"🖼️ Exportado: {ruta_jpg_final}")
             exportadas += 1
+            if es_estanado:
+                try:
+                    item_mark = ""
+                    if medida_export_desde_hoja:
+                        item_mark, _, _ = medida_export_desde_hoja(nombre_hoja)
+                    clave_est = str(item_mark or "").strip().upper()
+                    if clave_est:
+                        if not hasattr(exportar_hojas_jpg, "_sin_cota_hechos"):
+                            exportar_hojas_jpg._sin_cota_hechos = set()
+                        exportar_hojas_jpg._sin_cota_hechos.add(clave_est)
+                except Exception:
+                    pass
+            try:
+                from cotas_dossier_registro import registrar_jpg
+
+                registrar_jpg(ruta_jpg_final, job=job_token)
+            except Exception:
+                pass
+
+            # Cobre ABB/GENE/RLG: UNA sola captura SIN_COTA por pieza,
+            # desde la cara de mayor área (LENGTH / FRENTE_1).
+            # Si hay hoja ESTANIADO (Corte), esa hoja ya exportó SIN_COTA.
+            try:
+                from piezas_cobre import (
+                    es_pieza_cobre,
+                    medida_con_sin_cota,
+                )
+            except Exception:
+                es_pieza_cobre = None
+                medida_con_sin_cota = None
+            item_cobre = None
+            medida_exp = None
+            if armar_nombre_captura_pieza and medida_export_desde_hoja:
+                try:
+                    item_cobre, medida_exp, _ = medida_export_desde_hoja(
+                        nombre_hoja
+                    )
+                except Exception:
+                    item_cobre = None
+                    medida_exp = None
+            medida_up = str(medida_exp or "").upper()
+            es_cara_mayor = medida_up in (
+                "LENGTH",
+                "FRENTE_1",
+                "LARGO",
+            )
+            if not hasattr(exportar_hojas_jpg, "_sin_cota_hechos"):
+                exportar_hojas_jpg._sin_cota_hechos = set()
+            ya_sin_cota = exportar_hojas_jpg._sin_cota_hechos
+            clave_item = str(item_cobre or "").strip().upper()
+            omitir_sin_cota_frente = (
+                es_despliegue
+                or es_estanado
+                or (clave_item and clave_item in items_con_estanado)
+            )
+            if (
+                not omitir_sin_cota_frente
+                and es_pieza_cobre is not None
+                and item_cobre
+                and es_pieza_cobre(item_cobre)
+                and es_cara_mayor
+                and clave_item
+                and clave_item not in ya_sin_cota
+            ):
+                try:
+                    # valor_cota ya leído antes de borrar dimensiones.
+                    valor_prev = valor_cota
+                    n_borradas = _borrar_cotas_visibles_hoja(hoja)
+                    try:
+                        inv_app.ActiveView.Update()
+                    except Exception:
+                        pass
+                    time.sleep(0.12)
+                    if armar_nombre_captura_pieza and medida_export_desde_hoja and job_token:
+                        item_c, _medida_c, _num_c = medida_export_desde_hoja(
+                            nombre_hoja
+                        )
+                        valor_c = valor_prev or _num_c or contador_medida
+                        medida_bare = medida_con_sin_cota("LENGTH")
+                        nombre_bare = armar_nombre_captura_pieza(
+                            job_token, item_c, medida_bare, valor_c
+                        )
+                    else:
+                        nombre_bare = (
+                            _limpiar_nombre_archivo(nombre_hoja) + "_SIN_COTA"
+                        )
+                    ruta_bare_final = os.path.join(
+                        carpeta_salida, nombre_bare + ".jpg"
+                    )
+                    ruta_bare_tmp = os.path.join(
+                        carpeta_salida, "_tmp_" + nombre_bare + ".jpg"
+                    )
+                    inv_app.ActiveView.Camera.SaveAsBitmap(
+                        ruta_bare_tmp,
+                        ANCHO_EXPORTACION,
+                        ALTO_EXPORTACION,
+                        white,
+                    )
+                    _recortar_exportacion_jpg(
+                        hoja, ruta_bare_tmp, ruta_bare_final
+                    )
+                    ya_sin_cota.add(clave_item)
+                    print(
+                        f"🖼️ Exportado SIN_COTA (cobre, cara mayor, "
+                        f"-{n_borradas} cotas): {ruta_bare_final}"
+                    )
+                    exportadas += 1
+                    try:
+                        from cotas_dossier_registro import registrar_jpg
+
+                        registrar_jpg(ruta_bare_final, job=job_token)
+                    except Exception:
+                        pass
+                except Exception as exc_bare:
+                    print(
+                        f"AVISO: no se pudo exportar SIN_COTA para "
+                        f"'{nombre_hoja}': {exc_bare}"
+                    )
 
             # Respiro periódico para vaciar la cola COM (evita saturación tipo
             # RPC crash cuando se exportan cientos de hojas seguidas).
@@ -1137,6 +1666,12 @@ def exportar_hojas_jpg(
 
     print(f"✅ Exportación terminada. JPG creados: {exportadas} | Hojas omitidas: {omitidas}")
     print(f"📁 Carpeta de salida: {carpeta_salida}")
+    try:
+        from cotas_dossier_registro import sincronizar_carpeta_jpgs
+
+        sincronizar_carpeta_jpgs(carpeta_salida, job=job_token)
+    except Exception:
+        pass
 
 
 # ============================================================
@@ -1323,6 +1858,15 @@ def ejecutar_flujo_desde_app(
     log(f"Documento activo (Plano): {doc.DisplayName}")
     log(f"Modo por lotes: tam_lote={tam_lote} | incremental={incremental}")
 
+    # Unidad automática por producto (GIGA/BOARD → mm; tanques → in).
+    try:
+        from producto_tipo import aplicar_unidad_producto
+
+        u = aplicar_unidad_producto(ensamble=ensamble_doc)
+        log(f"Unidad de cotas (auto producto): {u}")
+    except Exception as exc_u:
+        log(f"AVISO unidad producto: {exc_u}")
+
     # Reinicia el registro global de pendientes THK para esta corrida.
     try:
         THK.reset_pendientes_thk()
@@ -1398,19 +1942,32 @@ def ejecutar_flujo_desde_app(
         piezas_pendientes = []
         for part_doc, part_name in piezas:
             base = creador_vistas.obtener_nombre_base_corto(part_name)
+            solo_flat_corte = os.environ.get("SOLO_FLAT_CORTE", "").strip().lower() in (
+                "1",
+                "true",
+                "yes",
+            )
             if filtro_up:
                 pn_up = str(part_name or "").upper()
                 base_up = str(base or "").upper()
-                if not any(f in pn_up or f in base_up for f in filtro_up):
+                if solo_flat_corte:
+                    # Match EXACTO contra carpetas Corte\Corte (nada de substring).
+                    if base_up not in filtro_up and pn_up not in filtro_up:
+                        continue
+                elif not any(f in pn_up or f in base_up for f in filtro_up):
                     continue
             if catalogo:
                 from generador_tanque_completo import _clave_pieza
 
                 pn_up = str(part_name or "").upper()
+                base_up = str(base or "").upper()
                 clave_pn = _clave_pieza(part_name)
                 en_catalogo = False
-                if pn_up in catalogo or str(base or "").upper() in catalogo:
+                if pn_up in catalogo or base_up in catalogo:
                     en_catalogo = True
+                elif solo_flat_corte:
+                    # Solo igualdad de clave normalizada (evita GENEBCU5 ⊂ GENEBCU5165).
+                    en_catalogo = clave_pn in set(claves_catalogo)
                 else:
                     for clave in claves_catalogo:
                         if clave in clave_pn or clave_pn in clave:
@@ -1555,6 +2112,7 @@ def ejecutar_flujo_desde_app(
                     carpeta_salida=carpeta_salida,
                     nombres_permitidos=nombres_finales,
                     hojas_lado_sin_thk=pendientes_snapshot,
+                    nombre_job=getattr(ensamble_doc, "DisplayName", None),
                 )
             except Exception as e:
                 log(f"❌ Error exportando JPG del lote {idx_lote}: {e}")

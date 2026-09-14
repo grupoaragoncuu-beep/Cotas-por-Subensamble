@@ -2,18 +2,25 @@ import os
 import win32com.client
 import diametro
 from inventor_com import conectar_inventor
-from cota_estilo import aplicar_estilo_cota
+from cota_estilo import (
+    OFFSET_FUERA_PIEZA_CM,
+    aplicar_estilo_cota,
+    asegurar_cota_fuera_pieza_robusto,
+    candidatos_texto_fuera_pieza,
+    clearance_texto_cota_cm,
+    dim_solapa_pieza,
+)
 import lineal_especial
 import arcos
 from rutas_runtime import ruta_hojas_diametro
-
 kHorizontalDimensionType = 60162
 kVerticalDimensionType = 60163
 
 EPS_GEOM = 0.0001
 TOL_EXTREMO_RATIO = 0.01
 DOMINANCIA_RECTA = 2.5
-OFFSET_COTA = 1.5
+# Separación silueta → texto (antes 1.5: solapaba bridas Vantran).
+OFFSET_COTA = float(OFFSET_FUERA_PIEZA_CM)
 
 FACTOR_VALIDACION_MIN = 0.97
 FACTOR_VALIDACION_MAX = 1.05
@@ -70,25 +77,57 @@ def _base_hoja(nombre):
     return str(nombre)
 
 
-def _clampear_punto_hoja(hoja, tg, x, y, margen=1.2):
+def _clampear_punto_hoja(hoja, tg, x, y, margen=1.2, evitar_bbox=None):
     """
-    Fuerza el Point2d de texto de cota a caer dentro del rectángulo físico de
-    la hoja de Inventor con un margen mínimo. Sin esto, cotas colocadas
-    cerca del borde quedan fuera del rectángulo que la cámara exporta como
-    JPG (Inventor las acepta pero el bitmap no las incluye) y el resultado
-    es la clásica captura sin cota.
+    Fuerza el Point2d de texto dentro del sheet, sin meterlo en la pieza.
 
-    El margen por defecto (1.2 cm) da espacio al número + flecha para que
-    quepan enteros dentro del sheet, evitando que el recorte del JPG los
-    corte.
+    Si ``evitar_bbox`` (silueta) está dado y el clamp caería dentro, se
+    empuja al borde exterior más cercano. Evita el bug Vantran: cota
+    horizontal/vertical atravesando el cuerpo al clampear contra el sheet.
     """
+    from cota_estilo import empujar_punto_fuera_bbox, punto_dentro_bbox
+
     try:
         sheet_w = float(hoja.Width)
         sheet_h = float(hoja.Height)
-        x = max(margen, min(sheet_w - margen, x))
-        y = max(margen, min(sheet_h - margen, y))
+        x = max(margen, min(sheet_w - margen, float(x)))
+        y = max(margen, min(sheet_h - margen, float(y)))
     except Exception:
-        pass
+        x, y = float(x), float(y)
+    if evitar_bbox is not None and punto_dentro_bbox(
+        x, y, evitar_bbox, holgura=0.2
+    ):
+        # Preferir el lado con más aire hacia el borde del sheet.
+        try:
+            sheet_w = float(hoja.Width)
+            sheet_h = float(hoja.Height)
+            minx, maxx, miny, maxy = (
+                float(evitar_bbox[0]),
+                float(evitar_bbox[1]),
+                float(evitar_bbox[2]),
+                float(evitar_bbox[3]),
+            )
+            aire = {
+                "izq": minx - margen,
+                "der": sheet_w - margen - maxx,
+                "inf": miny - margen,
+                "sup": sheet_h - margen - maxy,
+            }
+            lado = max(aire, key=aire.get)
+        except Exception:
+            lado = "auto"
+        clr = clearance_texto_cota_cm()
+        x, y = empujar_punto_fuera_bbox(x, y, evitar_bbox, lado, clr)
+        try:
+            sheet_w = float(hoja.Width)
+            sheet_h = float(hoja.Height)
+            x = max(margen, min(sheet_w - margen, x))
+            y = max(margen, min(sheet_h - margen, y))
+        except Exception:
+            pass
+        # Si el clamp volvió a meter el punto, priorizar fuera de pieza.
+        if punto_dentro_bbox(x, y, evitar_bbox, holgura=0.15):
+            x, y = empujar_punto_fuera_bbox(x, y, evitar_bbox, lado, clr)
     return tg.CreatePoint2d(x, y)
 
 # =========================================================
@@ -461,14 +500,34 @@ def _crear_cota_horizontal_mejorada(hoja, vista, tg, datos, nombre_hoja):
     if not int_izq or not int_der:
         return False
 
+    pieza_bb = (minx, maxx, miny, maxy)
+    clr = clearance_texto_cota_cm()
     try:
-        pt_texto = _clampear_punto_hoja(
-            hoja, tg, (minx + maxx) / 2.0, maxy + OFFSET_COTA
-        )
-        dim = hoja.DrawingDimensions.GeneralDimensions.AddLinear(
-            pt_texto, int_izq, int_der, kHorizontalDimensionType
-        )
-        aplicar_estilo_cota(dim, hoja=hoja)
+        dim = None
+        for x, y, _lado in candidatos_texto_fuera_pieza(
+            pieza_bb, "H", clearance=clr
+        ):
+            pt_texto = _clampear_punto_hoja(
+                hoja, tg, x, y, evitar_bbox=pieza_bb
+            )
+            try:
+                dim_test = hoja.DrawingDimensions.GeneralDimensions.AddLinear(
+                    pt_texto, int_izq, int_der, kHorizontalDimensionType
+                )
+            except Exception:
+                continue
+            aplicar_estilo_cota(dim_test, hoja=hoja)
+            asegurar_cota_fuera_pieza_robusto(dim_test, tg, pieza_bb, n_chars=10)
+            if dim_solapa_pieza(dim_test, pieza_bb):
+                try:
+                    dim_test.Delete()
+                except Exception:
+                    pass
+                continue
+            dim = dim_test
+            break
+        if dim is None:
+            return False
 
         esperado = _esperado_modelo(vista, ancho_sheet)
         return _validar_dimension(dim, esperado, nombre_hoja, "horizontal")
@@ -511,14 +570,34 @@ def _crear_cota_vertical_mejorada(hoja, vista, tg, datos, nombre_hoja):
     if not int_inf or not int_sup:
         return False
 
+    pieza_bb = (minx, maxx, miny, maxy)
+    clr = clearance_texto_cota_cm()
     try:
-        pt_texto = _clampear_punto_hoja(
-            hoja, tg, minx - OFFSET_COTA, (miny + maxy) / 2.0
-        )
-        dim = hoja.DrawingDimensions.GeneralDimensions.AddLinear(
-            pt_texto, int_inf, int_sup, kVerticalDimensionType
-        )
-        aplicar_estilo_cota(dim, hoja=hoja)
+        dim = None
+        for x, y, _lado in candidatos_texto_fuera_pieza(
+            pieza_bb, "V", clearance=clr
+        ):
+            pt_texto = _clampear_punto_hoja(
+                hoja, tg, x, y, evitar_bbox=pieza_bb
+            )
+            try:
+                dim_test = hoja.DrawingDimensions.GeneralDimensions.AddLinear(
+                    pt_texto, int_inf, int_sup, kVerticalDimensionType
+                )
+            except Exception:
+                continue
+            aplicar_estilo_cota(dim_test, hoja=hoja)
+            asegurar_cota_fuera_pieza_robusto(dim_test, tg, pieza_bb, n_chars=10)
+            if dim_solapa_pieza(dim_test, pieza_bb):
+                try:
+                    dim_test.Delete()
+                except Exception:
+                    pass
+                continue
+            dim = dim_test
+            break
+        if dim is None:
+            return False
 
         esperado = _esperado_modelo(vista, alto_sheet)
         return _validar_dimension(dim, esperado, nombre_hoja, "vertical")
@@ -561,13 +640,32 @@ def _crear_cota_vertical_solo_rectas(hoja, vista, tg, datos, nombre_hoja):
         return False
 
     try:
-        pt_texto = _clampear_punto_hoja(
-            hoja, tg, minx - OFFSET_COTA, (miny + maxy) / 2.0
-        )
-        dim = hoja.DrawingDimensions.GeneralDimensions.AddLinear(
-            pt_texto, int_inf, int_sup, kVerticalDimensionType
-        )
-        aplicar_estilo_cota(dim, hoja=hoja)
+        pieza_bb = (minx, maxx, miny, maxy)
+        dim = None
+        for x, y, _lado in candidatos_texto_fuera_pieza(
+            pieza_bb, "V", clearance=clearance_texto_cota_cm()
+        ):
+            pt_texto = _clampear_punto_hoja(
+                hoja, tg, x, y, evitar_bbox=pieza_bb
+            )
+            try:
+                dim_test = hoja.DrawingDimensions.GeneralDimensions.AddLinear(
+                    pt_texto, int_inf, int_sup, kVerticalDimensionType
+                )
+            except Exception:
+                continue
+            aplicar_estilo_cota(dim_test, hoja=hoja)
+            asegurar_cota_fuera_pieza_robusto(dim_test, tg, pieza_bb, n_chars=10)
+            if dim_solapa_pieza(dim_test, pieza_bb):
+                try:
+                    dim_test.Delete()
+                except Exception:
+                    pass
+                continue
+            dim = dim_test
+            break
+        if dim is None:
+            return False
         esperado = _esperado_modelo(vista, alto_sheet)
         return _validar_dimension(dim, esperado, nombre_hoja, "vertical_rectas")
     except Exception:
@@ -612,11 +710,15 @@ def _crear_cota_horizontal_legacy(hoja, vista, tg, datos, nombre_hoja):
             hoja, tg,
             vista.Position.X,
             vista.Position.Y + (vista.Height / 2.0) + OFFSET_COTA,
+            evitar_bbox=(minx, maxx, miny, maxy),
         )
         dim = hoja.DrawingDimensions.GeneralDimensions.AddLinear(
             pt_texto, int_izq, int_der, kHorizontalDimensionType
         )
         aplicar_estilo_cota(dim, hoja=hoja)
+        asegurar_cota_fuera_pieza_robusto(
+            dim, tg, (minx, maxx, miny, maxy), n_chars=10
+        )
 
         return _validar_dimension(dim, esperado, nombre_hoja, "horizontal_legacy")
 
@@ -646,11 +748,15 @@ def _crear_cota_vertical_legacy(hoja, vista, tg, datos, nombre_hoja):
             hoja, tg,
             vista.Position.X - (vista.Width / 2.0) - OFFSET_COTA,
             vista.Position.Y,
+            evitar_bbox=(minx, maxx, miny, maxy),
         )
         dim = hoja.DrawingDimensions.GeneralDimensions.AddLinear(
             pt_texto, int_inf, int_sup, kVerticalDimensionType
         )
         aplicar_estilo_cota(dim, hoja=hoja)
+        asegurar_cota_fuera_pieza_robusto(
+            dim, tg, (minx, maxx, miny, maxy), n_chars=10
+        )
 
         return _validar_dimension(dim, esperado, nombre_hoja, "vertical_legacy")
 
@@ -727,6 +833,16 @@ def acotar_planos(nombres_permitidos=None, reset_diametro=True):
         "excepciones": 0,
     }
     hojas_frente_ok = []
+    solo_barrenos_thk = os.environ.get("SOLO_FLAT_CORTE", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    if solo_barrenos_thk:
+        print(
+            "SOLO_FLAT_CORTE: no LENGTH/WIDTH; "
+            "barrenos X/Y+TYP + Ø por tipo + THK (LADO)."
+        )
 
     for i in range(1, plano.Sheets.Count + 1):
         hoja = plano.Sheets.Item(i)
@@ -739,15 +855,28 @@ def acotar_planos(nombres_permitidos=None, reset_diametro=True):
             contadores["filtradas_por_permitidos"] += 1
             continue
 
+        # Modo rápido flat: omitir LARGO/ANCHO en DESPLIEGUE_FRENTE_*.
+        # Los barrenos X/Y se agregan al final; el espesor va por THK.py.
+        if solo_barrenos_thk and "_DESPLIEGUE_" in nombre_hoja and (
+            "_FRENTE_1" in nombre_hoja or "_FRENTE_2" in nombre_hoja
+        ):
+            contadores["visitadas"] += 1
+            _dbg(f"  skip lineal (SOLO_FLAT): {nombre_completo}")
+            continue
+
         contadores["visitadas"] += 1
         _dbg(f"visita: {nombre_hoja} (base={base_up})")
 
         if (
-            "_LADO" in nombre_hoja
+            "_ESTANIADO" in nombre_hoja
+            or "_LADO" in nombre_hoja
             or "_ALTO" in nombre_hoja
             or "_LARGO_PATA" in nombre_hoja
         ):
-            print(f"⏭️ {nombre_hoja}: omitida por regla _LADO/_ALTO/_LARGO_PATA.")
+            print(
+                f"⏭️ {nombre_hoja}: omitida por regla "
+                f"_ESTANIADO/_LADO/_ALTO/_LARGO_PATA."
+            )
             continue
 
         if hoja.DrawingViews.Count == 0:
@@ -851,6 +980,7 @@ def acotar_planos(nombres_permitidos=None, reset_diametro=True):
 
             if cota_ok:
                 contadores["frente2_ok"] += 1
+                hojas_frente_ok.append(nombre_completo)
             else:
                 # Jacking Pad / punta: legacy SÍ para ANCHO (eje menor con
                 # rectas H). Antes `if not punta` bloqueaba FRENTE_2 y
@@ -870,6 +1000,7 @@ def acotar_planos(nombres_permitidos=None, reset_diametro=True):
                     _dbg(f"  excepción en legacy FRENTE_2: {e}")
                 if cota_ok:
                     contadores["frente2_legacy"] += 1
+                    hojas_frente_ok.append(nombre_completo)
 
             # Rescate final punta: forzar intents solo en rectas de borde.
             if not cota_ok and punta:
@@ -927,19 +1058,50 @@ def acotar_planos(nombres_permitidos=None, reset_diametro=True):
         print(f"\n🔄 Llamando a diametro.py para {len(hojas_para_diametro)} hojas...")
         hojas_no_resueltas_diametro = diametro.acotar_diametros(hojas_para_diametro)
 
-    # Barrenos en placas que YA tienen LARGO (aristas circulares).
+    # Barrenos flat: X/Y+TYP (posición) + Ø por TIPO de tamaño (DIAMETRO_Hnn).
+    # Doblado: solo Ø por tipo (como antes).
     hojas_extra_barrenos = []
-    if hojas_frente_ok:
-        try:
+    try:
+        import barrenos_xy_despliegue
+
+        print("\nBarrenos flat X/Y+TYP (todas las DESPLIEGUE_FRENTE_1)...")
+        resultado_xy = barrenos_xy_despliegue.acotar_barrenos_xy_despliegue(None)
+        if resultado_xy:
+            hojas_extra_barrenos.extend(resultado_xy)
+            print(f"  -> {len(resultado_xy)} hojas XCENTRO/YCENTRO creadas")
+        else:
+            print("  -> 0 hojas XY (sin barrenos detectados)")
+    except Exception as e:
+        print(f"AVISO: barrenos X/Y despliegue fallo: {e}")
+
+    # Ø: una hoja por cada tamaño distinto (circulo 11 + oval 13 = 2 hojas).
+    try:
+        frentes_diam = []
+        for i in range(1, int(plano.Sheets.Count) + 1):
+            try:
+                h = plano.Sheets.Item(i)
+            except Exception:
+                continue
+            nu = str(h.Name).upper()
+            if "_DIAMETRO_" in nu or "_XCENTRO" in nu or "_YCENTRO" in nu:
+                continue
+            if "_FRENTE_1" not in nu and "_FRENTE_2" not in nu:
+                continue
+            # En modo SOLO_FLAT_CORTE solo flat; si no, flat + doblado.
+            if solo_barrenos_thk and "_DESPLIEGUE_" not in nu:
+                continue
+            frentes_diam.append(str(h.Name).rsplit(":", 1)[0])
+        if frentes_diam:
             print(
-                f"\n🕳️ Buscando barrenos en {len(hojas_frente_ok)} "
-                "hojas FRENTE_1 con cota lineal OK..."
+                f"\nBarrenos Ø por tipo de tamaño en "
+                f"{len(frentes_diam)} hojas FRENTE..."
             )
-            resultado_barrenos = diametro.acotar_barrenos_placas(hojas_frente_ok)
+            resultado_barrenos = diametro.acotar_barrenos_placas(frentes_diam)
             if resultado_barrenos:
-                hojas_extra_barrenos = list(resultado_barrenos)
-        except Exception as e:
-            print(f"AVISO: barrenos en placas falló: {e}")
+                hojas_extra_barrenos.extend(resultado_barrenos)
+                print(f"  -> {len(resultado_barrenos)} hojas DIAMETRO_H* creadas")
+    except Exception as e:
+        print(f"AVISO: barrenos Ø por tipo fallo: {e}")
 
     # =====================================================
     # REPORTE FINAL

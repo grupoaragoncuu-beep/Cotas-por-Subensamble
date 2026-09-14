@@ -10,6 +10,8 @@ Actualizado: 2026-09-04
 | `COTAS_POR_SEG` | mismo | Prueba rápida de **una** cara |
 | `COTAS_ILOGIC_ABIGAIL` | `generador_piezas.py` | Piezas LARGO/ANCHO/THK/Ø/ALTO → `PIEZAS_ACOTADAS` |
 | `COTAS_POR_SEG_PIEZAS` | mismo | Prueba rápida de piezas de **una** cara |
+| `COTAS_ENSAMBLES_INDEPENDIENTES` | `generador_ensambles_instructivo.py` | Kits independientes, 6 vistas |
+| `COTAS_BOARD` | `generador_board.py` | Tablero GIGA/Board → `JPG/<job>/BOARD/` |
 
 Tras `git pull`: ejecutar `Planos\instalar_boton_inventor.bat` y reiniciar Inventor.
 
@@ -25,7 +27,12 @@ Tras `git pull`: ejecutar `Planos\instalar_boton_inventor.bat` y reiniciar Inven
 ## Cobertura por producto
 
 - **Tanques** OTC / Vantran / SWE / PTT (casco): mismo motor; validar picks TOP/SEGM/BASE.
-- **No es objetivo** de Abigail: gabinetes ATC, boards GIGA, STD/weld/BOM de PDF.
+- **Board / GIGA tablero** (`9919-Board`, etc.):
+  - Caras / ensambles → `generador_board.py` (`JPG/<job>/BOARD/…`).
+  - **Abigail / piezas** → `generador_piezas.py` (sin picks). Piezas **cobre**
+    (prefijos ABB, GENE, GEN1, GE3R, AcuCT, CITEL, 9919-F/M/P, … mapeados desde
+    nesteos de cobre): **2 JPG por cota** (con dimensión + `*_SIN_COTA_*`).
+- **No es objetivo** (aún): gabinetes ATC sueltos, STD/weld/BOM de PDF.
 
 ## Artefactos de análisis (referencia)
 

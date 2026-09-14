@@ -10,7 +10,7 @@ Modo preferido (COTAS_POR_SUBENSAMBLE):
   (0,0) = esquina inferior-izquierda de la pared completa (mitades nesting).
   Carpetas SEGM1/SEGM2/SEGM3/SEGM4/TOP/BASE.
   1 JPG por tipo de pieza (mismas piezas agrupadas) con todas las X+Y.
-  Cotas coincidentes llevan etiqueta TYP + puntos azules.
+  Cotas coincidentes llevan etiqueta TYP + puntos azules visibles.
 
 Modo automatico (compat COTAS_CARAS_TANQUE sin JSON):
   Orientacion PQart + mapeo por centroide FRONT/BACK/LEFT/RIGHT/TOP.
@@ -34,8 +34,12 @@ import win32com.client
 
 from inventor_com import conectar_inventor
 from cota_estilo import (
+    COTA_FONT_SIZE_CM,
     aplicar_estilo_cota,
     aplicar_estilo_texto_cota,
+    asegurar_unidad_pulgadas,
+    letra_typ_indice,
+    offset_letra_typ,
     texto_cota_limpio,
 )
 from generador_vistas import (
@@ -78,6 +82,10 @@ TAM_FLECHA_COTA = 0.23
 FACTOR_ENCUADRE_FOTO = 0.88
 MARGEN_DERECHO_FOTO_CM = 0.55
 MARGEN_TEXTO_COTA_CM = 0.85
+# Respiro mínimo alrededor del JPG cuando hay cota (flechas + texto rotado).
+MARGEN_FOTO_SUP_CM = 1.35
+MARGEN_FOTO_INF_CM = 1.10
+MARGEN_FOTO_LAT_CM = 1.00
 # A partir de esta cantidad, apilar cotas Y a izquierda Y derecha.
 UMBRAL_COTAS_Y_DOBLE_CARA = 8
 EPS = 0.0001
@@ -89,9 +97,19 @@ TOLERANCIA_COTA_CM = 0.03
 TOL_COINCIDENCIA_HOJA = 0.001
 # Nunca comprimir el stack por debajo de esto: si no, los valores se solapan.
 PASO_COTA_LEGIBLE = 0.62
-# Donas TYP: radio único y separación mínima entre marcas.
-RADIO_MARCA_TYP_CM = 0.14
+# Donas TYP: 3 anillos por marca; trazo grueso (LineWeight + micro-anillos).
+RADIO_MARCA_TYP_CM = 0.45
+RADIO_MARCA_TYP_MEDIO_CM = 0.32
+RADIO_MARCA_TYP_INTERIOR_CM = 0.19
 SEP_MIN_MARCA_TYP_CM = 0.55
+# Grosor nominal (cm). Inventor a veces lo ignora en export → se refuerza
+# dibujando micro-anillos concéntricos alrededor de cada radio.
+PESO_LINEA_TYP_CM = 0.45
+PESO_LINEA_TYP_INT_CM = 0.35
+# Desplazamientos de radio para simular trazo grueso en el JPG.
+_OFFSETS_GROSOR_TYP_CM = (-0.04, -0.02, 0.0, 0.02, 0.04)
+# RGB azul visible en JPG (mismo tono navy de las cotas).
+COLOR_MARCA_TYP_RGB = (0, 0, 220)
 # Grupos muy densos (p. ej. P18 QTY16): partir en láminas legibles.
 MAX_INSTANCIAS_POR_LAMINA = 4
 MAX_COTAS_POR_LAMINA = 14
@@ -2919,6 +2937,7 @@ def _info_curva(curva):
         dy = abs(maxy - miny)
         if dx < EPS and dy < EPS:
             return None
+        es_recta = _curva_hlr_es_recta(curva, dx, dy)
         return {
             "curve": curva,
             "minx": minx,
@@ -2929,9 +2948,174 @@ def _info_curva(curva):
             "dy": dy,
             "cx": (minx + maxx) / 2.0,
             "cy": (miny + maxy) / 2.0,
+            "es_recta": bool(es_recta),
         }
     except Exception:
         return None
+
+
+# DrawingCurve.CurveType (Curve2dTypeEnum) — línea vs arco/círculo.
+_CURVE_TYPE_LINEA = {15873}  # kLineCurve
+
+
+def _curva_hlr_es_recta(curva, dx=None, dy=None):
+    """True si el trazo HLR es una arista recta (escuadrable)."""
+    try:
+        ct = int(curva.CurveType)
+        if ct in _CURVE_TYPE_LINEA:
+            return True
+        # Arcos / círculos / splines.
+        if ct in (15874, 15875, 15876, 15877, 15878):
+            return False
+    except Exception:
+        pass
+    try:
+        geom = curva.Curve2D
+        tipo = str(type(geom)).upper()
+        if "LINE" in tipo and "SPLINE" not in tipo:
+            return True
+        if any(t in tipo for t in ("CIRCLE", "ARC", "ELLIPSE", "BSPLINE", "SPLINE")):
+            return False
+    except Exception:
+        pass
+    # Respaldo geométrico: bbox casi degenerado = trazo recto.
+    try:
+        dx = float(dx if dx is not None else 0.0)
+        dy = float(dy if dy is not None else 0.0)
+        mayor = max(dx, dy)
+        if mayor <= EPS:
+            return False
+        return min(dx, dy) <= mayor * 0.10
+    except Exception:
+        return False
+
+
+def _endpoints_curva_info(d):
+    """Extremos Start/End de una curva HLR (o esquinas de su bbox)."""
+    pts = []
+    curva = d.get("curve")
+    if curva is not None:
+        for attr in ("StartPoint", "EndPoint"):
+            try:
+                p = getattr(curva, attr)
+                if p is None:
+                    continue
+                pts.append((float(p.X), float(p.Y)))
+            except Exception:
+                continue
+    if len(pts) >= 2:
+        return pts[:2]
+    try:
+        return [
+            (float(d["minx"]), float(d["miny"])),
+            (float(d["maxx"]), float(d["maxy"])),
+        ]
+    except Exception:
+        return []
+
+
+def _dir_segmento_info(d):
+    """Vector unitario aproximado del trazo (None si degenera)."""
+    pts = _endpoints_curva_info(d)
+    if len(pts) < 2:
+        return None
+    dx = pts[1][0] - pts[0][0]
+    dy = pts[1][1] - pts[0][1]
+    n = math.hypot(dx, dy)
+    if n <= EPS:
+        return None
+    return (dx / n, dy / n)
+
+
+def _esquinas_hlr_escuadrables(datos, tol=None):
+    """
+    Esquinas reales = encuentro de DOS rectas HLR (no tangente de arco).
+
+    Una placa semicircular/stadium solo tiene arcos + laterales: no genera
+    esquinas escuadrables → no sirve como origen de cota de piso.
+    """
+    if not datos:
+        return []
+    if tol is None:
+        try:
+            span = max(
+                max(float(d["maxx"]) for d in datos)
+                - min(float(d["minx"]) for d in datos),
+                max(float(d["maxy"]) for d in datos)
+                - min(float(d["miny"]) for d in datos),
+            )
+            tol = max(0.06, min(0.35, span * 0.02))
+        except Exception:
+            tol = 0.10
+    rectas = [
+        d
+        for d in datos
+        if bool(d.get("es_recta"))
+        or _curva_hlr_es_recta(d.get("curve"), d.get("dx"), d.get("dy"))
+    ]
+    if len(rectas) < 2:
+        return []
+    extremos = []
+    for d in rectas:
+        dire = _dir_segmento_info(d)
+        if dire is None:
+            continue
+        for p in _endpoints_curva_info(d):
+            extremos.append((p[0], p[1], dire[0], dire[1], id(d)))
+    esquinas = []
+    for i in range(len(extremos)):
+        x1, y1, ux1, uy1, id1 = extremos[i]
+        for j in range(i + 1, len(extremos)):
+            x2, y2, ux2, uy2, id2 = extremos[j]
+            if id1 == id2:
+                continue
+            if math.hypot(x1 - x2, y1 - y2) > tol:
+                continue
+            # Ángulo: |u·v| bajo → esquina (no colineales).
+            if abs(ux1 * ux2 + uy1 * uy2) > 0.92:
+                continue
+            esquinas.append(((x1 + x2) * 0.5, (y1 + y2) * 0.5))
+    # Deduplicar
+    unicas = []
+    for x, y in esquinas:
+        if any(math.hypot(x - a, y - b) <= tol for a, b in unicas):
+            continue
+        unicas.append((x, y))
+    return unicas
+
+
+def _tiene_esquina_escuadrable(dato_o_curvas):
+    """True si la silueta aporta al menos una esquina recta+recta."""
+    if isinstance(dato_o_curvas, dict):
+        curvas = list(dato_o_curvas.get("curvas") or [])
+        if not curvas and dato_o_curvas.get("curve"):
+            curvas = [dato_o_curvas]
+    else:
+        curvas = list(dato_o_curvas or [])
+    return bool(_esquinas_hlr_escuadrables(curvas))
+
+
+def _origen_esquina_escuadrable_il(dato):
+    """Compat: delega a esquina superior-izquierda (constante de piso)."""
+    return _origen_esquina_escuadrable_si(dato)
+
+
+def _origen_esquina_escuadrable_si(dato):
+    """
+    Esquina superior-izquierda escuadrable (dos rectas).
+
+    Constante de medición en instructivos de armado: el operador escuadra
+    desde arriba-izquierda, no desde una tangente de radio ni desde abajo.
+    None si la pieza es redondeada / sin apoyo de escuadra.
+    """
+    if not dato:
+        return None
+    curvas = list(dato.get("curvas") or [])
+    esquinas = _esquinas_hlr_escuadrables(curvas)
+    if not esquinas:
+        return None
+    # SI: menor X, empate → mayor Y (arriba).
+    return min(esquinas, key=lambda p: (p[0], -p[1]))
 
 
 def _ruta_occurrence(ocurrencia):
@@ -2996,17 +3180,30 @@ def _es_recta_dominante(d, lado):
     return d["dx"] >= max(EPS, d["dy"] * DOMINANCIA_RECTA)
 
 
-def _vertice_extremo_silueta(datos, lado):
+def _vertice_extremo_silueta(datos, lado, solo_rectas=False):
     """
     Vértice Start/End más extremo de la silueta HLR.
 
     En diagonales AISC el AABB/cy del tramo NO coincide con el tip donde
     la pieza toca el marco: hay que anclar la extensión a este vértice.
+
+    ``solo_rectas``: ignora extremos de arco (tangentes blandas); útil para
+    no señalar el crowning de una tapa semicircular.
     """
     if not datos:
         return None
+    pool = list(datos)
+    if solo_rectas:
+        rectas = [
+            d
+            for d in pool
+            if bool(d.get("es_recta"))
+            or _curva_hlr_es_recta(d.get("curve"), d.get("dx"), d.get("dy"))
+        ]
+        if rectas:
+            pool = rectas
     mejor = None
-    for d in datos:
+    for d in pool:
         curva = d.get("curve")
         pts = []
         if curva is not None:
@@ -3273,13 +3470,22 @@ def _agregar_posicion(
 
 
 def _agrupar_referencias_typ(
-    posiciones, tolerancia, eje=None, origen=None, vista=None, hoja=None
+    posiciones,
+    tolerancia,
+    eje=None,
+    origen=None,
+    vista=None,
+    hoja=None,
+    origen_x=None,
+    origen_y=None,
 ):
     """
     Consolida referencias que producen exactamente la misma cota visible.
 
     La dimensión se exporta una sola vez con TYP; se conservan sus miembros
     para marcar en azul todos los extremos a los que aplica la igualdad.
+    Los miembros quedan ordenados cerca → lejos del (origen_x, origen_y)
+    para que A/B/C coincidan con el sentido de armado.
     """
     if not posiciones:
         return []
@@ -3322,9 +3528,15 @@ def _agrupar_referencias_typ(
         else:
             grupo_destino["miembros"].append(posicion)
 
+    # Si solo llega el origen del eje medido, el otro queda en 0 para ordenar.
+    ox = origen_x if origen_x is not None else (origen if eje == "X" else None)
+    oy = origen_y if origen_y is not None else (origen if eje == "Y" else None)
+
     consolidadas = []
     for grupo in grupos:
-        miembros = grupo["miembros"]
+        miembros = _ordenar_miembros_typ_cerca_origen(
+            grupo["miembros"], origen_x=ox, origen_y=oy, eje=eje
+        )
         referencia = dict(miembros[0])
         referencia["miembros"] = miembros
         # TYP si varias instancias del mismo tipo (base sin _NNN) comparten cota.
@@ -3610,6 +3822,108 @@ def _punto_geometria_acotada(miembro, eje, valor_medida=None):
             float(miembro.get("valor", 0)),
             float(dato.get("cy", dato.get("cx", 0))),
         )
+
+
+def _punto_toque_real_pieza(miembro, eje, preferir_recta=True):
+    """
+    Punto EXACTO donde la cota debe señalar la pieza (sin forzar otra medida).
+
+    1) Tip HLR del borde acotado (prioriza extremos de RECTA escuadrable).
+    2) Si no hay curvas: borde de la envolvente 2D en el centro del otro eje.
+    Así la extensión / constructiva / círculo TYP caen SOBRE la pieza.
+    """
+    dato = miembro.get("dato") or {}
+    lado = str(miembro.get("lado", "")).lower()
+    curvas = list(dato.get("curvas") or [])
+    if not curvas and dato.get("curve"):
+        curvas = [dato]
+    try:
+        if eje == "X":
+            if lado == "centro":
+                return float(dato["cx"]), float(dato["cy"])
+            lado_ext = lado if lado in ("izq", "der") else "izq"
+            vert = None
+            if curvas:
+                if preferir_recta:
+                    vert = _vertice_extremo_silueta(
+                        curvas, lado_ext, solo_rectas=True
+                    )
+                if vert is None:
+                    vert = _vertice_extremo_silueta(curvas, lado_ext)
+            if vert is not None:
+                return float(vert[0]), float(vert[1])
+            x = float(dato["maxx"] if lado_ext == "der" else dato["minx"])
+            y = float(dato.get("cy", (float(dato["miny"]) + float(dato["maxy"])) * 0.5))
+            y = min(max(y, float(dato["miny"])), float(dato["maxy"]))
+            return x, y
+
+        if lado == "centro":
+            return float(dato["cx"]), float(dato["cy"])
+        lado_ext = lado if lado in ("inf", "sup") else "inf"
+        vert = None
+        if curvas:
+            if preferir_recta:
+                vert = _vertice_extremo_silueta(
+                    curvas, lado_ext, solo_rectas=True
+                )
+            if vert is None:
+                vert = _vertice_extremo_silueta(curvas, lado_ext)
+        if vert is not None:
+            return float(vert[0]), float(vert[1])
+        y = float(dato["maxy"] if lado_ext == "sup" else dato["miny"])
+        x = float(dato.get("cx", (float(dato["minx"]) + float(dato["maxx"])) * 0.5))
+        x = min(max(x, float(dato["minx"])), float(dato["maxx"]))
+        return x, y
+    except Exception:
+        return _punto_geometria_acotada(miembro, eje)
+
+
+def _punto_toque_origen(dato_origen, eje, origen_x, origen_y):
+    """
+    Punto del ANCLA donde nace la extensión (0,0).
+
+    Preferencia: esquina SI escuadrable (recta+recta). X → borde izq;
+    Y → borde SUPERIOR (constante de piso), no inferior.
+    """
+    if not dato_origen:
+        return float(origen_x), float(origen_y)
+    # Si el origen ya es una esquina escuadrable, usarla directa.
+    try:
+        if bool(dato_origen.get("origen_escuadrable")):
+            return float(origen_x), float(origen_y)
+    except Exception:
+        pass
+    esq = _origen_esquina_escuadrable_si(dato_origen)
+    if esq is not None:
+        if eje == "X":
+            return float(origen_x), float(esq[1])
+        return float(esq[0]), float(origen_y)
+    if eje == "X":
+        m = {
+            "lado": "izq",
+            "valor": float(origen_x),
+            "dato": dato_origen,
+        }
+        _tx, ty = _punto_toque_real_pieza(m, "X", preferir_recta=True)
+        return float(origen_x), float(ty)
+    m = {
+        "lado": "sup",
+        "valor": float(origen_y),
+        "dato": dato_origen,
+    }
+    tx, _ty = _punto_toque_real_pieza(m, "Y", preferir_recta=True)
+    return float(tx), float(origen_y)
+
+
+def _clave_trazo_hv(eje, x1, y1, x2, y2, dec=2):
+    """Clave para no dibujar dos veces la misma extensión/constructiva."""
+    if eje == "X":
+        x = round((float(x1) + float(x2)) * 0.5, dec)
+        ya, yb = sorted((round(float(y1), dec), round(float(y2), dec)))
+        return ("V", x, ya, yb)
+    y = round((float(y1) + float(y2)) * 0.5, dec)
+    xa, xb = sorted((round(float(x1), dec), round(float(x2), dec)))
+    return ("H", y, xa, xb)
 
 
 def _envolvente_occurrence_en_hoja(datos, vista, tg):
@@ -4335,6 +4649,40 @@ def _linea_cota_sketch(sketch, tg, x1, y1, x2, y2, color=None):
         return None
 
 
+def _linea_discontinua_sketch(
+    sketch, tg, x1, y1, x2, y2, color=None, dash=0.30, gap=0.18
+):
+    """Línea seccionada (constructiva). Inventor a menudo ignora LineType al JPG."""
+    try:
+        dx = float(x2) - float(x1)
+        dy = float(y2) - float(y1)
+        largo = math.hypot(dx, dy)
+    except Exception:
+        return None
+    if largo < 1e-6:
+        return None
+    ux, uy = dx / largo, dy / largo
+    t = 0.0
+    on = True
+    ultima = None
+    while t < largo - 1e-9:
+        seg = float(dash if on else gap)
+        t2 = min(largo, t + seg)
+        if on:
+            ultima = _linea_cota_sketch(
+                sketch,
+                tg,
+                float(x1) + ux * t,
+                float(y1) + uy * t,
+                float(x1) + ux * t2,
+                float(y1) + uy * t2,
+                color,
+            )
+        t = t2
+        on = not on
+    return ultima
+
+
 def _texto_cota_sketch(sketch, tg, x, y, texto, inv_app, vertical=False):
     try:
         caja = sketch.TextBoxes.AddFitted(
@@ -4353,41 +4701,342 @@ def _texto_cota_sketch(sketch, tg, x, y, texto, inv_app, vertical=False):
         return None
 
 
-def _circulo_cota_sketch(sketch, tg, x, y, radio, color=None):
+def _circulo_cota_sketch(sketch, tg, x, y, radio, color=None, line_weight=None):
     try:
         circulo = sketch.SketchCircles.AddByCenterRadius(
             _punto_sketch_desde_hoja(sketch, tg, x, y),
             float(radio),
         )
         if color is not None:
-            try:
-                circulo.Color = color
-            except Exception:
-                pass
+            for attr in ("OverrideColor", "Color"):
+                try:
+                    setattr(circulo, attr, color)
+                    break
+                except Exception:
+                    continue
+        if line_weight is not None:
+            for attr in ("LineWeight", "OverrideLineWeight"):
+                try:
+                    setattr(circulo, attr, float(line_weight))
+                    break
+                except Exception:
+                    continue
         return circulo
     except Exception:
         return None
 
 
-def _marcas_typ_en_accesorios(sketch, tg, eje, referencia, color, valor_medida=None):
+def _etiqueta_letra_typ(sketch, tg, x, y, letra, inv_app, color=None):
+    """TextBox con letra A/B/C… junto a una marca TYP."""
+    if not letra or inv_app is None:
+        return None
+    try:
+        caja = sketch.TextBoxes.AddFitted(
+            _punto_sketch_desde_hoja(sketch, tg, x, y), str(letra)
+        )
+        aplicar_estilo_texto_cota(caja, str(letra), inv_app, vertical=False)
+        if color is not None:
+            try:
+                caja.Color = color
+            except Exception:
+                pass
+        return caja
+    except Exception:
+        return None
+
+
+def _dist_miembro_typ_al_origen(miembro, origen_x, origen_y, eje=None):
     """
-    Dona en el punto exacto donde la extension toca cada miembro TYP.
+    Distancia de un miembro TYP al (0,0) de referencia.
+
+    Si la cota es Y (mismo valor Y), se ordena por X (cerca→lejos en planta).
+    Si es X, se ordena por Y. Así A,B,C siguen el sentido de armado.
+    """
+    dato = miembro.get("dato") or {}
+    try:
+        cx = float(
+            dato.get(
+                "cx",
+                (
+                    float(dato.get("minx", 0))
+                    + float(dato.get("maxx", 0))
+                )
+                * 0.5,
+            )
+        )
+        cy = float(
+            dato.get(
+                "cy",
+                (
+                    float(dato.get("miny", 0))
+                    + float(dato.get("maxy", 0))
+                )
+                * 0.5,
+            )
+        )
+    except (TypeError, ValueError):
+        cx = float(miembro.get("valor", 0) or 0)
+        cy = float(miembro.get("valor", 0) or 0)
+    ox = float(origen_x if origen_x is not None else 0.0)
+    oy = float(origen_y if origen_y is not None else 0.0)
+    eje_u = str(eje or "").upper()
+    if eje_u == "Y":
+        # Misma cota Y: A = más cerca en X del origen.
+        return (abs(cx - ox), abs(cy - oy), str(miembro.get("pieza_id") or ""))
+    if eje_u == "X":
+        return (abs(cy - oy), abs(cx - ox), str(miembro.get("pieza_id") or ""))
+    return (
+        math.hypot(cx - ox, cy - oy),
+        abs(cx - ox),
+        abs(cy - oy),
+        str(miembro.get("pieza_id") or ""),
+    )
+
+
+def _ordenar_miembros_typ_cerca_origen(
+    miembros, origen_x=None, origen_y=None, eje=None
+):
+    """A=más cerca del origen … Z=más lejos (estable por pieza_id)."""
+    lista = list(miembros or [])
+    if len(lista) < 2:
+        return lista
+    if origen_x is None and origen_y is None:
+        return lista
+    return sorted(
+        lista,
+        key=lambda m: _dist_miembro_typ_al_origen(
+            m, origen_x, origen_y, eje=eje
+        ),
+    )
+
+
+def _marcas_typ_en_accesorios(
+    sketch,
+    tg,
+    eje,
+    referencia,
+    color,
+    valor_medida=None,
+    un_solo_anillo=False,
+    toque_real=False,
+    anillos_por_cluster=False,
+    inv_app=None,
+    etiquetar_letras=False,
+    origen_x=None,
+    origen_y=None,
+):
+    """
+    Marca azul en miembros TYP.
+
+    - Subensamble (default): dona de 3 anillos en CADA ubicación.
+    - Ensambles ``un_solo_anillo``: un círculo grueso por ubicación distinta.
+    - Ensambles ``anillos_por_cluster``: si N piezas TYP caen casi en el mismo
+      punto, dibuja N anillos concéntricos (adentro→afuera), no N círculos
+      disparejos. Ubicaciones separadas siguen con 1 círculo cada una.
+    - ``etiquetar_letras``: A, B, C… junto a cada círculo, SIEMPRE en orden
+      cerca → lejos del origen de referencia (no por orden de ocurrencia).
     """
     if not referencia.get("typ"):
         return
     miembros = list(referencia.get("miembros") or [])
-    if len(miembros) < 2:
+    if not miembros:
+        miembros = [referencia]
+    miembros = _ordenar_miembros_typ_cerca_origen(
+        miembros, origen_x=origen_x, origen_y=origen_y, eje=eje
+    )
+    # Persistir orden para nombres/export que lean miembros después.
+    try:
+        referencia["miembros"] = list(miembros)
+    except Exception:
+        pass
+
+    puntos = []
+    for miembro in miembros:
+        dato = miembro.get("dato") or {}
+        # Marca TYP centrada en la pieza (eje perpendicular), no en el tip
+        # de orilla (ese tip suele caer en una esquina y se ve desfasado).
+        try:
+            cy = float(
+                dato.get(
+                    "cy",
+                    (
+                        float(dato.get("miny", 0))
+                        + float(dato.get("maxy", 0))
+                    )
+                    * 0.5,
+                )
+            )
+            cx = float(
+                dato.get(
+                    "cx",
+                    (
+                        float(dato.get("minx", 0))
+                        + float(dato.get("maxx", 0))
+                    )
+                    * 0.5,
+                )
+            )
+        except (TypeError, ValueError):
+            cx = cy = 0.0
+        if toque_real:
+            tx, ty = _punto_toque_real_pieza(miembro, eje)
+            if eje == "X":
+                # Cota vertical de valor X: círculo sobre X real, Y = centro.
+                x, y = float(tx), cy
+            else:
+                x, y = cx, float(ty)
+        else:
+            gx, gy = _punto_geometria_acotada(
+                miembro, eje, valor_medida=valor_medida
+            )
+            if eje == "X":
+                x, y = float(gx), cy
+            else:
+                x, y = cx, float(gy)
+        puntos.append((float(x), float(y)))
+
+    # Orden de letras = cerca→lejos del origen (por centro de marca).
+    if origen_x is not None or origen_y is not None:
+        ox = float(origen_x if origen_x is not None else 0.0)
+        oy = float(origen_y if origen_y is not None else 0.0)
+        eje_u = str(eje or "").upper()
+
+        def _key_pt(pt):
+            x, y = pt
+            if eje_u == "Y":
+                return (abs(x - ox), abs(y - oy))
+            if eje_u == "X":
+                return (abs(y - oy), abs(x - ox))
+            return (math.hypot(x - ox, y - oy), abs(x - ox), abs(y - oy))
+
+        puntos = sorted(puntos, key=_key_pt)
+
+    def _radio_typ_dinamico(pts, n_anillos=1):
+        """
+        Radio según separación entre miembros: evita columnas de círculos
+        solapados; en cluster concéntrico usa paso proporcional a n.
+        """
+        r_base = float(RADIO_MARCA_TYP_CM)
+        r_min = float(RADIO_MARCA_TYP_INTERIOR_CM)
+        if len(pts) >= 2:
+            dmin = None
+            for i in range(len(pts)):
+                for j in range(i + 1, len(pts)):
+                    d = math.hypot(pts[i][0] - pts[j][0], pts[i][1] - pts[j][1])
+                    if d < 1e-6:
+                        continue
+                    dmin = d if dmin is None else min(dmin, d)
+            if dmin is not None and dmin < float(SEP_MIN_MARCA_TYP_CM) * 2.2:
+                # Piezas cercanas (p. ej. columna de pines): círculos más chicos.
+                r_base = max(r_min, min(r_base, dmin * 0.38))
+        if n_anillos <= 1:
+            return [r_base]
+        r_in = max(0.12, min(r_min, r_base * 0.42))
+        r_out = max(r_base, r_in + 0.12 * (n_anillos - 1))
+        paso = (r_out - r_in) / max(1, n_anillos - 1)
+        return [r_in + i * max(0.12, paso) for i in range(n_anillos)]
+
+    def _poner_letras(centros_radio):
+        """centros_radio: lista (x, y, radio_exterior) YA ordenada cerca→lejos."""
+        if not etiquetar_letras or inv_app is None:
+            return
+        if len(centros_radio) < 2:
+            return
+        ocupados = [(c[0], c[1]) for c in centros_radio]
+        for i, (cx, cy, radio) in enumerate(centros_radio):
+            letra = letra_typ_indice(i)
+            lx, ly = offset_letra_typ(cx, cy, radio, ocupados)
+            ocupados.append((lx, ly))
+            _etiqueta_letra_typ(sketch, tg, lx, ly, letra, inv_app, color)
+
+    if anillos_por_cluster:
+        # Agrupar marcas casi coincidentes. Centro = promedio del cluster
+        # (puntos ya van centrados en la pieza; el promedio evita sesgo al
+        # primer miembro cuando hay micro-desfases de proyección).
+        # ``puntos`` ya viene ordenado cerca→lejos: el orden de clusters
+        # preserva A,B,C.
+        clusters = []  # {sx, sy, n}
+        tol = float(SEP_MIN_MARCA_TYP_CM)
+        for x, y in puntos:
+            puesto = False
+            for c in clusters:
+                cx0 = c["sx"] / c["n"]
+                cy0 = c["sy"] / c["n"]
+                if math.hypot(x - cx0, y - cy0) <= tol:
+                    c["sx"] += float(x)
+                    c["sy"] += float(y)
+                    c["n"] = int(c["n"]) + 1
+                    puesto = True
+                    break
+            if not puesto:
+                clusters.append({"sx": float(x), "sy": float(y), "n": 1})
+        centros = [(c["sx"] / c["n"], c["sy"] / c["n"]) for c in clusters]
+        letras_info = []
+        for c, (cx_c, cy_c) in zip(clusters, centros):
+            n = max(1, int(c["n"]))
+            if n > 1:
+                radios = _radio_typ_dinamico([(cx_c, cy_c)], n)
+            else:
+                radios = _radio_typ_dinamico(
+                    centros if len(centros) > 1 else [(cx_c, cy_c)], 1
+                )
+            for radio in radios:
+                _circulo_cota_sketch(
+                    sketch,
+                    tg,
+                    cx_c,
+                    cy_c,
+                    float(radio),
+                    color,
+                    line_weight=PESO_LINEA_TYP_CM,
+                )
+            letras_info.append((cx_c, cy_c, float(radios[-1])))
+        _poner_letras(letras_info)
         return
+
     vistos = set()
-    for miembro in miembros[1:]:
-        x, y = _punto_geometria_acotada(
-            miembro, eje, valor_medida=valor_medida
-        )
+    pts_unicos = []
+    for x, y in puntos:
         clave = (round(x, 3), round(y, 3))
         if clave in vistos:
             continue
         vistos.add(clave)
-        _circulo_cota_sketch(sketch, tg, x, y, RADIO_MARCA_TYP_CM, color)
+        pts_unicos.append((x, y))
+    radios_uni = (
+        _radio_typ_dinamico(pts_unicos, 1)
+        if (un_solo_anillo and pts_unicos)
+        else [float(RADIO_MARCA_TYP_CM)]
+    )
+    radio_uni = float(radios_uni[0])
+    letras_info = []
+    for x, y in pts_unicos:
+        if un_solo_anillo:
+            _circulo_cota_sketch(
+                sketch,
+                tg,
+                x,
+                y,
+                radio_uni,
+                color,
+                line_weight=PESO_LINEA_TYP_CM,
+            )
+            letras_info.append((x, y, radio_uni))
+            continue
+        anillos = (
+            (RADIO_MARCA_TYP_CM, PESO_LINEA_TYP_CM),
+            (RADIO_MARCA_TYP_MEDIO_CM, PESO_LINEA_TYP_CM),
+            (RADIO_MARCA_TYP_INTERIOR_CM, PESO_LINEA_TYP_INT_CM),
+        )
+        for radio, peso in anillos:
+            for delta in _OFFSETS_GROSOR_TYP_CM:
+                r = float(radio) + float(delta)
+                if r <= 0.05:
+                    continue
+                _circulo_cota_sketch(
+                    sketch, tg, x, y, r, color, line_weight=peso
+                )
+        letras_info.append((x, y, float(RADIO_MARCA_TYP_CM)))
+    _poner_letras(letras_info)
 
 
 def _nivel_cota_y(indice, total, base_izq, base_der, paso_y):
@@ -4517,8 +5166,98 @@ def _valor_real_desde_hoja(vista, inicio, final, hoja):
         return ""
 
 
+def _trazo_constructiva_en_vista(sketch, tg, vista, eje, x_geo, y_geo, color):
+    """
+    Línea constructiva azul seccionada según el eje acotado.
+
+    X → vertical a lo alto de la vista; Y → horizontal a lo ancho.
+    Aclara la posición cuando la pieza no aporta silueta HLR en esa vista.
+    """
+    try:
+        left = float(vista.Left)
+        right = left + float(vista.Width)
+        top = float(vista.Top)
+        bot = top - float(vista.Height)
+    except Exception:
+        return
+    if eje == "X":
+        _linea_discontinua_sketch(
+            sketch, tg, float(x_geo), bot, float(x_geo), top, color
+        )
+    else:
+        _linea_discontinua_sketch(
+            sketch, tg, left, float(y_geo), right, float(y_geo), color
+        )
+
+
+def _dibujar_constructivas_miembros(
+    sketch,
+    tg,
+    vista,
+    eje,
+    referencia,
+    color,
+    valor_medida=None,
+    toque_real=False,
+    trazos_vistos=None,
+    omitir_coords=None,
+):
+    """Constructivas solo en miembros sin silueta HLR usable; sin duplicar trazos."""
+    miembros = list(referencia.get("miembros") or [])
+    if not miembros:
+        miembros = [referencia]
+    flagged = [m for m in miembros if m.get("constructiva")]
+    if not flagged and referencia.get("constructiva"):
+        flagged = list(miembros)
+    vistos = set()
+    omitir = set(omitir_coords or [])
+    for miembro in flagged:
+        if toque_real:
+            x, y = _punto_toque_real_pieza(miembro, eje)
+        else:
+            x, y = _punto_geometria_acotada(
+                miembro, eje, valor_medida=valor_medida
+            )
+        clave_pt = (round(x, 2), round(y, 2))
+        if clave_pt in vistos:
+            continue
+        vistos.add(clave_pt)
+        # Misma X (o Y) que la extensión de la cota → no repetir constructiva.
+        if eje == "X" and round(float(x), 2) in omitir:
+            continue
+        if eje == "Y" and round(float(y), 2) in omitir:
+            continue
+        try:
+            left = float(vista.Left)
+            right = left + float(vista.Width)
+            top = float(vista.Top)
+            bot = top - float(vista.Height)
+        except Exception:
+            left = right = top = bot = None
+        if eje == "X" and left is not None:
+            clave = _clave_trazo_hv("X", x, bot, x, top)
+        elif eje == "Y" and left is not None:
+            clave = _clave_trazo_hv("Y", left, y, right, y)
+        else:
+            clave = ("PT", round(x, 2), round(y, 2))
+        if trazos_vistos is not None:
+            if clave in trazos_vistos:
+                continue
+            trazos_vistos.add(clave)
+        _trazo_constructiva_en_vista(sketch, tg, vista, eje, x, y, color)
+        tick = 0.35
+        if eje == "X":
+            _linea_cota_sketch(sketch, tg, x, y - tick, x, y + tick, color)
+        else:
+            _linea_cota_sketch(sketch, tg, x - tick, y, x + tick, y, color)
+
+
 def _dibujar_cotas_hv_desde_origen(
-    hoja, vista, tg, inv_app, posiciones_x, posiciones_y, origen_x, origen_y
+    hoja, vista, tg, inv_app, posiciones_x, posiciones_y, origen_x, origen_y,
+    typ_un_anillo=False,
+    dibujar_constructivas=False,
+    anclar_toque_real=False,
+    dato_origen=None,
 ):
     """
     Cotas gráficas H/V con líneas, extensiones, flechas y valor real.
@@ -4527,24 +5266,41 @@ def _dibujar_cotas_hv_desde_origen(
     AddLinear -> alineadas diagonales; Ordinate -> números sin líneas.
     Las vistas son ortográficas y se regeneran en cada corrida, por lo que las
     posiciones y valores se obtienen de su escala real en ese instante.
+
+    ``typ_un_anillo``: un círculo TYP grueso (ensambles) en lugar de dona de 3.
+    ``dibujar_constructivas``: si un miembro trae ``constructiva=True``
+    (sin silueta HLR en esa vista), traza línea azul seccionada.
+    ``anclar_toque_real``: extremo de cota + extensión + marcas = tip/borde
+    real de la pieza (sin desfase respecto a lo acotado).
+    ``dato_origen``: envolvente/HLR del ancla para que la extensión de inicio
+    toque geometría real (no el rincón AABB vacío).
+
+    Devuelve ``(creadas, fallos, valores_texto)`` — números dibujados sin TYP.
     """
     _borrar_sketches_cotas(hoja)
+    valores_texto = []
     try:
         sketch = hoja.Sketches.Add()
         sketch.Name = PREFIJO_SKETCH_COTAS + "HV"
         sketch.Edit()
     except Exception as error:
         log(f"    ERROR creando sketch de cotas H/V: {error}")
-        return 0, len(posiciones_x) + len(posiciones_y)
+        return 0, len(posiciones_x) + len(posiciones_y), valores_texto
 
     color = None
+    color_typ = None
     try:
         color = inv_app.TransientObjects.CreateColor(0, 0, 128)
     except Exception:
         pass
+    try:
+        color_typ = inv_app.TransientObjects.CreateColor(*COLOR_MARCA_TYP_RGB)
+    except Exception:
+        color_typ = color
 
     creadas = 0
     fallos = 0
+    trazos_vistos = set()
     try:
         base_abajo = float(vista.Top) - float(vista.Height) - OFFSET_COTA
         base_izq = float(vista.Left) - OFFSET_COTA
@@ -4555,31 +5311,116 @@ def _dibujar_cotas_hv_desde_origen(
 
         for indice, pos in enumerate(posiciones_x):
             rep = (pos.get("miembros") or [pos])[0]
-            x = float(pos["valor"])
             y_dim = base_abajo - indice * paso_x
-            # Extensión en la MISMA X que cierra la cota (no la del miembro TYP).
-            x_geo, y_geo = _punto_geometria_acotada(rep, "X", valor_medida=x)
+            if anclar_toque_real:
+                x_geo, y_geo = _punto_toque_real_pieza(rep, "X")
+                x = float(x_geo)
+                ox_t, oy_t = _punto_toque_origen(
+                    dato_origen, "X", origen_x, origen_y
+                )
+            else:
+                x = float(pos["valor"])
+                x_geo, y_geo = _punto_geometria_acotada(
+                    rep, "X", valor_medida=x
+                )
+                ox_t, oy_t = float(origen_x), float(origen_y)
             valor = _valor_real_desde_hoja(vista, origen_x, x, hoja)
             if not valor:
                 fallos += 1
                 continue
 
             ok = _linea_cota_sketch(sketch, tg, origen_x, y_dim, x, y_dim, color)
-            ok = (
-                _linea_cota_sketch(
-                    sketch, tg, origen_x, origen_y, origen_x, y_dim, color
+            # Extensión de INICIO: desde toque real del ancla (no rincón vacío).
+            clave_orig = _clave_trazo_hv("X", origen_x, oy_t, origen_x, y_dim)
+            if clave_orig not in trazos_vistos:
+                trazos_vistos.add(clave_orig)
+                ok = (
+                    _linea_cota_sketch(
+                        sketch, tg, origen_x, oy_t, origen_x, y_dim, color
+                    )
+                    and ok
                 )
-                and ok
+                if anclar_toque_real:
+                    _linea_cota_sketch(
+                        sketch,
+                        tg,
+                        origen_x - 0.35,
+                        oy_t,
+                        origen_x + 0.35,
+                        oy_t,
+                        color,
+                    )
+            usa_const_rep = bool(dibujar_constructivas) and bool(
+                rep.get("constructiva")
             )
-            ok = (
-                _linea_cota_sketch(sketch, tg, x_geo, y_geo, x_geo, y_dim, color)
-                and ok
+            hay_const_miembros = bool(dibujar_constructivas) and (
+                bool(pos.get("constructiva"))
+                or any(
+                    m.get("constructiva")
+                    for m in (pos.get("miembros") or [])
+                )
             )
+            clave_ext = _clave_trazo_hv("X", x_geo, y_geo, x_geo, y_dim)
+            if clave_ext not in trazos_vistos:
+                trazos_vistos.add(clave_ext)
+                if usa_const_rep:
+                    ok = (
+                        _linea_discontinua_sketch(
+                            sketch, tg, x_geo, y_geo, x_geo, y_dim, color_typ
+                        )
+                        is not None
+                    ) and ok
+                    ok = (
+                        _linea_cota_sketch(
+                            sketch,
+                            tg,
+                            x_geo,
+                            y_geo,
+                            x_geo,
+                            y_geo + (0.25 if y_dim >= y_geo else -0.25),
+                            color_typ,
+                        )
+                        is not None
+                    ) and ok
+                else:
+                    ok = (
+                        _linea_cota_sketch(
+                            sketch, tg, x_geo, y_geo, x_geo, y_dim, color
+                        )
+                        and ok
+                    )
+            if hay_const_miembros:
+                _dibujar_constructivas_miembros(
+                    sketch,
+                    tg,
+                    vista,
+                    "X",
+                    pos,
+                    color_typ,
+                    valor_medida=x,
+                    toque_real=anclar_toque_real,
+                    trazos_vistos=trazos_vistos,
+                    omitir_coords={round(float(x_geo), 2), round(float(origen_x), 2)},
+                )
             _flechas_horizontales(sketch, tg, origen_x, x, y_dim, color)
             _marcas_typ_en_accesorios(
-                sketch, tg, "X", pos, color, valor_medida=x
+                sketch,
+                tg,
+                "X",
+                pos,
+                color_typ,
+                valor_medida=x,
+                un_solo_anillo=False,
+                toque_real=anclar_toque_real,
+                anillos_por_cluster=typ_un_anillo,
+                inv_app=inv_app,
+                etiquetar_letras=True,
+                origen_x=origen_x,
+                origen_y=origen_y,
             )
             texto_valor = f"{valor} TYP" if pos.get("typ") else valor
+            texto_valor = asegurar_unidad_pulgadas(texto_valor)
+            valores_texto.append(str(valor))
             dy_txt = 0.16
             texto = _texto_cota_sketch(
                 sketch,
@@ -4596,30 +5437,115 @@ def _dibujar_cotas_hv_desde_origen(
 
         for indice, pos in enumerate(posiciones_y):
             rep = (pos.get("miembros") or [pos])[0]
-            y = float(pos["valor"])
             x_dim = _nivel_cota_y(indice, n_y, base_izq, base_der, paso_y)
-            x_geo, y_geo = _punto_geometria_acotada(rep, "Y", valor_medida=y)
+            if anclar_toque_real:
+                x_geo, y_geo = _punto_toque_real_pieza(rep, "Y")
+                y = float(y_geo)
+                ox_t, oy_t = _punto_toque_origen(
+                    dato_origen, "Y", origen_x, origen_y
+                )
+            else:
+                y = float(pos["valor"])
+                x_geo, y_geo = _punto_geometria_acotada(
+                    rep, "Y", valor_medida=y
+                )
+                ox_t, oy_t = float(origen_x), float(origen_y)
             valor = _valor_real_desde_hoja(vista, origen_y, y, hoja)
             if not valor:
                 fallos += 1
                 continue
 
             ok = _linea_cota_sketch(sketch, tg, x_dim, origen_y, x_dim, y, color)
-            ok = (
-                _linea_cota_sketch(
-                    sketch, tg, origen_x, origen_y, x_dim, origen_y, color
+            clave_orig = _clave_trazo_hv("Y", ox_t, origen_y, x_dim, origen_y)
+            if clave_orig not in trazos_vistos:
+                trazos_vistos.add(clave_orig)
+                ok = (
+                    _linea_cota_sketch(
+                        sketch, tg, ox_t, origen_y, x_dim, origen_y, color
+                    )
+                    and ok
                 )
-                and ok
+                if anclar_toque_real:
+                    _linea_cota_sketch(
+                        sketch,
+                        tg,
+                        ox_t,
+                        origen_y - 0.35,
+                        ox_t,
+                        origen_y + 0.35,
+                        color,
+                    )
+            usa_const_rep = bool(dibujar_constructivas) and bool(
+                rep.get("constructiva")
             )
-            ok = (
-                _linea_cota_sketch(sketch, tg, x_geo, y_geo, x_dim, y_geo, color)
-                and ok
+            hay_const_miembros = bool(dibujar_constructivas) and (
+                bool(pos.get("constructiva"))
+                or any(
+                    m.get("constructiva")
+                    for m in (pos.get("miembros") or [])
+                )
             )
+            clave_ext = _clave_trazo_hv("Y", x_geo, y_geo, x_dim, y_geo)
+            if clave_ext not in trazos_vistos:
+                trazos_vistos.add(clave_ext)
+                if usa_const_rep:
+                    ok = (
+                        _linea_discontinua_sketch(
+                            sketch, tg, x_geo, y_geo, x_dim, y_geo, color_typ
+                        )
+                        is not None
+                    ) and ok
+                    ok = (
+                        _linea_cota_sketch(
+                            sketch,
+                            tg,
+                            x_geo,
+                            y_geo,
+                            x_geo + (0.25 if x_dim >= x_geo else -0.25),
+                            y_geo,
+                            color_typ,
+                        )
+                        is not None
+                    ) and ok
+                else:
+                    ok = (
+                        _linea_cota_sketch(
+                            sketch, tg, x_geo, y_geo, x_dim, y_geo, color
+                        )
+                        and ok
+                    )
+            if hay_const_miembros:
+                _dibujar_constructivas_miembros(
+                    sketch,
+                    tg,
+                    vista,
+                    "Y",
+                    pos,
+                    color_typ,
+                    valor_medida=y,
+                    toque_real=anclar_toque_real,
+                    trazos_vistos=trazos_vistos,
+                    omitir_coords={round(float(y_geo), 2), round(float(origen_y), 2)},
+                )
             _flechas_verticales(sketch, tg, x_dim, origen_y, y, color)
             _marcas_typ_en_accesorios(
-                sketch, tg, "Y", pos, color, valor_medida=y
+                sketch,
+                tg,
+                "Y",
+                pos,
+                color_typ,
+                valor_medida=y,
+                un_solo_anillo=False,
+                toque_real=anclar_toque_real,
+                anillos_por_cluster=typ_un_anillo,
+                inv_app=inv_app,
+                etiquetar_letras=True,
+                origen_x=origen_x,
+                origen_y=origen_y,
             )
             texto_valor = f"{valor} TYP" if pos.get("typ") else valor
+            texto_valor = asegurar_unidad_pulgadas(texto_valor)
+            valores_texto.append(str(valor))
             dx_txt = 0.16
             if indice >= n_y // 2 and n_y > UMBRAL_COTAS_Y_DOBLE_CARA:
                 dx_txt = -(0.16 + len(texto_valor) * 0.08)
@@ -4642,7 +5568,7 @@ def _dibujar_cotas_hv_desde_origen(
         except Exception:
             pass
 
-    return creadas, fallos
+    return creadas, fallos, valores_texto
 
 
 def _punto_curva_mas_cercano(todas, x, y, tg):
@@ -5032,6 +5958,8 @@ def _construir_grupos_por_tipo(
             origen=origen_x,
             vista=vista,
             hoja=hoja,
+            origen_x=origen_x,
+            origen_y=origen_y,
         )
         py = _agrupar_referencias_typ(
             data["y"],
@@ -5040,6 +5968,8 @@ def _construir_grupos_por_tipo(
             origen=origen_y,
             vista=vista,
             hoja=hoja,
+            origen_x=origen_x,
+            origen_y=origen_y,
         )
         grupos.append(
             {
@@ -5108,8 +6038,81 @@ def _instancias_ordenadas_grupo(grupo):
     ids = list(_ids_en_grupo(grupo))
     return sorted(
         ids,
-        key=lambda pid: _centroide_instancia_en_grupo(grupo, pid),
+        key=lambda pid: (
+            _centroide_instancia_en_grupo(grupo, pid)[1],  # Y primero
+            _centroide_instancia_en_grupo(grupo, pid)[0],  # luego X
+        ),
     )
+
+
+def _clusters_typ_inseparables(grupo):
+    """
+    Conjuntos de instancia que comparten la misma cota consolidada.
+
+    Si dos (o más) miembros ya están en el mismo ``pos`` tipificado,
+    no deben partirse entre láminas P1/P2 (si se separan, cada hoja ve
+    1 miembro y pierde el TYP — Parking Stands 62.063).
+
+    No une filas/columnas distintas entre sí (evita fundir toda una malla
+    en un solo cluster vía X+Y).
+    """
+    parent = {}
+
+    def _find(a):
+        parent.setdefault(a, a)
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    def _union(a, b):
+        ra, rb = _find(str(a)), _find(str(b))
+        if ra != rb:
+            parent[rb] = ra
+
+    for pid in _ids_en_grupo(grupo):
+        parent.setdefault(str(pid), str(pid))
+
+    for pos in (grupo.get("posiciones_x") or []) + (
+        grupo.get("posiciones_y") or []
+    ):
+        ids = []
+        for m in pos.get("miembros") or [pos]:
+            pid = str(m.get("pieza_id") or "")
+            if pid:
+                ids.append(pid)
+        # Solo el grupo de esta cota (misma medida), no cruzar ejes.
+        uniq = []
+        vistos = set()
+        for pid in ids:
+            if pid not in vistos:
+                vistos.add(pid)
+                uniq.append(pid)
+        if len(uniq) >= 2:
+            for i in range(1, len(uniq)):
+                _union(uniq[0], uniq[i])
+
+    buckets = {}
+    for pid in parent:
+        root = _find(pid)
+        buckets.setdefault(root, set()).add(pid)
+    return [frozenset(s) for s in buckets.values()]
+
+
+def _ordenar_clusters_typ(grupo, clusters):
+    """Clusters ordenados por centroide (Y, X) del conjunto."""
+
+    def _key(cluster):
+        cxs, cys = [], []
+        for pid in cluster:
+            cx, cy = _centroide_instancia_en_grupo(grupo, pid)
+            cxs.append(cx)
+            cys.append(cy)
+        if not cxs:
+            return (0.0, 0.0)
+        return (sum(cys) / len(cys), sum(cxs) / len(cxs))
+
+    return sorted(clusters, key=_key)
 
 
 def _tam_chunk_lamina(grupo):
@@ -5139,10 +6142,24 @@ def _subgrupo_desde_ids(
         if str(p.get("pieza_id")) in ids_ok
     ]
     px = _agrupar_referencias_typ(
-        xs, tolerancia, eje="X", origen=origen_x, vista=vista, hoja=hoja
+        xs,
+        tolerancia,
+        eje="X",
+        origen=origen_x,
+        vista=vista,
+        hoja=hoja,
+        origen_x=origen_x,
+        origen_y=origen_y,
     )
     py = _agrupar_referencias_typ(
-        ys, tolerancia, eje="Y", origen=origen_y, vista=vista, hoja=hoja
+        ys,
+        tolerancia,
+        eje="Y",
+        origen=origen_y,
+        vista=vista,
+        hoja=hoja,
+        origen_x=origen_x,
+        origen_y=origen_y,
     )
     sub = dict(grupo)
     sub["posiciones_x"] = px
@@ -5155,8 +6172,10 @@ def _partir_grupos_en_laminas(
     grupos, tolerancia, origen_x, origen_y, vista, hoja
 ):
     """
-    Divide grupos densos en láminas con continuidad espacial (misma pieza,
-    instancias consecutivas en Y/X) para conservar fidelidad en piso.
+    Divide grupos densos en láminas sin romper gemelos TYP.
+
+    Empaca clusters inseparables (misma cota X/Y) enteros. Si un cluster
+    solo supera el cupo, se deja entero (mejor TYP correcto que partir).
     """
     resultado = []
     for grupo in grupos:
@@ -5170,9 +6189,28 @@ def _partir_grupos_en_laminas(
             g["laminas_total"] = 1
             resultado.append(g)
             continue
-        laminas_total = (qty_total + chunk - 1) // chunk
-        for i in range(0, qty_total, chunk):
-            ids_chunk = set(ids_ord[i : i + chunk])
+
+        clusters = _ordenar_clusters_typ(
+            grupo, _clusters_typ_inseparables(grupo)
+        )
+        # Empaque first-fit por orden espacial, sin partir clusters.
+        laminas_ids = []
+        actual = set()
+        for cluster in clusters:
+            cset = set(cluster)
+            if not actual:
+                actual = set(cset)
+                continue
+            if len(actual) + len(cset) <= chunk:
+                actual |= cset
+            else:
+                laminas_ids.append(actual)
+                actual = set(cset)
+        if actual:
+            laminas_ids.append(actual)
+
+        laminas_total = max(1, len(laminas_ids))
+        for i, ids_chunk in enumerate(laminas_ids, start=1):
             sub = _subgrupo_desde_ids(
                 grupo,
                 ids_chunk,
@@ -5183,7 +6221,7 @@ def _partir_grupos_en_laminas(
                 hoja,
             )
             sub["qty_total"] = qty_total
-            sub["lamina"] = i // chunk + 1
+            sub["lamina"] = i
             sub["laminas_total"] = laminas_total
             resultado.append(sub)
     return resultado
@@ -5650,6 +6688,75 @@ def _acotar_vista(
             )
         elif es_lug:
             log("    AVISO: no se detectó línea de contacto del lifting lug.")
+
+    # Completar X/Y faltantes (tip lejano): misma filosofía que ensambles
+    # instructivo — cada pieza no-panel debe tener X e Y vs el origen.
+    ids_con_x = {str(p["pieza_id"]) for p in posiciones_x}
+    ids_con_y = {str(p["pieza_id"]) for p in posiciones_y}
+    for nombre, nombre_pieza, datos in grupos_en_cara:
+        if nombre in nombres_panel:
+            continue
+        faltan_x = str(nombre) not in ids_con_x
+        faltan_y = str(nombre) not in ids_con_y
+        if not faltan_x and not faltan_y:
+            continue
+        if _es_pieza_solo_centro(nombre_pieza, datos, None):
+            continue
+        es_lug = _es_nombre_lug(nombre_pieza)
+        tol_pos = (0.01 if es_lug else TOLERANCIA_COTA_CM) * escala_hoja
+        datos_inicio = _datos_para_inicio_cota(
+            datos, vista, tg, nombre_pieza=nombre_pieza
+        )
+        if faltan_x:
+            der = _elegir_extrema(datos_inicio, "der", tol)
+            if der is not None:
+                dato_x = dict(der)
+                dato_x["curvas"] = list(datos_inicio)
+                dato_x.pop("puntos_modelo", None)
+                _agregar_posicion(
+                    posiciones_x,
+                    der["maxx"],
+                    dato_x,
+                    tol_pos,
+                    "der",
+                    nombre,
+                )
+                ids_con_x.add(str(nombre))
+                log(f"    forzada X(der) → {nombre_pieza[:36]}")
+        if faltan_y:
+            sup = _elegir_extrema(datos_inicio, "sup", tol)
+            if sup is not None:
+                dato_y = dict(sup)
+                dato_y["curvas"] = list(datos_inicio)
+                dato_y.pop("puntos_modelo", None)
+                _agregar_posicion(
+                    posiciones_y,
+                    sup["maxy"],
+                    dato_y,
+                    tol_pos,
+                    "sup",
+                    nombre,
+                )
+                ids_con_y.add(str(nombre))
+                log(f"    forzada Y(sup) → {nombre_pieza[:36]}")
+
+    incompletos_xy = []
+    for nombre, nombre_pieza, _datos in grupos_en_cara:
+        if nombre in nombres_panel:
+            continue
+        tiene_x = str(nombre) in ids_con_x
+        tiene_y = str(nombre) in ids_con_y
+        if not tiene_x or not tiene_y:
+            ejes = (
+                ("X" if tiene_x else "")
+                + ("Y" if tiene_y else "")
+            ) or "ninguno"
+            incompletos_xy.append(f"{nombre_pieza[:28]}:{ejes}")
+    if incompletos_xy:
+        log(
+            "    AVISO piezas sin X+Y completo: "
+            + ", ".join(incompletos_xy[:10])
+        )
 
     posiciones_x = [
         p for p in posiciones_x
@@ -6408,6 +7515,12 @@ def construir_mapa_piezas_desde_seleccion(ensamble, seleccion):
             f"(occ={seleccion['base'].get('occ_name', '')})"
         )
     log(f"  Mapa TOP: {len(mapa['TOP'])} nombres")
+    try:
+        from generador_tanque_completo import deduplicar_mapa_piezas_por_cara
+
+        mapa = deduplicar_mapa_piezas_por_cara(mapa)
+    except Exception as err:
+        log(f"  AVISO: dedupe SEGM del mapa falló ({err})")
     LAST_PIEZAS_POR_CARA.clear()
     for cara, piezas in mapa.items():
         LAST_PIEZAS_POR_CARA[cara] = set(piezas)
@@ -7064,52 +8177,108 @@ def _recortar_jpg_caras(
     hoja, ruta_temporal, ruta_final, vista_objetivo=None, bbox_forzada=None
 ):
     """
-    Encuadra vista + cotas. Nunca recortar solo la geometria si hay cotas.
+    Encuadra vista + cotas. Si el bbox ideal se sale del sheet, completa
+    con canvas blanco (mismo criterio que ``_recortar_exportacion_jpg``)
+    para no cortar texto/flechas.
     """
     if Image is None:
         os.replace(ruta_temporal, ruta_final)
         return
 
     if bbox_forzada is not None:
-        bbox_hoja, n_cotas = bbox_forzada, 1
+        bbox_ideal, n_cotas = list(bbox_forzada), 1
     else:
-        bbox_hoja, n_cotas = _bbox_contenido_hoja(hoja, vista_objetivo)
-    if not bbox_hoja:
+        bbox_ideal, n_cotas = _bbox_contenido_hoja(hoja, vista_objetivo)
+    if not bbox_ideal:
         os.replace(ruta_temporal, ruta_final)
         return
 
     try:
-        img = Image.open(ruta_temporal)
-        img_w, img_h = img.size
-        margen = MARGEN_RECORTE_CARAS
-        # Las cotas H/V del DrawingSketch ya tienen su bbox completo:
-        # margen pequeño para encuadrar, no volver a exportar toda la hoja.
+        img_raw = Image.open(ruta_temporal)
         try:
-            for i in range(1, hoja.Sketches.Count + 1):
-                if str(hoja.Sketches.Item(i).Name).upper().startswith(
-                    PREFIJO_SKETCH_COTAS
-                ):
-                    # La cota y el modelo ya están incluidos en su bbox.
-                    # Cualquier margen de hoja vuelve a introducir el marco
-                    # impreso del machote.
-                    margen = 0.0
-                    break
-        except Exception:
-            pass
-        if n_cotas > 0:
-            margen = max(margen, 0.0)
+            from generador_vistas import _blanquear_fondo
 
-        left_px, upper_px, right_px, lower_px = _bbox_hoja_a_pixeles(
-            hoja, bbox_hoja, img_w, img_h, margen_ratio=margen
-        )
+            img = _blanquear_fondo(img_raw)
+        except Exception:
+            img = img_raw.convert("RGB")
+        if img is not img_raw:
+            img_raw.close()
+        img_w, img_h = img.size
+        sheet_w = float(hoja.Width)
+        sheet_h = float(hoja.Height)
+        if sheet_w <= 1e-6 or sheet_h <= 1e-6:
+            img.save(ruta_final, quality=95, subsampling=0)
+            img.close()
+            try:
+                os.remove(ruta_temporal)
+            except OSError:
+                pass
+            return
+
+        minx_i, maxx_i, miny_i, maxy_i = [float(v) for v in bbox_ideal]
+        # Respiro mínimo extra (texto rotado / flechas cerca del borde).
+        if n_cotas > 0:
+            minx_i -= 0.25
+            maxx_i += 0.25
+            miny_i -= 0.30
+            maxy_i += 0.40
+
+        ancho_ideal = max(1e-6, maxx_i - minx_i)
+        alto_ideal = max(1e-6, maxy_i - miny_i)
+
+        # Intersección con lo que sí está en el JPG del sheet.
+        minx_c = max(0.0, minx_i)
+        maxx_c = min(sheet_w, maxx_i)
+        miny_c = max(0.0, miny_i)
+        maxy_c = min(sheet_h, maxy_i)
+        if maxx_c <= minx_c or maxy_c <= miny_c:
+            img.save(ruta_final, quality=95, subsampling=0)
+            img.close()
+            try:
+                os.remove(ruta_temporal)
+            except OSError:
+                pass
+            return
+
+        left_px = int((minx_c / sheet_w) * img_w)
+        right_px = int((maxx_c / sheet_w) * img_w)
+        upper_px = int(((sheet_h - maxy_c) / sheet_h) * img_h)
+        lower_px = int(((sheet_h - miny_c) / sheet_h) * img_h)
+        left_px = max(0, min(left_px, img_w - 1))
+        right_px = max(left_px + 1, min(right_px, img_w))
+        upper_px = max(0, min(upper_px, img_h - 1))
+        lower_px = max(upper_px + 1, min(lower_px, img_h))
+
         if (right_px - left_px) < 80 or (lower_px - upper_px) < 80:
             img.close()
             os.replace(ruta_temporal, ruta_final)
             return
 
-        recorte = img.crop((left_px, upper_px, right_px, lower_px)).convert("RGB")
-        recorte.save(ruta_final, quality=95, subsampling=0)
+        recorte = img.crop((left_px, upper_px, right_px, lower_px)).convert(
+            "RGB"
+        )
         img.close()
+
+        escala_x = img_w / sheet_w
+        escala_y = img_h / sheet_h
+        canvas_w = max(recorte.size[0], int(round(ancho_ideal * escala_x)))
+        canvas_h = max(recorte.size[1], int(round(alto_ideal * escala_y)))
+        pad_izq_cm = max(0.0, minx_c - minx_i)
+        pad_sup_cm = max(0.0, maxy_i - maxy_c)
+        offset_x = max(
+            0, min(int(round(pad_izq_cm * escala_x)), canvas_w - recorte.size[0])
+        )
+        offset_y = max(
+            0, min(int(round(pad_sup_cm * escala_y)), canvas_h - recorte.size[1])
+        )
+
+        if canvas_w > recorte.size[0] or canvas_h > recorte.size[1]:
+            canvas = Image.new("RGB", (canvas_w, canvas_h), (255, 255, 255))
+            canvas.paste(recorte, (offset_x, offset_y))
+            canvas.save(ruta_final, quality=95, subsampling=0)
+        else:
+            recorte.save(ruta_final, quality=95, subsampling=0)
+
         try:
             os.remove(ruta_temporal)
         except OSError:
@@ -7146,6 +8315,44 @@ def _nombre_archivo_referencia(indice, eje, referencia):
     )
 
 
+def _mitades_caja_texto_cota(texto, vertical=False):
+    """
+    Mitad del TextBox estimado (cm) para encuadre JPG.
+
+    ``AddFitted`` + negrita + ``COTA_FONT_SIZE_CM`` desborda con facilidad
+    en cotas Y cortas (texto rotado 90°): el largo del string va en Y y
+    suele pasar las flechas. Sin esto el recorte corta número y tip.
+    """
+    t = str(texto or "0.000 in").strip() or "0.000 in"
+    n = max(4, len(t))
+    fs = float(COTA_FONT_SIZE_CM)
+    largo = n * fs * 0.85  # ancho tipográfico del string
+    alto = fs * 1.60  # alto de línea (ascenders / negrita)
+    # Holgura extra por ancla AddFitted (no siempre es el centro geométrico).
+    if vertical:
+        return (alto * 0.65 + 0.35, largo * 0.55 + 0.45)  # half_x, half_y
+    return (largo * 0.55 + 0.35, alto * 0.65 + 0.35)
+
+
+def _texto_aprox_para_foto(vista, origen, valor_hoja, typ=False):
+    """Texto probable de cota (para estimar bbox sin COM de TextBox)."""
+    try:
+        from cota_estilo import texto_cota_limpio, asegurar_unidad_cota
+
+        escala = abs(float(vista.Scale))
+        if escala <= EPS:
+            raise ValueError("escala")
+        # hoja cm / escala = modelo cm
+        cm = abs(float(valor_hoja) - float(origen)) / escala
+        s = texto_cota_limpio(cm)
+        if not s:
+            s = "0.000"
+        texto = asegurar_unidad_cota(f"{s} TYP" if typ else s)
+        return texto
+    except Exception:
+        return "0.000 in"
+
+
 def _bbox_foto_grupo(vista, posiciones_x, posiciones_y, origen_x, origen_y):
     """Caja de recorte para una foto: vista completa + gráficos de cota."""
     minx = float(vista.Left)
@@ -7162,6 +8369,7 @@ def _bbox_foto_grupo(vista, posiciones_x, posiciones_y, origen_x, origen_y):
     base_izq = minx - OFFSET_COTA
     base_der = maxx + OFFSET_COTA
     puntos = [(origen_x, origen_y)]
+    flecha = float(TAM_FLECHA_COTA) + 0.15
 
     for indice, referencia in enumerate(posiciones_x):
         rep = (referencia.get("miembros") or [referencia])[0]
@@ -7169,11 +8377,20 @@ def _bbox_foto_grupo(vista, posiciones_x, posiciones_y, origen_x, origen_y):
         y_dim = base_abajo - indice * paso_x
         x_geo, y_geo = _punto_geometria_acotada(rep, "X", valor_medida=x)
         dy_txt = 0.16
+        tx = (origen_x + x) * 0.5
+        ty = y_dim + dy_txt
+        txt = _texto_aprox_para_foto(
+            vista, origen_x, x, typ=bool(referencia.get("typ"))
+        )
+        hx, hy = _mitades_caja_texto_cota(txt, vertical=False)
         puntos.extend([
             (origen_x, y_dim),
             (x, y_dim),
             (x_geo, y_geo),
-            ((origen_x + x) * 0.5, y_dim + dy_txt + 0.45),
+            (origen_x, y_dim - flecha),
+            (x, y_dim + flecha),
+            (tx - hx, ty - hy),
+            (tx + hx, ty + hy),
         ])
         for miembro in (referencia.get("miembros") or [])[1:]:
             mx, my = _punto_geometria_acotada(miembro, "X", valor_medida=x)
@@ -7184,14 +8401,23 @@ def _bbox_foto_grupo(vista, posiciones_x, posiciones_y, origen_x, origen_y):
         y = float(referencia["valor"])
         x_dim = _nivel_cota_y(indice, n_y, base_izq, base_der, paso_y)
         x_geo, y_geo = _punto_geometria_acotada(rep, "Y", valor_medida=y)
+        txt = _texto_aprox_para_foto(
+            vista, origen_y, y, typ=bool(referencia.get("typ"))
+        )
         dx_txt = 0.16
         if indice >= n_y // 2 and n_y > UMBRAL_COTAS_Y_DOBLE_CARA:
-            dx_txt = -(0.16 + 1.2)
+            dx_txt = -(0.16 + len(txt) * 0.08)
+        tx = x_dim + dx_txt
+        ty = (origen_y + y) * 0.5
+        hx, hy = _mitades_caja_texto_cota(txt, vertical=True)
         puntos.extend([
             (x_dim, origen_y),
             (x_dim, y),
             (x_geo, y_geo),
-            (x_dim + dx_txt, (origen_y + y) * 0.5),
+            (x_dim - flecha, origen_y),
+            (x_dim + flecha, y),
+            (tx - hx, ty - hy),
+            (tx + hx, ty + hy),
         ])
         for miembro in (referencia.get("miembros") or [])[1:]:
             mx, my = _punto_geometria_acotada(miembro, "Y", valor_medida=y)
@@ -7203,31 +8429,45 @@ def _bbox_foto_grupo(vista, posiciones_x, posiciones_y, origen_x, origen_y):
         miny = min(miny, float(y))
         maxy = max(maxy, float(y))
 
-    pad_izq = res["reserva_izq"] * 0.15 + MARGEN_TEXTO_COTA_CM
-    pad_der = res["reserva_der"] * 0.15 + MARGEN_DERECHO_FOTO_CM
-    pad_inf = res["reserva_inf"] * 0.12 + MARGEN_TEXTO_COTA_CM
+    pad_izq = max(
+        MARGEN_FOTO_LAT_CM,
+        res["reserva_izq"] * 0.12 + MARGEN_TEXTO_COTA_CM,
+    )
+    pad_der = max(
+        MARGEN_DERECHO_FOTO_CM + 0.35,
+        res["reserva_der"] * 0.12 + MARGEN_DERECHO_FOTO_CM,
+    )
+    pad_inf = max(
+        MARGEN_FOTO_INF_CM,
+        res["reserva_inf"] * 0.10 + MARGEN_TEXTO_COTA_CM,
+    )
+    pad_sup = MARGEN_FOTO_SUP_CM
     return [
         minx - pad_izq,
         maxx + pad_der,
         miny - pad_inf,
-        maxy + 0.45,
+        maxy + pad_sup,
     ]
 
 
-def _nombre_archivo_grupo(indice, grupo):
+def _nombre_archivo_grupo(indice, grupo, nombre_job="JOB", valor_cota=None):
     """
     Nombre JPG por cota individual, p. ej.:
-      001_XMIN_TYP_SP-852_2.jpg
-      017_XCENTRO_62176-1251-P06_ROD_689.jpg
+      MODELO VANTRAN 25432__SP-852_2__XMIN_TYP_4.25.jpg
+      MODELO VANTRAN 25432__Solera Segmento 1__YMIN_12.jpg
+
+    ``valor_cota`` es el número visible en la captura (no el índice).
     """
+    try:
+        from nomenclatura_capturas import armar_nombre_captura_referencia
+    except Exception:
+        armar_nombre_captura_referencia = None
+
     pieza = _limpiar_nombre_archivo(grupo.get("clave", "PIEZA"))[:70] or "PIEZA"
     qty = int(grupo.get("qty") or 1)
     qty_total = int(grupo.get("qty_total") or qty)
     lamina = int(grupo.get("lamina") or 1)
     laminas_total = int(grupo.get("laminas_total") or 1)
-    prefijo_lam = ""
-    if laminas_total > 1:
-        prefijo_lam = f"p{lamina}of{laminas_total}_"
 
     px = grupo.get("posiciones_x") or []
     py = grupo.get("posiciones_y") or []
@@ -7242,17 +8482,34 @@ def _nombre_archivo_grupo(indice, grupo):
     elif len(py) == 1 and not px:
         eje, ref = "Y", py[0]
 
+    sufijo_valor = valor_cota if valor_cota not in (None, "") else indice
+
     if eje and ref is not None:
         etiqueta = _etiqueta_referencia(eje, ref)
-        typ = "TYP_" if ref.get("typ") else ""
-        return f"{indice:03d}_{prefijo_lam}{etiqueta}_{typ}{pieza}.jpg"
+        if laminas_total > 1:
+            etiqueta = f"p{lamina}of{laminas_total}_{etiqueta}"
+        typ = bool(ref.get("typ"))
+        if armar_nombre_captura_referencia:
+            return (
+                armar_nombre_captura_referencia(
+                    nombre_job, pieza, etiqueta, sufijo_valor, typ=typ
+                )
+                + ".jpg"
+            )
+        typ_txt = "_TYP" if typ else ""
+        return f"{indice:03d}_{etiqueta}{typ_txt}_{pieza}.jpg"
 
+    etiqueta_qty = f"QTY{qty}"
     if laminas_total > 1:
+        etiqueta_qty = f"p{lamina}of{laminas_total}_QTY{qty}of{qty_total}"
+    if armar_nombre_captura_referencia:
         return (
-            f"{indice:03d}_{prefijo_lam}"
-            f"QTY{qty}of{qty_total}_{pieza}.jpg"
+            armar_nombre_captura_referencia(
+                nombre_job, pieza, etiqueta_qty, sufijo_valor, typ=False
+            )
+            + ".jpg"
         )
-    return f"{indice:03d}_QTY{qty}_{pieza}.jpg"
+    return f"{indice:03d}_{etiqueta_qty}_{pieza}.jpg"
 
 
 def _limpiar_exportaciones_cara(carpeta):
@@ -7287,11 +8544,15 @@ _RE_JPG_REFERENCIA = re.compile(
 
 def _extraer_pieza_de_jpg_referencia(nombre_archivo):
     """
-    `001_QTY4_SP-852_2.jpg` → `SP-852_2`
-    `001_p1of2_QTY2of4_PIEZA.jpg` → `PIEZA`
-    `001_XMIN_TYP_62176-1248-P35_935.jpg` → `62176-1248-P35_935`
-    `017_XCENTRO_62176-1251-P06_ROD_689.jpg` → `62176-1251-P06_ROD_689`
+    `JOB__SP-852_2__XMIN_TYP_001.jpg` → `SP-852_2`
+    `001_XMIN_TYP_62176-1248-P35_935.jpg` → `62176-1248-P35_935` (legacy)
     """
+    try:
+        from nomenclatura_capturas import extraer_item_de_captura_referencia
+
+        return extraer_item_de_captura_referencia(nombre_archivo)
+    except Exception:
+        pass
     base = os.path.splitext(os.path.basename(nombre_archivo))[0]
     match = _RE_JPG_REFERENCIA.match(base)
     if match:
@@ -7375,9 +8636,16 @@ def _exportar_caras_jpg(inv_app, plano, ensamble, planes_cotas):
     exportadas = 0
     esperadas = 0
     tg = inv_app.TransientGeometry
+    try:
+        from nomenclatura_capturas import nombre_job_desde_ensamble
+
+        nombre_job = nombre_job_desde_ensamble(ensamble)
+    except Exception:
+        nombre_job = _nombre_tanque(ensamble)
 
     log("Exportando una fotografía JPG por cota (inicio X/Y o centro)...")
     log("  Modo: encuadre estable por cara (1 Update; sin reframe por JPG)")
+    log(f"  Nomenclatura: {{JOB}}__{{ITEM}}__{{XMIN|…}}_{{NNN}}.jpg  JOB={nombre_job}")
     log(f"  Carpeta: {carpeta_raiz}")
 
     for cara, plan in planes_cotas.items():
@@ -7493,13 +8761,9 @@ def _exportar_caras_jpg(inv_app, plano, ensamble, planes_cotas):
 
         for indice, grupo in enumerate(grupos, start=1):
             temporal = os.path.join(carpeta_cara, f"_tmp_{indice:03d}.jpg")
-            salida = os.path.join(
-                carpeta_cara,
-                _nombre_archivo_grupo(indice, grupo),
-            )
             try:
                 _borrar_sketches_cotas(hoja)
-                creadas, fallos = _dibujar_cotas_hv_desde_origen(
+                creadas, fallos, valores_txt = _dibujar_cotas_hv_desde_origen(
                     hoja,
                     vista,
                     tg,
@@ -7517,6 +8781,26 @@ def _exportar_caras_jpg(inv_app, plano, ensamble, planes_cotas):
                         f"Cotas incompletas del grupo "
                         f"(ok={creadas}/{esperadas_grupo}, fallos={fallos})."
                     )
+
+                # Sufijo = valor dibujado (3.375), nunca el índice de foto.
+                valor_cota = (
+                    str(valores_txt[0]).strip() if valores_txt else ""
+                )
+                if not valor_cota:
+                    log(
+                        f"  AVISO {cara} #{indice}: sin valor de cota "
+                        f"para nombre JPG"
+                    )
+                    valor_cota = "0"
+                salida = os.path.join(
+                    carpeta_cara,
+                    _nombre_archivo_grupo(
+                        indice,
+                        grupo,
+                        nombre_job=nombre_job,
+                        valor_cota=valor_cota,
+                    ),
+                )
 
                 bbox_foto = _bbox_foto_grupo(
                     vista,
@@ -7625,6 +8909,29 @@ def ejecutar(gestionar_com=True, ruta_seleccion=None):
         log(f"Carpeta de salida: {_carpeta_salida_tanque(plano, ensamble)}")
 
         try:
+            from producto_tipo import (
+                aplicar_unidad_producto,
+                clasificar_producto,
+                redirigir_si_board,
+            )
+
+            info = clasificar_producto(ensamble)
+            aplicar_unidad_producto(ensamble=ensamble, info=info)
+        except Exception:
+            from producto_tipo import redirigir_si_board
+
+        desvio = redirigir_si_board(
+            inv_app,
+            plano,
+            ensamble,
+            origen_flujo="CARAS",
+            gestionar_com_board=False,
+            limpiar=True,
+        )
+        if desvio is not None:
+            return bool(desvio)
+
+        try:
             silent_prev = inv_app.SilentOperation
             screen_prev = inv_app.ScreenUpdating
             inv_app.SilentOperation = True
@@ -7721,6 +9028,18 @@ def ejecutar(gestionar_com=True, ruta_seleccion=None):
         log(traceback.format_exc())
         return False
     finally:
+        try:
+            from cota_estilo import set_unidad_cota
+
+            set_unidad_cota("in")
+        except Exception:
+            pass
+        try:
+            from creador_vistas import set_nombre_pieza_completo
+
+            set_nombre_pieza_completo(False)
+        except Exception:
+            pass
         # Siempre dejar el machote limpio (exito o error a media corrida).
         try:
             if plano is not None:

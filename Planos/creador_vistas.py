@@ -1,6 +1,7 @@
 import win32com.client
 import math
 import os
+import re
 import sys
 import time
 import pythoncom
@@ -11,6 +12,54 @@ kLineSegmentCurve = 5123
 kArbitraryViewOrientation = 10763
 kDefaultViewOrientation = 10753
 kHiddenLineRemovedDrawingViewStyle = 32258
+
+# Piezas con iProperty Corte: segunda pasada flat + Estañado (cobre).
+_PIEZAS_CORTE_KEYS = set()
+
+
+def configurar_piezas_corte(nombres):
+    """Registra nombres de piezas clasificadas como Corte (Abigail)."""
+    global _PIEZAS_CORTE_KEYS
+    keys = set()
+    for n in nombres or []:
+        k = _clave_pieza_simple(n)
+        if k:
+            keys.add(k)
+    _PIEZAS_CORTE_KEYS = keys
+
+
+def _clave_pieza_simple(texto):
+    limpio = str(texto or "").upper()
+    limpio = re.sub(r"\.IPT$", "", limpio)
+    limpio = re.sub(r"[\s\-_:()\[\]{},.]+", "", limpio)
+    return limpio
+
+
+def _es_pieza_corte(part_name):
+    if not _PIEZAS_CORTE_KEYS:
+        return False
+    candidatos = [part_name]
+    try:
+        candidatos.append(obtener_nombre_base_corto(part_name))
+    except Exception:
+        pass
+    for cand in candidatos:
+        k = _clave_pieza_simple(cand)
+        if not k:
+            continue
+        for ck in _PIEZAS_CORTE_KEYS:
+            if ck == k or ck in k or k in ck:
+                return True
+    return False
+
+
+def _es_pieza_cobre_nombre(part_name):
+    try:
+        from piezas_cobre import es_pieza_cobre
+
+        return bool(es_pieza_cobre(part_name))
+    except Exception:
+        return False
 
 def _log(msg):
     if getattr(sys, 'frozen', False):
@@ -321,18 +370,22 @@ def crear_vistas_lote(
             if not res_frente:
                 _log(f"⚠️ {part_name} -> no se encontró frente válido.")
                 continue
-                
+
             frente_face, v_frente, area_frente = res_frente
-            
-            res_lado = elegir_lado(caras_a_medir, frente_face, v_frente, area_frente, use_flat_pattern)
+
+            res_lado = elegir_lado(
+                caras_a_medir, frente_face, v_frente, area_frente, use_flat_pattern
+            )
             if not res_lado:
                 v_lado = obtener_lado_fallback(tg, v_frente)
             else:
                 lado_face, v_lado, area_lado = res_lado
-                
+
             cx, cy, cz = obtener_centro(part_doc, cuerpo_medicion)
-            
-            tiene_guia_frente, v_guia_frente = obtener_vector_guia_frente(frente_face, v_frente, tg)
+
+            tiene_guia_frente, v_guia_frente = obtener_vector_guia_frente(
+                frente_face, v_frente, tg
+            )
 
             # Orientación LADO desde sólido doblado (perfil L/U en piso).
             # También para JACKING PADS aunque no sean Sheet Metal: si no,
@@ -340,10 +393,76 @@ def crear_vistas_lote(
             lado_cx, lado_cy, lado_cz = cx, cy, cz
             lado_eye, lado_up = v_lado, v_frente
             nombre_u = str(part_name or "").upper()
-            forzar_perfil_l = is_sm or (
-                "JACKING" in nombre_u and "PAD" in nombre_u and "SOLERA" not in nombre_u
+
+            # BOARD/GIGA: FRENTE = cara mayor área; LADO = perfil L/canto.
+            ori_giga = None
+            if _es_flujo_board_giga(part_name):
+                ori_giga = _orientacion_board_giga(part_doc, tg, to)
+                if ori_giga:
+                    v_frente = ori_giga["v_frente"]
+                    v_guia_frente = ori_giga["v_up_frente"]
+                    tiene_guia_frente = True
+                    lado_eye = ori_giga["v_lado"]
+                    lado_up = ori_giga["v_up_lado"]
+                    lado_cx = ori_giga["cx"]
+                    lado_cy = ori_giga["cy"]
+                    lado_cz = ori_giga["cz"]
+                    cx, cy, cz = lado_cx, lado_cy, lado_cz
+                    _log(
+                        f"  {part_name}: orientación BOARD "
+                        f"({ori_giga.get('modo', '?')})"
+                    )
+
+            # --- SOLO_FLAT_CORTE: NUNCA vistas dobladas; solo DESPLIEGUE ---
+            solo_flat = os.environ.get("SOLO_FLAT_CORTE", "").strip().lower() in (
+                "1",
+                "true",
+                "yes",
             )
-            if forzar_perfil_l:
+            if solo_flat:
+                _log(
+                    f"  {part_name}: SOLO_FLAT_CORTE → SOLO flat "
+                    f"(barrenos XY + THK). Sin flat = omitida."
+                )
+                if is_sm:
+                    res_fp = preparar_geometria_flat(part_doc, True, to)
+                    if not res_fp:
+                        _log(
+                            f"  {part_name}: SIN Flat Pattern → "
+                            f"NO se crea ninguna vista (regla flat estricto)"
+                        )
+                    else:
+                        try:
+                            _crear_vistas_despliegue_corte(
+                                machote_doc,
+                                base_sheet,
+                                part_doc,
+                                part_name,
+                                tg,
+                                to,
+                                nombres_creadas,
+                            )
+                        except Exception as exc_flat:
+                            _log(
+                                f"  AVISO {part_name}: vistas DESPLIEGUE fallaron "
+                                f"({exc_flat})"
+                            )
+                        finally:
+                            _asegurar_modelo_doblado(part_doc, is_sm)
+                else:
+                    _log(
+                        f"  {part_name}: no es SheetMetal → omitida "
+                        f"(solo flat)"
+                    )
+                # No Estañado, no FRENTE/LADO doblado en este modo.
+                continue
+
+            forzar_perfil_l = is_sm or (
+                "JACKING" in nombre_u
+                and "PAD" in nombre_u
+                and "SOLERA" not in nombre_u
+            )
+            if forzar_perfil_l and ori_giga is None:
                 ori = _orientacion_lado_doblado(part_doc, tg, to, v_frente)
                 if ori:
                     lado_eye = ori["v_lado"]
@@ -353,7 +472,6 @@ def crear_vistas_lote(
                         f"  {part_name}: LADO orientado desde modelo doblado "
                         f"({ori.get('modo', '?')})"
                     )
-            
             sufijos = ["FRENTE_1", "FRENTE_2", "LADO"]
             es_lado = [False, False, True]
             
@@ -394,12 +512,24 @@ def crear_vistas_lote(
                             lado_up,
                         )
                     else:
-                        if tiene_guia_frente:
-                            up_hint = v_guia_frente.Copy()
+                        eye_f = v_frente
+                        up_f = v_guia_frente if tiene_guia_frente else v_lado
+                        # FRENTE_2 en brida L: segunda cara grande perpendicular.
+                        if (
+                            idx == 1
+                            and ori_giga
+                            and ori_giga.get("v_frente_2") is not None
+                        ):
+                            eye_f = ori_giga["v_frente_2"]
+                            up_f = ori_giga.get("v_up_frente_2") or v_frente
                         else:
-                            up_hint = v_lado.Copy()
+                            if tiene_guia_frente:
+                                up_f = v_guia_frente.Copy()
+                            else:
+                                up_f = v_lado.Copy()
+                            eye_f = v_frente.Copy()
                         cam = crear_camara(
-                            part_doc, tg, to, cx, cy, cz, v_frente.Copy(), up_hint
+                            part_doc, tg, to, cx, cy, cz, eye_f, up_f
                         )
                         view = _crear_vista_base(
                             new_sheet,
@@ -427,14 +557,109 @@ def crear_vistas_lote(
                                 f"⚠️ {part_name} -> no se pudo crear vista LADO "
                                 f"con cámara de perfil: {ex1}"
                             )
-                    except:
-                        _log(f"⚠️ {part_name} -> no se pudo crear vista {sufijos[idx]}")
-                        
+                    except Exception:
+                        _log(
+                            f"⚠️ {part_name} -> no se pudo crear vista "
+                            f"{sufijos[idx]}"
+                        )
+
                 if view is not None:
                     escalar_vista(
                         machote_doc, view, tg, px, py, ancho_util, alto_util
                     )
-            
+                    # GIGA cobre: si LADO no muestra canto, reorientar con
+                    # eje de doblez / espesor clásico.
+                    if (
+                        is_side
+                        and ori_giga is not None
+                        and not _vista_lado_muestra_canto(
+                            view, _grosor_3d_pieza(part_doc)
+                        )
+                    ):
+                        ori_fix = _orientacion_lado_doblado(
+                            part_doc, tg, to, v_frente
+                        )
+                        if ori_fix:
+                            try:
+                                _borrar_todas_las_vistas(new_sheet)
+                                view = _crear_vista_lado_con_reintentos(
+                                    new_sheet,
+                                    part_doc,
+                                    tg,
+                                    to,
+                                    px,
+                                    py,
+                                    ori_fix["cx"],
+                                    ori_fix["cy"],
+                                    ori_fix["cz"],
+                                    ori_fix["v_lado"],
+                                    ori_fix["v_up"],
+                                )
+                                if view is not None:
+                                    escalar_vista(
+                                        machote_doc,
+                                        view,
+                                        tg,
+                                        px,
+                                        py,
+                                        ancho_util,
+                                        alto_util,
+                                    )
+                                    _log(
+                                        f"  {part_name}: LADO GIGA reintentado "
+                                        f"({ori_fix.get('modo', '?')})"
+                                    )
+                            except Exception as exc_r:
+                                _log(
+                                    f"  AVISO {part_name}: reintento LADO GIGA "
+                                    f"falló ({exc_r})"
+                                )
+
+            # --- Corte: segunda pasada flat (mismas vistas/medidas) ---
+            es_corte = _es_pieza_corte(part_name)
+            if es_corte and is_sm:
+                try:
+                    _crear_vistas_despliegue_corte(
+                        machote_doc,
+                        base_sheet,
+                        part_doc,
+                        part_name,
+                        tg,
+                        to,
+                        nombres_creadas,
+                    )
+                except Exception as exc_flat:
+                    _log(
+                        f"  AVISO {part_name}: vistas DESPLIEGUE fallaron "
+                        f"({exc_flat})"
+                    )
+                finally:
+                    _asegurar_modelo_doblado(part_doc, is_sm)
+
+            # --- Corte cobre: hoja ESTANIADO isométrica (cara mayor) ---
+            if es_corte and _es_pieza_cobre_nombre(part_name):
+                try:
+                    _crear_vista_estanado_iso(
+                        machote_doc,
+                        base_sheet,
+                        part_doc,
+                        part_name,
+                        tg,
+                        to,
+                        cx,
+                        cy,
+                        cz,
+                        v_frente,
+                        v_guia_frente if tiene_guia_frente else v_lado,
+                        nombres_creadas,
+                        is_sm=is_sm,
+                    )
+                except Exception as exc_iso:
+                    _log(
+                        f"  AVISO {part_name}: vista ESTANIADO falló "
+                        f"({exc_iso})"
+                    )
+
             # Respiro a la tarjeta gráfica y bombeo de mensajes para evitar TDR.
             # Antes: 4s por pieza + 10s cada 10 (~10 min muertos en OTC).
             # Ahora: 1.2s por pieza + 3s cada 20; suficiente para el TDR sin
@@ -499,6 +724,59 @@ def preparar_geometria(part_doc, is_sm, to):
         return None
 
 
+def preparar_geometria_flat(part_doc, is_sm, to):
+    """
+    Prepara caras del Flat Pattern (Corte/Corte). Devuelve None si no aplica.
+    """
+    if not is_sm:
+        return None
+    try:
+        sm_def = win32com.client.CastTo(
+            part_doc.ComponentDefinition, "SheetMetalComponentDefinition"
+        )
+    except Exception:
+        return None
+    try:
+        if not sm_def.HasFlatPattern:
+            try:
+                sm_def.Unfold()
+            except Exception as exc_u:
+                _log(f"  AVISO Unfold flat: {exc_u}")
+                return None
+        if not sm_def.HasFlatPattern:
+            return None
+        fp = sm_def.FlatPattern
+        cuerpo = None
+        caras = to.CreateObjectCollection()
+        # Inventor: FlatPattern.Body o SurfaceBodies del flat.
+        try:
+            cuerpo = fp.Body
+        except Exception:
+            cuerpo = None
+        if cuerpo is not None:
+            try:
+                for j in range(1, cuerpo.Faces.Count + 1):
+                    caras.Add(cuerpo.Faces.Item(j))
+            except Exception:
+                pass
+        if caras.Count == 0:
+            try:
+                for i in range(1, fp.SurfaceBodies.Count + 1):
+                    body = fp.SurfaceBodies.Item(i)
+                    if cuerpo is None:
+                        cuerpo = body
+                    for j in range(1, body.Faces.Count + 1):
+                        caras.Add(body.Faces.Item(j))
+            except Exception:
+                pass
+        if caras.Count == 0:
+            return None
+        return (True, caras, cuerpo)
+    except Exception as exc:
+        _log(f"  AVISO preparar_geometria_flat: {exc}")
+        return None
+
+
 def _asegurar_modelo_doblado(part_doc, is_sm):
     """Sale de Flat Pattern edit si una corrida previa dejó la chapa desplegada."""
     if not is_sm:
@@ -535,6 +813,227 @@ def _caras_y_cuerpo_doblado(part_doc, to):
     except Exception:
         pass
     return caras, cuerpo
+
+
+def _ejes_bbox_ordenados(part_doc, tg):
+    """
+    Ejes del RangeBox ordenados L ≥ W ≥ T.
+    Cada ítem: ``(longitud_cm, vector_unitario)``.
+    """
+    rb = part_doc.ComponentDefinition.RangeBox
+    ejes = [
+        (
+            abs(float(rb.MaxPoint.X) - float(rb.MinPoint.X)),
+            tg.CreateVector(1.0, 0.0, 0.0),
+        ),
+        (
+            abs(float(rb.MaxPoint.Y) - float(rb.MinPoint.Y)),
+            tg.CreateVector(0.0, 1.0, 0.0),
+        ),
+        (
+            abs(float(rb.MaxPoint.Z) - float(rb.MinPoint.Z)),
+            tg.CreateVector(0.0, 0.0, 1.0),
+        ),
+    ]
+    ejes.sort(key=lambda item: item[0], reverse=True)
+    for _lon, vec in ejes:
+        try:
+            vec.Normalize()
+        except Exception:
+            pass
+    return ejes[0], ejes[1], ejes[2]
+
+
+def _normal_plana_alineada(part_doc, to, direccion, area_min_frac=0.05):
+    """
+    Cara plana cuyo normal ≈ ``direccion`` (y área no diminuta).
+    Devuelve (normal_vector, area) o (None, 0).
+    """
+    caras, _cuerpo = _caras_y_cuerpo_doblado(part_doc, to)
+    if caras is None or caras.Count == 0:
+        return None, 0.0
+    try:
+        direccion.Normalize()
+    except Exception:
+        pass
+
+    mejor_n = None
+    mejor_area = 0.0
+    mejor_alin = -1.0
+    area_ref = 0.0
+    candidatas = []
+    try:
+        for i in range(1, caras.Count + 1):
+            face = caras.Item(i)
+            if face.SurfaceType != kPlaneSurface:
+                continue
+            ok, n = obtener_normal_cara(face)
+            if not ok:
+                continue
+            try:
+                area = float(face.Evaluator.Area)
+            except Exception:
+                continue
+            if area <= 0:
+                continue
+            n.Normalize()
+            candidatas.append((area, n))
+            if area > area_ref:
+                area_ref = area
+    except Exception:
+        return None, 0.0
+
+    umbral = max(area_ref * float(area_min_frac), 1e-8)
+    for area, n in candidatas:
+        if area < umbral:
+            continue
+        alin = abs(float(n.DotProduct(direccion)))
+        # Preferir alineación; empate → mayor área.
+        score = (alin, area)
+        best = (mejor_alin, mejor_area)
+        if score > best:
+            mejor_alin = alin
+            mejor_area = area
+            mejor_n = n
+
+    if mejor_n is None or mejor_alin < 0.55:
+        return None, 0.0
+    return mejor_n, mejor_area
+
+
+def _orientacion_board_giga(part_doc, tg, to):
+    """
+    Orientación BOARD/GIGA (todas las piezas del board, no solo cobre).
+
+    - FRENTE: normal de la cara plana de MAYOR área (barrenos / ranuras).
+      Independiente de si el IPT se modeló en Front.
+    - LADO: eje de doblez / canto (perfil L o espesor) para dibujar THK.
+    - THK numérico en chapa: Sheet Metal Thickness (ver THK.py).
+    """
+    caras, cuerpo = _caras_y_cuerpo_doblado(part_doc, to)
+    if caras is None or caras.Count == 0:
+        return None
+
+    cx, cy, cz = obtener_centro(part_doc, cuerpo)
+    res_frente = elegir_frente(caras)
+    if not res_frente:
+        return None
+    _frente_face, v_frente, area_frente = res_frente
+    try:
+        v_frente.Normalize()
+    except Exception:
+        pass
+
+    try:
+        (_lon_l, eje_l), (_lon_w, eje_w), (_lon_t, eje_t) = _ejes_bbox_ordenados(
+            part_doc, tg
+        )
+    except Exception:
+        eje_l = tg.CreateVector(1.0, 0.0, 0.0)
+        eje_w = tg.CreateVector(0.0, 1.0, 0.0)
+        eje_t = tg.CreateVector(0.0, 0.0, 1.0)
+
+    v_up_frente = eje_l
+    try:
+        if abs(float(v_frente.DotProduct(v_up_frente))) > 0.85:
+            v_up_frente = eje_w
+        if abs(float(v_frente.DotProduct(v_up_frente))) > 0.85:
+            v_up_frente = eje_t
+    except Exception:
+        v_up_frente = eje_w
+
+    # Segunda cara grande ~perpendicular → brida L: FRENTE_2 puede usarla.
+    v_frente_2 = None
+    v_up_frente_2 = None
+    try:
+        planas = []
+        for i in range(1, caras.Count + 1):
+            face = caras.Item(i)
+            if face.SurfaceType != kPlaneSurface:
+                continue
+            ok, n = obtener_normal_cara(face)
+            if not ok:
+                continue
+            try:
+                area = float(face.Evaluator.Area)
+            except Exception:
+                continue
+            if area < area_frente * 0.18:
+                continue
+            n.Normalize()
+            planas.append((area, n))
+        planas.sort(key=lambda x: x[0], reverse=True)
+        for area, n in planas[1:6]:
+            if abs(float(v_frente.DotProduct(n))) < 0.35:
+                v_frente_2 = n
+                v_up_frente_2 = v_frente
+                break
+    except Exception:
+        pass
+
+    ori_lado = _orientacion_lado_doblado(part_doc, tg, to, v_frente)
+    if ori_lado:
+        v_lado = ori_lado["v_lado"]
+        v_up_lado = ori_lado["v_up"]
+        cx = ori_lado.get("cx", cx)
+        cy = ori_lado.get("cy", cy)
+        cz = ori_lado.get("cz", cz)
+        modo_lado = ori_lado.get("modo", "doblez")
+    else:
+        v_lado = eje_l
+        try:
+            if abs(float(v_frente.DotProduct(v_lado))) > 0.85:
+                v_lado = eje_w
+        except Exception:
+            pass
+        v_up_lado = v_frente
+        modo_lado = "bbox_canto"
+
+    try:
+        v_frente.Normalize()
+        v_up_frente.Normalize()
+        v_lado.Normalize()
+        v_up_lado.Normalize()
+        if v_frente_2 is not None:
+            v_frente_2.Normalize()
+            if v_up_frente_2 is not None:
+                v_up_frente_2.Normalize()
+    except Exception:
+        pass
+
+    return {
+        "v_frente": v_frente,
+        "v_up_frente": v_up_frente,
+        "v_frente_2": v_frente_2,
+        "v_up_frente_2": v_up_frente_2,
+        "v_lado": v_lado,
+        "v_up_lado": v_up_lado,
+        "cx": cx,
+        "cy": cy,
+        "cz": cz,
+        "modo": f"board_cara+{modo_lado}",
+    }
+
+
+# Alias histórico (nombre antiguo "cobre"); misma lógica BOARD.
+_orientacion_cobre_giga = _orientacion_board_giga
+
+
+def _es_flujo_board_giga(part_name=None) -> bool:
+    """True en BOARD/GIGA (nombre completo activo)."""
+    return bool(get_nombre_pieza_completo())
+
+
+def _es_flujo_cobre_giga(part_name) -> bool:
+    """Compat: cobre ABB/GENE/RLG dentro de BOARD."""
+    if not _es_flujo_board_giga():
+        return False
+    try:
+        from piezas_cobre import es_pieza_cobre
+
+        return bool(es_pieza_cobre(part_name))
+    except Exception:
+        return False
 
 
 def _orientacion_lado_doblado(part_doc, tg, to, v_frente_fallback):
@@ -636,13 +1135,12 @@ def _orientacion_lado_doblado(part_doc, tg, to, v_frente_fallback):
 
 def _crear_vista_base(new_sheet, part_doc, tg, to, px, py, cam, use_flat_pattern_view):
     """
-    Crea vista base. Las cotas de piso/soldadura siempre usan el modelo
-    doblado: SheetMetalFoldedModel=True (nunca flat pattern).
+    Crea vista base. Por defecto modelo doblado (SheetMetalFoldedModel=True).
+    Si ``use_flat_pattern_view`` es True (pasada Corte/despliegue), usa flat.
     """
     options = to.CreateNameValueMap()
-    # Ignorar use_flat_pattern_view: nunca desplegar chapa en este flujo.
     try:
-        options.Add("SheetMetalFoldedModel", True)
+        options.Add("SheetMetalFoldedModel", not bool(use_flat_pattern_view))
     except Exception:
         pass
     return new_sheet.DrawingViews.AddBaseView(
@@ -997,6 +1495,187 @@ def crear_camara(part_doc, tg, to, cx, cy, cz, eye_dir, up_hint):
     return cam
 
 
+def crear_camara_isometrica_desde_frente(
+    part_doc, tg, to, cx, cy, cz, v_frente, up_hint=None
+):
+    """
+    Isométrica anclada a la cara de mayor área: el ojo se desplaza
+    ``n + up + right`` para que esa cara siga siendo la principal.
+    """
+    n = v_frente.Copy()
+    n.Normalize()
+    if up_hint is not None:
+        up0 = up_hint.Copy()
+    else:
+        up0 = tg.CreateVector(0.0, 1.0, 0.0)
+    up0.Normalize()
+    if abs(n.DotProduct(up0)) > 0.92:
+        up0 = tg.CreateVector(1.0, 0.0, 0.0)
+        if abs(n.DotProduct(up0)) > 0.92:
+            up0 = tg.CreateVector(0.0, 0.0, 1.0)
+    right = n.CrossProduct(up0)
+    if right.Length < 0.001:
+        right = tg.CreateVector(1.0, 0.0, 0.0)
+    right.Normalize()
+    up = right.CrossProduct(n)
+    up.Normalize()
+    eye = tg.CreateVector(
+        n.X + up.X + right.X,
+        n.Y + up.Y + right.Y,
+        n.Z + up.Z + right.Z,
+    )
+    if eye.Length < 0.001:
+        eye = n.Copy()
+    eye.Normalize()
+    return crear_camara(part_doc, tg, to, cx, cy, cz, eye, up)
+
+
+def _crear_vistas_despliegue_corte(
+    machote_doc,
+    base_sheet,
+    part_doc,
+    part_name,
+    tg,
+    to,
+    nombres_creadas,
+):
+    """Crea FRENTE_1/2/LADO sobre flat pattern (sufijo DESPLIEGUE_*)."""
+    res_flat = preparar_geometria_flat(part_doc, True, to)
+    if not res_flat:
+        _log(f"  {part_name}: sin Flat Pattern → omite DESPLIEGUE")
+        return
+    _use_fp, caras_fp, cuerpo_fp = res_flat
+    res_frente = elegir_frente(caras_fp)
+    if not res_frente:
+        _log(f"  {part_name}: flat sin cara frente → omite DESPLIEGUE")
+        return
+    frente_face, v_frente, area_frente = res_frente
+    res_lado = elegir_lado(
+        caras_fp, frente_face, v_frente, area_frente, use_flat_pattern=True
+    )
+    if not res_lado:
+        v_lado = obtener_lado_fallback(tg, v_frente)
+    else:
+        _lf, v_lado, _al = res_lado
+    cx, cy, cz = obtener_centro(part_doc, cuerpo_fp)
+    tiene_guia, v_guia = obtener_vector_guia_frente(frente_face, v_frente, tg)
+    sufijos = [
+        "DESPLIEGUE_FRENTE_1",
+        "DESPLIEGUE_LADO",
+    ]
+    es_lado = [False, True]
+    # SOLO_FLAT_CORTE / barrenos+THK: no hace falta FRENTE_2 (WIDTH).
+    solo_flat = os.environ.get("SOLO_FLAT_CORTE", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    if not solo_flat:
+        sufijos = [
+            "DESPLIEGUE_FRENTE_1",
+            "DESPLIEGUE_FRENTE_2",
+            "DESPLIEGUE_LADO",
+        ]
+        es_lado = [False, False, True]
+    _log(
+        f"  {part_name}: creando vistas DESPLIEGUE (flat)"
+        + (" [solo FRENTE_1+LADO]" if solo_flat else "")
+    )
+    for idx, sufijo in enumerate(sufijos):
+        is_side = es_lado[idx]
+        nombre_hoja = construir_nombre_hoja(machote_doc, part_name, sufijo)
+        try:
+            new_sheet = _crear_hoja_vista(machote_doc, base_sheet, nombre_hoja)
+        except Exception as e:
+            _log(f"⚠️ {part_name} -> no se pudo crear hoja {nombre_hoja}: {e}")
+            continue
+        nombres_creadas.add(nombre_hoja)
+        try:
+            if new_sheet.TitleBlock is not None:
+                tb = new_sheet.TitleBlock
+                tb.SetResultText(tb.Definition.Sketch.TextBoxes.Item(1), part_name)
+        except Exception:
+            pass
+        px, py, ancho_util, alto_util = _area_util_hoja(new_sheet)
+        view = None
+        try:
+            if is_side:
+                cam = crear_camara(
+                    part_doc, tg, to, cx, cy, cz, v_lado, v_frente
+                )
+            else:
+                up_f = v_guia if tiene_guia else v_lado
+                cam = crear_camara(
+                    part_doc, tg, to, cx, cy, cz, v_frente, up_f
+                )
+            view = _crear_vista_base(
+                new_sheet,
+                part_doc,
+                tg,
+                to,
+                px,
+                py,
+                cam,
+                use_flat_pattern_view=True,
+            )
+        except Exception as ex1:
+            _log(f"⚠️ {part_name} DESPLIEGUE {sufijo}: {ex1}")
+            continue
+        if view is not None:
+            escalar_vista(
+                machote_doc, view, tg, px, py, ancho_util, alto_util
+            )
+
+
+def _crear_vista_estanado_iso(
+    machote_doc,
+    base_sheet,
+    part_doc,
+    part_name,
+    tg,
+    to,
+    cx,
+    cy,
+    cz,
+    v_frente,
+    up_hint,
+    nombres_creadas,
+    is_sm=False,
+):
+    """Hoja ESTANIADO: isométrica anclada a cara mayor (sin cotas)."""
+    _asegurar_modelo_doblado(part_doc, is_sm)
+    nombre_hoja = construir_nombre_hoja(machote_doc, part_name, "ESTANIADO")
+    try:
+        new_sheet = _crear_hoja_vista(machote_doc, base_sheet, nombre_hoja)
+    except Exception as e:
+        _log(f"⚠️ {part_name} -> no se pudo crear hoja ESTANIADO: {e}")
+        return
+    nombres_creadas.add(nombre_hoja)
+    try:
+        if new_sheet.TitleBlock is not None:
+            tb = new_sheet.TitleBlock
+            tb.SetResultText(tb.Definition.Sketch.TextBoxes.Item(1), part_name)
+    except Exception:
+        pass
+    px, py, ancho_util, alto_util = _area_util_hoja(new_sheet)
+    cam = crear_camara_isometrica_desde_frente(
+        part_doc, tg, to, cx, cy, cz, v_frente, up_hint
+    )
+    view = _crear_vista_base(
+        new_sheet,
+        part_doc,
+        tg,
+        to,
+        px,
+        py,
+        cam,
+        use_flat_pattern_view=False,
+    )
+    if view is not None:
+        escalar_vista(machote_doc, view, tg, px, py, ancho_util, alto_util)
+    _log(f"  {part_name}: hoja ESTANIADO isométrica (cara mayor)")
+
+
 def escalar_vista(doc, view, tg, px, py, ancho_util=None, alto_util=None):
     """
     Escala y centra la vista de forma que la PIEZA + espacio para cotas
@@ -1114,15 +1793,44 @@ def escalar_vista(doc, view, tg, px, py, ancho_util=None, alto_util=None):
         pass
 
 
+# Modo GIGA/BOARD: no truncar a 3 segmentos (ABB-42-BCK-705_718 ≠ ABB-42-BCK).
+_NOMBRE_PIEZA_COMPLETO = False
+
+
+def set_nombre_pieza_completo(activo=True):
+    """True = carpeta/hoja con nombre de archivo íntegro (GIGA/BOARD)."""
+    global _NOMBRE_PIEZA_COMPLETO
+    _NOMBRE_PIEZA_COMPLETO = bool(activo)
+    return _NOMBRE_PIEZA_COMPLETO
+
+
+def get_nombre_pieza_completo():
+    return bool(_NOMBRE_PIEZA_COMPLETO)
+
+
 def obtener_nombre_base_corto(part_name):
-    limpio = part_name.strip()
-    if not limpio: return limpio
-    
-    partes = limpio.split('-')
+    """
+    Identidad de pieza para hojas JPG / carpetas.
+
+    Tanques (Vantran/OTC): historicamente los 3 primeros segmentos
+    ``A-B-C`` (agrupa variantes).
+    GIGA/BOARD (``set_nombre_pieza_completo(True)``): nombre completo del
+    IPT, solo sin ``:ocurrencia`` ni extensión — cada sufijo distinto es
+    pieza independiente.
+    """
+    limpio = str(part_name or "").strip()
+    if not limpio:
+        return limpio
+    limpio = os.path.splitext(os.path.basename(limpio))[0]
+    if ":" in limpio:
+        limpio = limpio.split(":", 1)[0].strip()
+    if _NOMBRE_PIEZA_COMPLETO:
+        return limpio
+
+    partes = limpio.split("-")
     if len(partes) >= 3:
         return f"{partes[0]}-{partes[1]}-{partes[2]}"
-    else:
-        return limpio
+    return limpio
 
 
 def construir_nombre_hoja(doc, part_name, sufijo):

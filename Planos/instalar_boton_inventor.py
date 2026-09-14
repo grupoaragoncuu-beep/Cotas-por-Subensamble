@@ -92,6 +92,8 @@ def _imprimir_instrucciones_ribbon():
     print("   - COTAS_POR_SEG            (prueba rapida: UNA cara SEGM/TOP/BASE)")
     print("   - COTAS_POR_SEG_PIEZAS     (prueba rapida: piezas de UNA cara)")
     print(f"   - {NOMBRE_REGLA}      (solo piezas acotadas, tanque completo)")
+    print("   - COTAS_ENSAMBLES_INDEPENDIENTES  (instructivo kits FRONT/TOP/RIGHT)")
+    print("   - COTAS_BOARD             (tablero GIGA/Board → JPG/.../BOARD)")
     print()
     print("4. Opcional: activa 'Texto' y tamano grande en el boton.")
     print()

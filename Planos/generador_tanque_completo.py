@@ -64,25 +64,51 @@ SUBCARPETAS_CLASIFICACION_PIEZAS = (
 )
 SUBCARPETA_SIN_CLASIFICAR = "SIN CLASIFICACION"
 
+# Anidado solo bajo Corte/ (flujo Abigail BOARD/cobre):
+#   Corte/Corte/<PIEZA>/     ← flat pattern (recién cortadas)
+#   Corte/Doblado/<PIEZA>/   ← modelo doblado (comportamiento actual)
+#   Corte/Estañado/*.jpg     ← cobre SIN_COTA isométrica (suelta, sin carpeta pieza)
+SUBCARPETAS_CORTE_ANIDADAS = ("Corte", "Doblado", "Estañado")
+STAGING_DESPLIEGUE = "_STAGING_DESPLIEGUE"
+STAGING_ESTANIADO = "_STAGING_ESTANIADO"
+
 # Sufijos que agrega el flujo de piezas al final del nombre del JPG. Se usan
 # para separar "pieza" de "tipo de cota" y así crear una carpeta por pieza.
 # ORDEN IMPORTA: los sufijos compuestos (LARGO_PATA, DIAMETRO_*) deben ir
 # ANTES de sus prefijos simples (LARGO, DIAMETRO) para que la alternancia
 # del regex los reconozca primero y no truncue el nombre.
 _SUFIJOS_JPG_PIEZA = (
+    "LENGTH",
+    "WIDTH",
+    "BROAD",  # legacy
+    "THK",
+    "HEIGHT",
+    "LEG",
+    "OD",
+    "ID",
+    "XCENTRO_TYP",
+    "YCENTRO_TYP",
+    "XCENTRO",
+    "YCENTRO",
+    "HOLE\\d{2}",
     "DIAMETRO_EXTERIOR",
     "DIAMETRO_INTERIOR",
     "DIAMETRO_H\\d{2}",
     "LARGO_PATA",
     "ANCHO",
     "LARGO",
-    "THK",
     "ALTO",
 )
 _RE_SUFIJO_PIEZA = re.compile(
     r"^(?P<pieza>.+?)_(?P<tipo>"
     + "|".join(_SUFIJOS_JPG_PIEZA)
-    + r")_\d+$",
+    + r")_\d+(?:\.\d+)?$",
+    re.IGNORECASE,
+)
+_RE_SUFIJO_PIEZA_JOB = re.compile(
+    r"^.+?__(?P<pieza>.+?)__(?P<tipo>"
+    + "|".join(_SUFIJOS_JPG_PIEZA)
+    + r")_\d+(?:\.\d+)?$",
     re.IGNORECASE,
 )
 
@@ -115,6 +141,10 @@ def _limpiar_exportacion_piezas(carpeta, incremental=False):
         c.casefold() for c in SUBCARPETAS_CLASIFICACION_PIEZAS
     }
     clasificaciones_ci.add(SUBCARPETA_SIN_CLASIFICAR.casefold())
+    staging_ci = {
+        STAGING_DESPLIEGUE.casefold(),
+        STAGING_ESTANIADO.casefold(),
+    }
 
     for nombre in os.listdir(carpeta):
         ruta = os.path.join(carpeta, nombre)
@@ -122,6 +152,7 @@ def _limpiar_exportacion_piezas(carpeta, incremental=False):
             if (
                 nombre.upper() in caras_upper
                 or nombre.casefold() in clasificaciones_ci
+                or nombre.casefold() in staging_ci
             ):
                 try:
                     shutil.rmtree(ruta)
@@ -160,7 +191,19 @@ def _clave_familia_pieza(texto):
     base = base.split(":")[0].strip()
     # Quitar sufijos de cota del JPG de piezas.
     base = re.sub(
-        r"_(DIAMETRO_EXTERIOR|DIAMETRO_INTERIOR|DIAMETRO_H\d{2}|LARGO_PATA|ANCHO|LARGO|THK|ALTO)_\d+$",
+        r"^(?:.+?__)(.+?)__"
+        r"(?:LENGTH|WIDTH|BROAD|THK|HEIGHT|LEG|OD|ID|HOLE\d{2}|"
+        r"XCENTRO_TYP|YCENTRO_TYP|XCENTRO|YCENTRO|"
+        r"DIAMETRO_EXTERIOR|DIAMETRO_INTERIOR|DIAMETRO_H\d{2}|"
+        r"LARGO_PATA|ANCHO|LARGO|ALTO)_\d+$",
+        r"\1",
+        base,
+        flags=re.IGNORECASE,
+    )
+    base = re.sub(
+        r"_(DIAMETRO_EXTERIOR|DIAMETRO_INTERIOR|DIAMETRO_H\d{2}|LARGO_PATA|"
+        r"ANCHO|LARGO|THK|ALTO|LENGTH|WIDTH|BROAD|HEIGHT|LEG|OD|ID|HOLE\d{2}|"
+        r"XCENTRO_TYP|YCENTRO_TYP|XCENTRO|YCENTRO)_\d+$",
         "",
         base,
         flags=re.IGNORECASE,
@@ -184,6 +227,53 @@ def _claves_match_pieza(texto):
     return claves
 
 
+def _match_claves_pieza(ca, cp):
+    """
+    Empareja claves normalizadas de JPG vs mapa.
+
+    Cubrir:
+    - nombre completo vs completo
+    - JPG corto ``VT-5657-R1`` vs mapa ``VT-5657-R1-D3000 LIFTING LUG…``
+    - JPG con prefijo JOB ``MODELO…__ITEM__LENGTH_…`` (usar ITEM extraído)
+    """
+    if not ca or not cp:
+        return False
+    if ca == cp:
+        return True
+    # Prefijo: el token corto del JPG es el inicio del nombre en el mapa.
+    if len(ca) >= 6 and cp.startswith(ca):
+        return True
+    if len(cp) >= 6 and ca.startswith(cp):
+        return True
+    # Contención solo con claves largas (evita falsos positivos tipo "R1").
+    if len(ca) >= 10 and ca in cp:
+        return True
+    if len(cp) >= 10 and cp in ca:
+        return True
+    return False
+
+
+def _candidatos_nombre_pieza_jpg(nombre_archivo):
+    """
+    Nombres a probar al matchear un JPG contra mapas de cara/clasificación.
+
+    Prioriza el ITEM de la nomenclatura ``JOB__ITEM__MEDIDA_VALOR``.
+    """
+    base = os.path.splitext(os.path.basename(str(nombre_archivo)))[0]
+    out = []
+    try:
+        from nomenclatura_capturas import extraer_item_de_captura_pieza
+
+        item = extraer_item_de_captura_pieza(nombre_archivo)
+        if item and item not in out:
+            out.append(item)
+    except Exception:
+        pass
+    if base and base not in out:
+        out.append(base)
+    return out
+
+
 def _cara_para_pieza(nombre_archivo, mapa_por_cara):
     """Devuelve UNA cara (match más específico). Compat con callers viejos."""
     caras = _caras_para_pieza(nombre_archivo, mapa_por_cara)
@@ -192,15 +282,19 @@ def _cara_para_pieza(nombre_archivo, mapa_por_cara):
 
 def _caras_para_pieza(nombre_archivo, mapa_por_cara):
     """
-    Todas las caras donde la pieza aparece en el catálogo.
+    Cara(s) destino para el JPG de pieza.
 
-    Si la misma pieza (o familia SP-852_1 / SP-852_2) está en SEGM1 y SEGM3,
-    devuelve ambas para que PIEZAS_ACOTADAS reciba una copia en cada carpeta.
+    Política (feedback OTC 62201):
+    - Como máximo **una** carpeta ``SEGM*`` (dueño primario = mejor match).
+      Evita que la base de SEGM1 (P14_1 / P14_2) se copie también a SEGM2.
+    - ``TOP`` / ``BASE`` pueden coexistir con un SEGM si el catálogo lo dice
+      (p. ej. accesorio en tapa y pared); no se duplican SEGM entre sí.
     """
     if not mapa_por_cara:
         return []
-    base_archivo = os.path.splitext(os.path.basename(nombre_archivo))[0]
-    claves_archivo = _claves_match_pieza(base_archivo)
+    claves_archivo = set()
+    for cand in _candidatos_nombre_pieza_jpg(nombre_archivo):
+        claves_archivo |= _claves_match_pieza(cand)
     if not claves_archivo:
         return []
     halladas = []
@@ -212,30 +306,99 @@ def _caras_para_pieza(nombre_archivo, mapa_por_cara):
                 continue
             for ca in claves_archivo:
                 for cp in claves_pieza:
-                    if ca in cp or cp in ca:
+                    if _match_claves_pieza(ca, cp):
                         mejor_len = max(mejor_len, len(cp), len(ca))
         if mejor_len > 0:
             halladas.append((mejor_len, str(cara).upper()))
     if not halladas:
         return []
     orden = {c: i for i, c in enumerate(SUBCARPETAS_CARA_SELECCION)}
-    halladas.sort(key=lambda item: (orden.get(item[1], 99), -item[0], item[1]))
+    segms = [(n, c) for n, c in halladas if str(c).startswith("SEGM")]
+    otras = [(n, c) for n, c in halladas if not str(c).startswith("SEGM")]
     vistas = []
-    for _n, cara in halladas:
+    if segms:
+        # Mejor match primero; empate → orden SEGM1..4.
+        segms.sort(key=lambda item: (-item[0], orden.get(item[1], 99), item[1]))
+        vistas.append(segms[0][1])
+    otras.sort(key=lambda item: (orden.get(item[1], 99), -item[0], item[1]))
+    for _n, cara in otras:
         if cara not in vistas:
             vistas.append(cara)
     return vistas
+
+
+def deduplicar_mapa_piezas_por_cara(mapa_por_cara):
+    """
+    Deja cada nombre de pieza en un solo SEGM* (primero en SEGM1..4).
+
+    Además quita de SEGM* todo lo que también esté en el catálogo BASE
+    (placa base del tanque no es “pieza de pared”).
+    """
+    if not mapa_por_cara:
+        return mapa_por_cara
+    mapa = {str(k).upper(): set(v or set()) for k, v in mapa_por_cara.items()}
+    base = set(mapa.get("BASE") or set())
+    if base:
+        claves_base = set()
+        for p in base:
+            claves_base |= _claves_match_pieza(p)
+        for cara in list(mapa):
+            if not cara.startswith("SEGM"):
+                continue
+            quitar = set()
+            for p in mapa[cara]:
+                if any(
+                    _match_claves_pieza(ca, cp)
+                    for ca in _claves_match_pieza(p)
+                    for cp in claves_base
+                ):
+                    quitar.add(p)
+            if quitar:
+                mapa[cara] -= quitar
+                print(
+                    f"  Dedupe SEGM: {cara} pierde {len(quitar)} "
+                    f"pieza(s) que son de BASE"
+                )
+
+    vistos = {}  # clave_familia -> SEGM dueño
+    for cara in ("SEGM1", "SEGM2", "SEGM3", "SEGM4"):
+        if cara not in mapa:
+            continue
+        quitar = set()
+        for p in list(mapa[cara]):
+            fam = _clave_familia_pieza(p) or _clave_pieza(p)
+            if not fam:
+                continue
+            if fam in vistos and vistos[fam] != cara:
+                quitar.add(p)
+            else:
+                vistos[fam] = cara
+        if quitar:
+            mapa[cara] -= quitar
+            print(
+                f"  Dedupe SEGM: {cara} pierde {len(quitar)} "
+                f"pieza(s) ya asignadas a otro SEGM"
+            )
+    return mapa
 
 
 def _extraer_pieza_de_jpg(nombre_archivo):
     """
     Devuelve el nombre de pieza contenido en un JPG del flujo por pieza.
 
-    Los archivos exportados terminan en `_<TIPO>_<n>.jpg`, donde `<TIPO>` es
-    uno de LARGO/ANCHO/THK/DIAMETRO_*. Todo lo previo es el nombre de pieza.
-    Si no coincide, se devuelve el nombre base sin extensión.
+    Formato nuevo: `{JOB}__{ITEM}__{LENGTH|WIDTH|THK|…}_{n}.jpg`
+    Legacy: `{ITEM}_{LARGO|ANCHO|…}_{n}.jpg`
     """
+    try:
+        from nomenclatura_capturas import extraer_item_de_captura_pieza
+
+        return extraer_item_de_captura_pieza(nombre_archivo)
+    except Exception:
+        pass
     base = os.path.splitext(os.path.basename(nombre_archivo))[0]
+    match = _RE_SUFIJO_PIEZA_JOB.match(base)
+    if match:
+        return match.group("pieza")
     match = _RE_SUFIJO_PIEZA.match(base)
     if not match:
         return base
@@ -302,10 +465,11 @@ def _reorganizar_piezas_por_cara(carpeta_piezas, mapa_por_cara):
     """
     Coloca cada JPG en `<CARA>/<PIEZA>/<archivo>.jpg`.
 
-    Si la pieza aparece en varias caras (p. ej. SEGM1 y SEGM3), COPIA el
-    JPG a cada una. Sin match → `OTROS/<PIEZA>/`.
+    Destino por ``_caras_para_pieza`` (como máximo un SEGM*). Si aún
+    hubiera más de una cara no-SEGM, copia. Sin match → ``OTROS/<PIEZA>/``.
     NO crea FRONT/BACK/LEFT/RIGHT (esquema PQart residual).
     """
+    mapa_por_cara = deduplicar_mapa_piezas_por_cara(mapa_por_cara)
     activas = _carpetas_cara_activas(mapa_por_cara)
     validas_destino = set(SUBCARPETAS_CARA_SELECCION) | {SUBCARPETA_OTROS_PIEZAS}
     try:
@@ -385,28 +549,122 @@ def _clasificacion_para_pieza(nombre_archivo, mapa_por_clasificacion):
     Devuelve la clasificación asignada al JPG según el mapa
     ``{clasificación: set(nombres_pieza)}`` construido leyendo el iProperty.
 
-    Usa el mismo matching por substring bidireccional que
-    ``_cara_para_pieza`` (los JPGs usan el nombre corto de la pieza y el
-    mapa puede tener el nombre completo con revisión/estado).
+    Usa el ITEM de ``JOB__ITEM__MEDIDA_VALOR`` (no el nombre completo del
+    archivo) y admite JPG cortos (``VT-5657-R1``) contra el nombre completo
+    del mapa (``VT-5657-R1-D3000 LIFTING LUG…``).
     """
     if not mapa_por_clasificacion:
         return None
-    base_archivo = os.path.splitext(os.path.basename(nombre_archivo))[0]
-    clave_archivo = _clave_pieza(base_archivo)
-    if not clave_archivo:
+
+    claves_archivo = set()
+    for cand in _candidatos_nombre_pieza_jpg(nombre_archivo):
+        c = _clave_pieza(cand)
+        if c:
+            claves_archivo.add(c)
+    if not claves_archivo:
         return None
+
     mejor_clase = None
     mejor_len = 0
+    sin_cf = SUBCARPETA_SIN_CLASIFICAR.casefold()
     for clase, piezas in mapa_por_clasificacion.items():
+        # No preferir "SIN CLASIFICACION" si hay otro match válido.
+        if str(clase).casefold() == sin_cf:
+            continue
         for pieza in piezas:
             clave_pieza = _clave_pieza(pieza)
             if not clave_pieza:
                 continue
-            if clave_pieza in clave_archivo or clave_archivo in clave_pieza:
-                if len(clave_pieza) > mejor_len:
-                    mejor_clase = clase
-                    mejor_len = len(clave_pieza)
+            for ca in claves_archivo:
+                if _match_claves_pieza(ca, clave_pieza):
+                    if len(clave_pieza) > mejor_len:
+                        mejor_clase = clase
+                        mejor_len = len(clave_pieza)
     return mejor_clase
+
+
+def _es_jpg_despliegue(nombre_archivo, staging_marker=None):
+    """True si la captura viene del flat pattern (Corte/Corte)."""
+    marker = str(staging_marker or "").upper()
+    nombre_u = str(nombre_archivo or "").upper()
+    if STAGING_DESPLIEGUE.upper() in marker or "DESPLIEGUE" in marker:
+        return True
+    return "DESPLIEGUE" in nombre_u
+
+
+def _es_jpg_estanado(nombre_archivo, staging_marker=None, nombre_pieza=None):
+    """True si debe ir a Corte/Estañado (cobre SIN_COTA / hoja ESTANIADO)."""
+    marker = str(staging_marker or "").upper()
+    nombre_u = str(nombre_archivo or "").upper()
+    if STAGING_ESTANIADO.upper() in marker or "ESTANIADO" in marker:
+        return True
+    if "SIN_COTA" not in nombre_u:
+        return False
+    try:
+        from piezas_cobre import es_pieza_cobre
+
+        pieza = nombre_pieza or _extraer_pieza_de_jpg(nombre_archivo)
+        return bool(es_pieza_cobre(pieza))
+    except Exception:
+        return "SIN_COTA" in nombre_u
+
+
+def _iter_jpgs_para_reorg(carpeta_piezas):
+    """
+    JPG en la raíz de PIEZAS_ACOTADAS + staging ``_STAGING_*``.
+
+    Yields ``(ruta_abs, nombre_archivo, staging_marker|None)``.
+    """
+    try:
+        entradas = list(os.listdir(carpeta_piezas))
+    except OSError:
+        return
+    for nombre in entradas:
+        ruta = os.path.join(carpeta_piezas, nombre)
+        if os.path.isfile(ruta) and nombre.lower().endswith(".jpg"):
+            yield ruta, nombre, None
+            continue
+        if not os.path.isdir(ruta):
+            continue
+        if nombre not in (STAGING_DESPLIEGUE, STAGING_ESTANIADO):
+            continue
+        try:
+            hijos = list(os.listdir(ruta))
+        except OSError:
+            continue
+        for hijo in hijos:
+            if not hijo.lower().endswith(".jpg"):
+                continue
+            yield os.path.join(ruta, hijo), hijo, nombre
+
+
+def _destino_dirs_clasificacion(
+    carpeta_piezas, destino_sub, nombre_archivo, staging_marker=None
+):
+    """
+    Devuelve ``(destino_dir, clave_conteo, con_carpeta_pieza)``.
+
+    Bajo Corte/ anida Corte|Doblado|Estañado. Estañado: JPG sueltos.
+    """
+    pieza = _extraer_pieza_de_jpg(nombre_archivo)
+    pieza_folder = _nombre_carpeta_pieza(pieza)
+    if str(destino_sub).casefold() == "corte":
+        if _es_jpg_estanado(nombre_archivo, staging_marker, pieza):
+            destino_dir = os.path.join(
+                carpeta_piezas, "Corte", "Estañado"
+            )
+            return destino_dir, "Corte/Estañado", False
+        if _es_jpg_despliegue(nombre_archivo, staging_marker):
+            destino_dir = os.path.join(
+                carpeta_piezas, "Corte", "Corte", pieza_folder
+            )
+            return destino_dir, "Corte/Corte", True
+        destino_dir = os.path.join(
+            carpeta_piezas, "Corte", "Doblado", pieza_folder
+        )
+        return destino_dir, "Corte/Doblado", True
+    destino_dir = os.path.join(carpeta_piezas, destino_sub, pieza_folder)
+    return destino_dir, destino_sub, True
 
 
 def _reorganizar_piezas_por_clasificacion(carpeta_piezas, mapa_por_clasificacion):
@@ -415,22 +673,26 @@ def _reorganizar_piezas_por_clasificacion(carpeta_piezas, mapa_por_clasificacion
 
     Estructura resultante en PIEZAS_ACOTADAS:
         Almacén/<PIEZA>/*.jpg
-        Corte/<PIEZA>/*.jpg
+        Corte/Corte/<PIEZA>/*.jpg       (flat / recién cortadas)
+        Corte/Doblado/<PIEZA>/*.jpg    (dobladas)
+        Corte/Estañado/*.jpg           (cobre SIN_COTA isométrica, suelta)
         Maquinado/<PIEZA>/*.jpg
         Doblado/<PIEZA>/*.jpg
         Plasma/<PIEZA>/*.jpg
         Plasma Doblado/<PIEZA>/*.jpg
-        SIN CLASIFICACION/<PIEZA>/*.jpg   (para piezas sin iProperty)
+        SIN CLASIFICACION/<PIEZA>/*.jpg
 
-    Piezas sin match en el mapa caen en ``SIN CLASIFICACION/`` (por decisión
-    del usuario: no perder nada aunque el iLogic Colorimetria no se haya
-    corrido para esa pieza).
+    Piezas sin match en el mapa caen en ``SIN CLASIFICACION/``.
     """
     subcarpetas = SUBCARPETAS_CLASIFICACION_PIEZAS + (SUBCARPETA_SIN_CLASIFICAR,)
     try:
         os.makedirs(carpeta_piezas, exist_ok=True)
         for sub in subcarpetas:
             os.makedirs(os.path.join(carpeta_piezas, sub), exist_ok=True)
+        for nest in SUBCARPETAS_CORTE_ANIDADAS:
+            os.makedirs(
+                os.path.join(carpeta_piezas, "Corte", nest), exist_ok=True
+            )
     except OSError as err:
         print(
             f"AVISO: no se pudieron preparar subcarpetas de PIEZAS_ACOTADAS "
@@ -439,54 +701,77 @@ def _reorganizar_piezas_por_clasificacion(carpeta_piezas, mapa_por_clasificacion
         return {}
 
     conteo = {sub: 0 for sub in subcarpetas}
+    conteo["Corte/Corte"] = 0
+    conteo["Corte/Doblado"] = 0
+    conteo["Corte/Estañado"] = 0
     piezas_por_clase = {sub: set() for sub in subcarpetas}
-    try:
-        entradas = list(os.listdir(carpeta_piezas))
-    except OSError as err:
-        print(f"AVISO: no se pudo listar {carpeta_piezas}: {err}")
-        return conteo
+    piezas_por_clase["Corte/Corte"] = set()
+    piezas_por_clase["Corte/Doblado"] = set()
+    piezas_por_clase["Corte/Estañado"] = set()
 
-    # Set case-insensitive de clasificaciones válidas para validar destino.
     clases_validas_cf = {c.casefold() for c in SUBCARPETAS_CLASIFICACION_PIEZAS}
 
-    for nombre in entradas:
-        ruta = os.path.join(carpeta_piezas, nombre)
-        if os.path.isdir(ruta):
-            continue
-        if not nombre.lower().endswith(".jpg"):
-            continue
+    for ruta, nombre, staging in _iter_jpgs_para_reorg(carpeta_piezas):
         clase = _clasificacion_para_pieza(nombre, mapa_por_clasificacion)
         if clase and clase.casefold() in clases_validas_cf:
-            # Preservar el spelling canónico (con acento/mayúsculas correctas).
             destino_sub = next(
                 s for s in SUBCARPETAS_CLASIFICACION_PIEZAS
                 if s.casefold() == clase.casefold()
             )
         else:
             destino_sub = SUBCARPETA_SIN_CLASIFICAR
-        pieza = _extraer_pieza_de_jpg(nombre)
-        pieza_folder = _nombre_carpeta_pieza(pieza)
-        destino_dir = os.path.join(carpeta_piezas, destino_sub, pieza_folder)
+        destino_dir, clave_conteo, _con_pieza = _destino_dirs_clasificacion(
+            carpeta_piezas, destino_sub, nombre, staging
+        )
+        pieza_folder = _nombre_carpeta_pieza(_extraer_pieza_de_jpg(nombre))
         try:
             os.makedirs(destino_dir, exist_ok=True)
             destino = os.path.join(destino_dir, nombre)
+            if os.path.abspath(ruta) == os.path.abspath(destino):
+                continue
             if os.path.exists(destino):
                 os.remove(destino)
             shutil.move(ruta, destino)
-            conteo[destino_sub] += 1
-            piezas_por_clase[destino_sub].add(pieza_folder)
+            conteo[clave_conteo] = conteo.get(clave_conteo, 0) + 1
+            if clave_conteo.startswith("Corte/"):
+                conteo["Corte"] = conteo.get("Corte", 0) + 1
+            piezas_por_clase.setdefault(clave_conteo, set()).add(pieza_folder)
+            if clave_conteo.startswith("Corte/"):
+                piezas_por_clase.setdefault("Corte", set()).add(pieza_folder)
         except OSError as err:
             print(
                 f"AVISO: no se pudo mover '{nombre}' a "
-                f"{destino_sub}/{pieza_folder}/: {err}"
+                f"{clave_conteo}/: {err}"
             )
 
+    # Vaciar staging vacío.
+    for staging in (STAGING_DESPLIEGUE, STAGING_ESTANIADO):
+        staging_dir = os.path.join(carpeta_piezas, staging)
+        if os.path.isdir(staging_dir):
+            try:
+                if not os.listdir(staging_dir):
+                    os.rmdir(staging_dir)
+                else:
+                    shutil.rmtree(staging_dir, ignore_errors=True)
+            except OSError:
+                pass
+
     print("  PIEZAS_ACOTADAS por clasificación:")
-    for sub in subcarpetas:
-        print(
-            f"    {sub}: {conteo[sub]} JPG en "
-            f"{len(piezas_por_clase[sub])} piezas"
-        )
+    orden_log = (
+        "Almacén",
+        "Corte/Corte",
+        "Corte/Doblado",
+        "Corte/Estañado",
+        "Maquinado",
+        "Doblado",
+        "Plasma",
+        "Plasma Doblado",
+        SUBCARPETA_SIN_CLASIFICAR,
+    )
+    for sub in orden_log:
+        n = conteo.get(sub, 0)
+        n_piezas = len(piezas_por_clase.get(sub, ()))
+        print(f"    {sub}: {n} JPG en {n_piezas} piezas")
     return conteo
 
 
@@ -578,6 +863,29 @@ def ejecutar():
             )
             return False
 
+        from producto_tipo import (
+            aplicar_unidad_producto,
+            clasificar_producto,
+            redirigir_si_board,
+        )
+
+        try:
+            info = clasificar_producto(ensamble)
+            aplicar_unidad_producto(ensamble=ensamble, info=info)
+        except Exception as exc_u:
+            print(f"AVISO unidades: {exc_u}")
+
+        desvio = redirigir_si_board(
+            inv_app,
+            plano,
+            ensamble,
+            origen_flujo="TANQUE_COMPLETO",
+            gestionar_com_board=False,
+            limpiar=True,
+        )
+        if desvio is not None:
+            return bool(desvio)
+
         carpeta_tanque = _carpeta_salida_tanque(plano, ensamble)
         alcance = _prevalidar_cuatro_caras(ensamble)
         if alcance.get("valido"):
@@ -649,6 +957,21 @@ def ejecutar():
                 )
                 if ruta_mapa:
                     print(f"  Mapa por clasificación persistido en: {ruta_mapa}")
+                try:
+                    import creador_vistas as _cv_corte
+
+                    nombres_corte = set()
+                    for clase, piezas_c in (mapa_clasificacion or {}).items():
+                        if str(clase).casefold() == "corte":
+                            nombres_corte.update(piezas_c or [])
+                    _cv_corte.configurar_piezas_corte(nombres_corte)
+                    if nombres_corte:
+                        print(
+                            f"  Corte anidado: {len(nombres_corte)} piezas → "
+                            "flat + Doblado (+ Estañado cobre)."
+                        )
+                except Exception as exc_corte:
+                    print(f"  AVISO configurar piezas Corte: {exc_corte}")
         except Exception as err:
             print(f"AVISO: fallo detectando clasificación por iProperty: {err}")
 

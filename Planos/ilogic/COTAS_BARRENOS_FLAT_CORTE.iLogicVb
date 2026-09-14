@@ -1,0 +1,295 @@
+' =============================================================================
+' COTAS_BARRENOS_FLAT_CORTE
+' =============================================================================
+' SOLO para piezas flat (JPGS\Corte\Corte):
+'   1) Barrenos TYP en X e Y  →  XCENTRO / YCENTRO (+ _TYP)  [centro circulo/ovalo H|V]
+'   2) Ø por tipo de tamaño   →  HOLE## (circulo y ovalo separados; mm exactos ≥6 dec)
+'   3) Espesor               →  THK
+'   4) Auditoría COM al final → repara cotas malas (p.ej. paso entre barrenos)
+'
+' NO genera LENGTH, WIDTH, Doblado ni Estañado.
+' Lanza: Planos\_reacotar_barrenos_flat_corte.py
+' =============================================================================
+
+Sub Main()
+    Const kDrawingDocument As Integer = 12292
+
+    Dim invApp As Inventor.Application = ThisApplication
+    Dim titulo As String = "FLAT: barrenos X/Y + Ø + THK"
+
+    If invApp.ActiveDocument Is Nothing Then
+        System.Windows.Forms.MessageBox.Show( _
+            "Abre el plano machote (.idw / .dwg) y dejalo activo.", _
+            titulo, _
+            System.Windows.Forms.MessageBoxButtons.OK, _
+            System.Windows.Forms.MessageBoxIcon.Warning)
+        Exit Sub
+    End If
+
+    If invApp.ActiveDocument.DocumentType <> kDrawingDocument Then
+        System.Windows.Forms.MessageBox.Show( _
+            "El documento activo debe ser el plano machote (.idw / .dwg).", _
+            titulo, _
+            System.Windows.Forms.MessageBoxButtons.OK, _
+            System.Windows.Forms.MessageBoxIcon.Warning)
+        Exit Sub
+    End If
+
+    Dim planoDoc As Document = invApp.ActiveDocument
+    If String.IsNullOrWhiteSpace(planoDoc.FullDocumentName) Then
+        System.Windows.Forms.MessageBox.Show( _
+            "Guarda el plano antes de ejecutar.", _
+            titulo, _
+            System.Windows.Forms.MessageBoxButtons.OK, _
+            System.Windows.Forms.MessageBoxIcon.Warning)
+        Exit Sub
+    End If
+
+    Dim planosDir As String = ResolverPlanosDir(invApp)
+    If String.IsNullOrWhiteSpace(planosDir) Then
+        System.Windows.Forms.MessageBox.Show( _
+            "No se encontro la carpeta Planos." & vbCrLf & _
+            "Ejecuta Planos\instalar_boton_inventor.bat y reinicia Inventor.", _
+            titulo, _
+            System.Windows.Forms.MessageBoxButtons.OK, _
+            System.Windows.Forms.MessageBoxIcon.Error)
+        Exit Sub
+    End If
+
+    Dim scriptPath As String = _
+        System.IO.Path.Combine(planosDir, "_reacotar_barrenos_flat_corte.py")
+    If Not System.IO.File.Exists(scriptPath) Then
+        System.Windows.Forms.MessageBox.Show( _
+            "No se encontro _reacotar_barrenos_flat_corte.py en:" & vbCrLf & _
+            planosDir, _
+            titulo, _
+            System.Windows.Forms.MessageBoxButtons.OK, _
+            System.Windows.Forms.MessageBoxIcon.Error)
+        Exit Sub
+    End If
+
+    Dim resp As System.Windows.Forms.DialogResult = _
+        System.Windows.Forms.MessageBox.Show( _
+            "Esta regla SOLO hace esto (piezas flat Corte\Corte):" & vbCrLf & vbCrLf & _
+            "  1. Barrenos TYP en X/Y  (centro circulo/ovalo)" & vbCrLf & _
+            "  2. Ø por tipo de tamaño (HOLE; circulo ≠ ovalo)" & vbCrLf & _
+            "  3. Espesor THK" & vbCrLf & vbCrLf & _
+            "Precision ≥3 decimales (mm). Ovalos H y V." & vbCrLf & _
+            "NO hace Length ni Width." & vbCrLf & _
+            "Reemplaza JPG en el servidor y actualiza la DB." & vbCrLf & vbCrLf & _
+            "Requisitos:" & vbCrLf & _
+            "  - Machote activo" & vbCrLf & _
+            "  - Ensamble Board abierto" & vbCrLf & _
+            "  - Sin Python de cotas colgado" & vbCrLf & vbCrLf & _
+            "Continuar?", _
+            titulo, _
+            System.Windows.Forms.MessageBoxButtons.YesNo, _
+            System.Windows.Forms.MessageBoxIcon.Question)
+
+    If resp <> System.Windows.Forms.DialogResult.Yes Then
+        Exit Sub
+    End If
+
+    Dim pythonExe As String = ResolverPythonExe(planosDir)
+    Dim psi As New System.Diagnostics.ProcessStartInfo()
+    psi.FileName = pythonExe
+    psi.Arguments = """" & scriptPath & """"
+    psi.WorkingDirectory = planosDir
+    psi.UseShellExecute = False
+    psi.CreateNoWindow = False
+
+    ' Forzar modo estricto desde iLogic (por si el .py no lo setea a tiempo)
+    Try
+        psi.EnvironmentVariables.Item("SOLO_FLAT_CORTE") = "1"
+        psi.EnvironmentVariables.Item("PIEZAS_INCREMENTAL") = "0"
+        psi.EnvironmentVariables.Item("ENSAMBLES_INDEPENDIENTES") = "0"
+        psi.EnvironmentVariables.Item("COTAS_JOB_OVERRIDE") = "9919-Board 2"
+        psi.EnvironmentVariables.Item("PYTHONIOENCODING") = "utf-8"
+    Catch
+        ' Algunas versiones de iLogic restringen EnvironmentVariables;
+        ' el .py tambien setea estas variables.
+    End Try
+
+    Try
+        Dim proc As System.Diagnostics.Process = _
+            System.Diagnostics.Process.Start(psi)
+        proc.WaitForExit()
+
+        If proc.ExitCode = 0 Then
+            System.Windows.Forms.MessageBox.Show( _
+                "Listo." & vbCrLf & vbCrLf & _
+                "Revisa en el servidor:" & vbCrLf & _
+                "JPGS\Corte\Corte\<pieza>\" & vbCrLf & _
+                "  *XCENTRO*  *YCENTRO*  *HOLE*  *THK*", _
+                titulo, _
+                System.Windows.Forms.MessageBoxButtons.OK, _
+                System.Windows.Forms.MessageBoxIcon.Information)
+        ElseIf proc.ExitCode = 3 Then
+            System.Windows.Forms.MessageBox.Show( _
+                "Termino pero NO se generaron barrenos X/Y (codigo 3)." & vbCrLf & _
+                "Revisa la ventana CMD: debe decir" & vbCrLf & _
+                "  Barrenos flat X/Y+TYP" & vbCrLf & _
+                "  hojas XCENTRO/YCENTRO creadas", _
+                titulo, _
+                System.Windows.Forms.MessageBoxButtons.OK, _
+                System.Windows.Forms.MessageBoxIcon.Warning)
+        Else
+            System.Windows.Forms.MessageBox.Show( _
+                "El proceso termino con errores (codigo " & _
+                CStr(proc.ExitCode) & ")." & vbCrLf & _
+                "Revisa la ventana CMD.", _
+                titulo, _
+                System.Windows.Forms.MessageBoxButtons.OK, _
+                System.Windows.Forms.MessageBoxIcon.Warning)
+        End If
+    Catch ex As Exception
+        System.Windows.Forms.MessageBox.Show( _
+            "No se pudo lanzar Python:" & vbCrLf & ex.Message & vbCrLf & vbCrLf & _
+            "Python: " & pythonExe & vbCrLf & _
+            "Script: " & scriptPath, _
+            titulo, _
+            System.Windows.Forms.MessageBoxButtons.OK, _
+            System.Windows.Forms.MessageBoxIcon.Error)
+    End Try
+End Sub
+
+' -----------------------------------------------------------------------------
+' Resolucion de rutas (mismo contrato que COTAS_ILOGIC_ABIGAIL)
+' -----------------------------------------------------------------------------
+
+Function ResolverPlanosDir(invApp As Inventor.Application) As String
+    Dim envDir As String = ""
+    Try
+        envDir = System.Environment.GetEnvironmentVariable("COTAS_ABIGAIL_DIR")
+    Catch
+        envDir = ""
+    End Try
+    If EsCarpetaPlanosValida(envDir) Then Return envDir
+
+    Dim desdeCfg As String = LeerPlanosDirDesdeConfig(invApp)
+    If EsCarpetaPlanosValida(desdeCfg) Then Return desdeCfg
+
+    Dim desdeExt As String = BuscarPlanosEnExternalRuleDirs(invApp)
+    If EsCarpetaPlanosValida(desdeExt) Then Return desdeExt
+
+    Dim tipico As String = "C:\Proyectos\COTAS ABIGAIL\COTAS ABIGAIL\Planos"
+    If EsCarpetaPlanosValida(tipico) Then Return tipico
+
+    Return ""
+End Function
+
+Function EsCarpetaPlanosValida(ruta As String) As Boolean
+    If String.IsNullOrWhiteSpace(ruta) Then Return False
+    Try
+        If Not System.IO.Directory.Exists(ruta) Then Return False
+        Dim py As String = System.IO.Path.Combine(ruta, "_reacotar_barrenos_flat_corte.py")
+        Return System.IO.File.Exists(py)
+    Catch
+        Return False
+    End Try
+End Function
+
+Function LeerPlanosDirDesdeConfig(invApp As Inventor.Application) As String
+    Dim candidatos As New System.Collections.Generic.List(Of String)
+    Try
+        Dim env As String = System.Environment.GetEnvironmentVariable("COTAS_ABIGAIL_DIR")
+        If Not String.IsNullOrWhiteSpace(env) Then
+            candidatos.Add(System.IO.Path.Combine(env, "ilogic\config_planos.txt"))
+            candidatos.Add(System.IO.Path.Combine(env, "config_planos.txt"))
+        End If
+    Catch
+    End Try
+
+    Try
+        Dim dirs As Object = ObtenerExternalRuleDirectories(invApp)
+        If dirs IsNot Nothing Then
+            For Each d As String In dirs
+                If String.IsNullOrWhiteSpace(d) Then Continue For
+                candidatos.Add(System.IO.Path.Combine(d, "config_planos.txt"))
+                Dim padre As String = System.IO.Path.GetDirectoryName(d)
+                If Not String.IsNullOrWhiteSpace(padre) Then
+                    candidatos.Add(System.IO.Path.Combine(padre, "ilogic\config_planos.txt"))
+                    candidatos.Add(System.IO.Path.Combine(padre, "config_planos.txt"))
+                End If
+            Next
+        End If
+    Catch
+    End Try
+
+    Dim tipicoCfg As String = _
+        "C:\Proyectos\COTAS ABIGAIL\COTAS ABIGAIL\Planos\ilogic\config_planos.txt"
+    candidatos.Add(tipicoCfg)
+
+    Dim cfg As String
+    For Each cfg In candidatos
+        Try
+            Dim valor As String = LeerValorConfig(cfg, "PLANOS_DIR")
+            If EsCarpetaPlanosValida(valor) Then Return valor
+            Dim carpetaCfg As String = System.IO.Path.GetDirectoryName(cfg)
+            If Not String.IsNullOrWhiteSpace(carpetaCfg) Then
+                Dim posible As String = System.IO.Path.GetDirectoryName(carpetaCfg)
+                If EsCarpetaPlanosValida(posible) Then Return posible
+                If EsCarpetaPlanosValida(carpetaCfg) Then Return carpetaCfg
+            End If
+        Catch
+        End Try
+    Next
+    Return ""
+End Function
+
+Function ObtenerExternalRuleDirectories(invApp As Inventor.Application) As Object
+    Try
+        Dim iLogicAddIn As ApplicationAddIn = _
+            invApp.ApplicationAddIns.ItemById("{3BDD8D79-2179-4B11-8A5A-257B1C0263AC}")
+        If iLogicAddIn Is Nothing Then Return Nothing
+        If Not iLogicAddIn.Activated Then iLogicAddIn.Activate()
+        Dim auto As Object = iLogicAddIn.Automation
+        Return auto.FileOptions.ExternalRuleDirectories
+    Catch
+        Return Nothing
+    End Try
+End Function
+
+Function BuscarPlanosEnExternalRuleDirs(invApp As Inventor.Application) As String
+    Try
+        Dim dirs As Object = ObtenerExternalRuleDirectories(invApp)
+        If dirs Is Nothing Then Return ""
+        For Each d As String In dirs
+            If String.IsNullOrWhiteSpace(d) Then Continue For
+            If EsCarpetaPlanosValida(d) Then Return d
+            Dim padre As String = System.IO.Path.GetDirectoryName(d)
+            If EsCarpetaPlanosValida(padre) Then Return padre
+        Next
+    Catch
+    End Try
+    Return ""
+End Function
+
+Function ResolverPythonExe(planosDir As String) As String
+    Dim cfgPath As String = System.IO.Path.Combine(planosDir, "ilogic\config_planos.txt")
+    Dim valor As String = LeerValorConfig(cfgPath, "PYTHON_EXE")
+    If Not String.IsNullOrWhiteSpace(valor) Then
+        If System.IO.File.Exists(valor) Then Return valor
+    End If
+    Return "python"
+End Function
+
+Function LeerValorConfig(cfgPath As String, clave As String) As String
+    Try
+        If Not System.IO.File.Exists(cfgPath) Then Return ""
+        Dim lineas() As String = System.IO.File.ReadAllLines(cfgPath)
+        Dim linea As String
+        For Each linea In lineas
+            Dim t As String = linea.Trim()
+            If t.Length = 0 OrElse t.StartsWith("#") Then Continue For
+            Dim eq As Integer = t.IndexOf("="c)
+            If eq <= 0 Then Continue For
+            Dim k As String = t.Substring(0, eq).Trim()
+            If String.Equals(k, clave, StringComparison.OrdinalIgnoreCase) Then
+                Return t.Substring(eq + 1).Trim()
+            End If
+        Next
+    Catch
+    End Try
+    Return ""
+End Function

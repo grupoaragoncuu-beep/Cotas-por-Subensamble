@@ -1,24 +1,22 @@
-' COTAS ABIGAIL - Cotas por subensamble (caras del tanque)
-' Regla externa: COTAS_POR_SUBENSAMBLE
+' COTAS ABIGAIL - Instructivo de ensambles independientes
+' Regla externa: COTAS_ENSAMBLES_INDEPENDIENTES
 '
-' Si el .iam es BOARD/GIGA tablero: desvia a generador_board.py (sin picks).
-' Si es tanque:
-' 1) Seleccion FORZOSA completa: Top Cover + Segmentos 1-4 + BASE.
-'    - TOP COVER = mapeo de tapa / carpeta TOP
-'    - BASE = escuadra de camara desde piso/(0,0)
-'      (OTC tiene inclinacion tipo tejado; NO usar Top Cover como "arriba")
-'    - SEGM1..4 = caras laterales
-' 2) Guarda seleccion_caras.json con normales, origen y ocurrencias.
-' 3) Lanza generador_caras_tanque.py --seleccion <json>
+' 1) Seleccion FORZOSA Top Cover + SEGM1-4 + BASE
+'    (igual contrato JSON que Subensamble / Abigail).
+'    Esas caras se EXCLUYEN: solo se procesan kits .iam independientes
+'    colgados en el arbol (no la tapa / paredes / base).
+' 2) Por kit: 6 vistas ViewCube (FRONT/BACK/TOP/BOTTOM/RIGHT/LEFT).
+'    (0,0)=esquina SUP-IZQ escuadrable del ancla (pieza de frente).
+'    Cada instancia hija: cota X e Y. TYP + letras A/B/C
+'    ordenadas cerca→lejos del ancla/origen.
+' 3) Lanza generador_ensambles_instructivo.py (todos los kits filtrados)
 '
-' Salida: COTAS_POR_REFERENCIA/SEGM1..4/TOP/BASE
-'   - 1 JPG por cota (Xmin/Ymin de inicio; Xcentro/Ycentro en barrenos)
-'   - Piezas no circulares: X e Y vs pieza/placa de referencia
-'   - TYP A/B/C = cerca → lejos del origen (no orden de inserción)
-'   - Circulares/barrenos: 2 capturas (X e Y al inicio de la circunferencia)
+' Salida:
+'   Planos\JPG\<tanque>\ENSAMBLES_INDEPENDIENTES\<kit>\FRONT|BACK|TOP|BOTTOM|RIGHT|LEFT\
+'   JPG: JOB__ITEM__VISTA_S##_XMIN[_TYP_N]_VALOR.jpg
+'        (un solo ítem base; si TYP, solo la cantidad al final)
 '
-' Rutas: NO hardcodear C:\Proyectos\...  Usar COTAS_ABIGAIL_DIR /
-' config_planos.txt / ExternalRuleDirectories (instalador).
+' Rutas: COTAS_ABIGAIL_DIR / config_planos.txt / ExternalRuleDirectories.
 
 Imports System.Collections.Generic
 Imports System.Text
@@ -27,12 +25,20 @@ Sub Main()
     Const kDrawingDocument As Integer = 12292
 
     Dim invApp As Inventor.Application = ThisApplication
-    Dim titulo As String = "COTAS ABIGAIL - Cotas por subensamble"
+    Dim titulo As String = "COTAS ABIGAIL - Ensambles independientes"
 
-    If invApp.ActiveDocument Is Nothing OrElse
-       invApp.ActiveDocument.DocumentType <> kDrawingDocument Then
+    If invApp.ActiveDocument Is Nothing Then
         System.Windows.Forms.MessageBox.Show(
             "Abre un plano (.idw / .dwg) y dejalo como ventana activa.",
+            titulo,
+            System.Windows.Forms.MessageBoxButtons.OK,
+            System.Windows.Forms.MessageBoxIcon.Warning)
+        Exit Sub
+    End If
+
+    If invApp.ActiveDocument.DocumentType <> kDrawingDocument Then
+        System.Windows.Forms.MessageBox.Show(
+            "El documento activo debe ser un plano de dibujo (.idw / .dwg).",
             titulo,
             System.Windows.Forms.MessageBoxButtons.OK,
             System.Windows.Forms.MessageBoxIcon.Warning)
@@ -64,11 +70,11 @@ Sub Main()
     End If
 
     Dim scriptPath As String =
-        System.IO.Path.Combine(planosDirFinal, "generador_caras_tanque.py")
-
+        System.IO.Path.Combine(planosDirFinal, "generador_ensambles_instructivo.py")
     If Not System.IO.File.Exists(scriptPath) Then
         System.Windows.Forms.MessageBox.Show(
-            "No se encontro:" & vbCrLf & scriptPath,
+            "No se encontro generador_ensambles_instructivo.py en:" & vbCrLf &
+            planosDirFinal,
             titulo,
             System.Windows.Forms.MessageBoxButtons.OK,
             System.Windows.Forms.MessageBoxIcon.Error)
@@ -85,7 +91,6 @@ Sub Main()
         Exit Sub
     End If
 
-    ' Board/GIGA tablero: no pedir caras de tanque.
     If EsProductoBoard(asmDoc) Then
         LanzarFlujoBoard(invApp, planosDirFinal, titulo)
         Exit Sub
@@ -99,18 +104,13 @@ Sub Main()
         preBoxCm(8) * lenToMm)
 
     System.Windows.Forms.MessageBox.Show( _
-        "Seleccion FORZOSA de TODO el tanque (6 picks en orden)." & vbCrLf & vbCrLf & _
-        "1. TOP COVER (tapa / mapeo)." & vbCrLf & _
-        "2. Cara expuesta del SEGMENTO 1." & vbCrLf & _
-        "3. Cara expuesta del SEGMENTO 2." & vbCrLf & _
-        "4. Cara expuesta del SEGMENTO 3." & vbCrLf & _
-        "5. Cara expuesta del SEGMENTO 4." & vbCrLf & _
-        "6. BASE del tanque (OBLIGATORIA: escuadra la camara desde el piso)." & vbCrLf & vbCrLf & _
-        "Por que BASE es obligatoria:" & vbCrLf & _
-        "  Los OTC tienen inclinacion tipo tejado. Si la camara usa el Top Cover" & vbCrLf & _
-        "  como 'arriba', las cotas Y se descuadran y el TYP falla." & vbCrLf & _
-        "  El (0,0) / BASE es la escuadra perfecta cercana al piso real." & vbCrLf & vbCrLf & _
-        "Si cancelas cualquier pick, el proceso se aborta (no hay modo parcial).", _
+        "Seleccion TOP + SEGM1..4 + BASE." & vbCrLf & vbCrLf & _
+        "Esas 6 caras se excluyen del instructivo." & vbCrLf & _
+        "Solo se acotan kits independientes (brackets, 1250/1251/…)." & vbCrLf & vbCrLf & _
+        "Orden de picks:" & vbCrLf & _
+        "1. TOP COVER" & vbCrLf & _
+        "2-5. SEGMENTO 1 a 4" & vbCrLf & _
+        "6. BASE", _
         titulo)
 
     Try
@@ -119,7 +119,7 @@ Sub Main()
     End Try
 
     Dim topPick As Object = PedirCaraPlana( _
-        invApp, "1/6 Selecciona el TOP COVER (tapa)", pivotMm, lenToMm, "TOP")
+        invApp, "Selecciona el TOP COVER (tapa)", pivotMm, lenToMm, "TOP")
     If topPick Is Nothing Then
         ReactivarPlano(planoDoc)
         Exit Sub
@@ -130,17 +130,11 @@ Sub Main()
     For iSeg = 1 To 4
         Dim segPick As Object = PedirCaraPlana( _
             invApp, _
-            (iSeg + 1).ToString() & "/6 Selecciona la cara expuesta del SEGMENTO " & iSeg, _
+            "Selecciona la cara expuesta del SEGMENTO " & iSeg, _
             pivotMm, _
             lenToMm, _
             "SEGM" & iSeg)
         If segPick Is Nothing Then
-            System.Windows.Forms.MessageBox.Show( _
-                "Seleccion incompleta: se requieren TOP + SEGM1..4 + BASE." & vbCrLf & _
-                "Proceso abortado.", _
-                titulo, _
-                System.Windows.Forms.MessageBoxButtons.OK, _
-                System.Windows.Forms.MessageBoxIcon.Warning)
             ReactivarPlano(planoDoc)
             Exit Sub
         End If
@@ -148,34 +142,8 @@ Sub Main()
     Next
 
     Dim basePick As Object = PedirCaraPlana( _
-        invApp, _
-        "6/6 Selecciona la BASE del tanque (escuadra desde piso)", _
-        pivotMm, _
-        lenToMm, _
-        "BASE")
+        invApp, "Selecciona la BASE del tanque", pivotMm, lenToMm, "BASE")
     If basePick Is Nothing Then
-        System.Windows.Forms.MessageBox.Show( _
-            "La BASE es obligatoria." & vbCrLf & _
-            "Sin ella la camara se inclina con el tejado OTC y las cotas TYP se rompen." & vbCrLf & _
-            "Proceso abortado.", _
-            titulo, _
-            System.Windows.Forms.MessageBoxButtons.OK, _
-            System.Windows.Forms.MessageBoxIcon.Warning)
-        ReactivarPlano(planoDoc)
-        Exit Sub
-    End If
-
-    If segmentos.Count <> 4 Then
-        System.Windows.Forms.MessageBox.Show( _
-            "Seleccion incompleta: se requieren exactamente 4 segmentos.", _
-            titulo, _
-            System.Windows.Forms.MessageBoxButtons.OK, _
-            System.Windows.Forms.MessageBoxIcon.Warning)
-        ReactivarPlano(planoDoc)
-        Exit Sub
-    End If
-
-    If Not ValidarPicksDistintos(topPick, segmentos, basePick) Then
         ReactivarPlano(planoDoc)
         Exit Sub
     End If
@@ -183,7 +151,7 @@ Sub Main()
     ReactivarPlano(planoDoc)
 
     Dim jsonPath As String = System.IO.Path.Combine( _
-        planosDirFinal, "seleccion_caras.json")
+        planosDirFinal, "seleccion_ensambles_independientes.json")
     Try
         GuardarSeleccionJson( _
             jsonPath, _
@@ -205,27 +173,27 @@ Sub Main()
 
     Dim psi As New System.Diagnostics.ProcessStartInfo()
     psi.FileName = pythonExeFinal
-    psi.Arguments = """" & scriptPath & """ --seleccion """ & jsonPath & """"
+    ' Siempre --limpiar: evita JPG residuales de corridas previas.
+    psi.Arguments = """" & scriptPath & """ --seleccion """ & jsonPath & """ --limpiar"
     psi.WorkingDirectory = planosDirFinal
     psi.UseShellExecute = False
     psi.CreateNoWindow = False
 
     Try
-        Dim proceso As System.Diagnostics.Process =
-            System.Diagnostics.Process.Start(psi)
-        proceso.WaitForExit()
+        Dim proc As System.Diagnostics.Process = System.Diagnostics.Process.Start(psi)
+        proc.WaitForExit()
 
-        If proceso.ExitCode = 0 Then
+        If proc.ExitCode = 0 Then
             System.Windows.Forms.MessageBox.Show(
-                "Cotas por subensamble generadas correctamente." & vbCrLf &
-                "Revisa Planos\JPG\<tanque>\COTAS_POR_REFERENCIA\SEGM1..4\TOP\BASE.",
+                "Instructivo de ensambles exportado." & vbCrLf &
+                "Revisa Planos\JPG\<tanque>\ENSAMBLES_INDEPENDIENTES\<kit>\FRONT|BACK|TOP|BOTTOM|RIGHT|LEFT\.",
                 titulo,
                 System.Windows.Forms.MessageBoxButtons.OK,
                 System.Windows.Forms.MessageBoxIcon.Information)
         Else
             System.Windows.Forms.MessageBox.Show(
                 "El proceso termino con errores." & vbCrLf &
-                "Revisa los mensajes de la ventana CMD.",
+                "Revisa la ventana de consola para mas detalle.",
                 titulo,
                 System.Windows.Forms.MessageBoxButtons.OK,
                 System.Windows.Forms.MessageBoxIcon.Warning)
@@ -240,9 +208,9 @@ Sub Main()
     End Try
 End Sub
 
-' ------------------------------------------------------------
-' Seleccion de caras (Dictionary para evitar Class en iLogic)
-' ------------------------------------------------------------
+'------------------------------------------------------------
+' Seleccion Top + SEGM (mismo contrato que COTAS_POR_SUBENSAMBLE)
+'------------------------------------------------------------
 
 Function PedirCaraPlana( _
     invApp As Inventor.Application, _
@@ -289,64 +257,6 @@ Function PedirCaraPlana( _
     Return data
 End Function
 
-Function ValidarPicksDistintos( _
-    topPick As Object, _
-    segmentos As List(Of Object), _
-    basePick As Object) As Boolean
-
-    If topPick Is Nothing OrElse basePick Is Nothing Then
-        System.Windows.Forms.MessageBox.Show( _
-            "Faltan picks: TOP y BASE son obligatorios.", _
-            "COTAS ABIGAIL", _
-            System.Windows.Forms.MessageBoxButtons.OK, _
-            System.Windows.Forms.MessageBoxIcon.Warning)
-        Return False
-    End If
-
-    Dim nTop As String = CStr(CType(topPick, Dictionary(Of String, Object))("occ_name")).Trim().ToUpperInvariant()
-    Dim nBase As String = CStr(CType(basePick, Dictionary(Of String, Object))("occ_name")).Trim().ToUpperInvariant()
-    If nTop <> "" AndAlso nTop = nBase Then
-        System.Windows.Forms.MessageBox.Show( _
-            "TOP COVER y BASE apuntan a la misma ocurrencia (" & nTop & ")." & vbCrLf & _
-            "Vuelve a seleccionar: tapa arriba y placa de piso abajo.", _
-            "COTAS ABIGAIL", _
-            System.Windows.Forms.MessageBoxButtons.OK, _
-            System.Windows.Forms.MessageBoxIcon.Warning)
-        Return False
-    End If
-
-    Dim i As Integer
-    Dim j As Integer
-    For i = 0 To segmentos.Count - 1
-        Dim nI As String = CStr(CType(segmentos(i), Dictionary(Of String, Object))("occ_name")).Trim().ToUpperInvariant()
-        If nI = "" Then Continue For
-        If nI = nTop OrElse nI = nBase Then
-            System.Windows.Forms.MessageBox.Show( _
-                "El segmento " & CStr(CType(segmentos(i), Dictionary(Of String, Object))("etiqueta")) & _
-                " comparte ocurrencia con TOP o BASE (" & nI & ")." & vbCrLf & _
-                "Cada pick debe ser una cara distinta.", _
-                "COTAS ABIGAIL", _
-                System.Windows.Forms.MessageBoxButtons.OK, _
-                System.Windows.Forms.MessageBoxIcon.Warning)
-            Return False
-        End If
-        For j = i + 1 To segmentos.Count - 1
-            Dim nJ As String = CStr(CType(segmentos(j), Dictionary(Of String, Object))("occ_name")).Trim().ToUpperInvariant()
-            If nJ <> "" AndAlso nI = nJ Then
-                System.Windows.Forms.MessageBox.Show( _
-                    "Dos segmentos apuntan a la misma ocurrencia (" & nI & ")." & vbCrLf & _
-                    "Selecciona SEGM1..4 en caras distintas.", _
-                    "COTAS ABIGAIL", _
-                    System.Windows.Forms.MessageBoxButtons.OK, _
-                    System.Windows.Forms.MessageBoxIcon.Warning)
-                Return False
-            End If
-        Next
-    Next
-
-    Return True
-End Function
-
 Sub ReactivarPlano(planoDoc As Document)
     Try
         planoDoc.Activate()
@@ -375,10 +285,6 @@ Function BuscarEnsambleTanque(invApp As Inventor.Application) As AssemblyDocumen
     Next
     Return mejor
 End Function
-
-' ------------------------------------------------------------
-' JSON
-' ------------------------------------------------------------
 
 Sub GuardarSeleccionJson( _
     ruta As String, _
@@ -449,10 +355,6 @@ End Function
 Function Fmt(valor As Double) As String
     Return valor.ToString("G17", System.Globalization.CultureInfo.InvariantCulture)
 End Function
-
-' ------------------------------------------------------------
-' Helpers de cara / vectores (minimos, estilo PQart)
-' ------------------------------------------------------------
 
 Function CombinedRootOccurrenceRangeBoxCm(ByVal asmDoc As AssemblyDocument) As Double()
     Dim xmin As Double = Double.MaxValue
@@ -593,10 +495,9 @@ Function SubVec(ByVal a As Double(), ByVal b As Double()) As Double()
     Return Vec(a(0) - b(0), a(1) - b(1), a(2) - b(2))
 End Function
 
-' ------------------------------------------------------------
-' Resolucion de rutas Planos / Python (sin cambios de contrato)
-' ------------------------------------------------------------
-
+'------------------------------------------------------------
+' Resolver carpeta Planos (portable entre PCs)
+'------------------------------------------------------------
 Function ResolverPlanosDir(invApp As Inventor.Application) As String
     Try
         Dim variable As String =
@@ -624,7 +525,7 @@ End Function
 
 Function EsCarpetaPlanosValida(dirPlanos As String) As Boolean
     Try
-        If System.IO.File.Exists(System.IO.Path.Combine(dirPlanos, "generador_board.py")) Then Return True
+        If System.IO.File.Exists(System.IO.Path.Combine(dirPlanos, "generador_ensambles_instructivo.py")) Then Return True
         If System.IO.File.Exists(System.IO.Path.Combine(dirPlanos, "generador_piezas.py")) Then Return True
         If System.IO.File.Exists(System.IO.Path.Combine(dirPlanos, "generador_tanque_completo.py")) Then Return True
         If System.IO.File.Exists(System.IO.Path.Combine(dirPlanos, "generador_caras_tanque.py")) Then Return True

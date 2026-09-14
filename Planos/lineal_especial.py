@@ -1,28 +1,63 @@
 import win32com.client
 from inventor_com import conectar_inventor
-from cota_estilo import aplicar_estilo_cota
+from cota_estilo import (
+    OFFSET_FUERA_PIEZA_CM,
+    aplicar_estilo_cota,
+    asegurar_cota_fuera_pieza_robusto,
+    clearance_texto_cota_cm,
+)
 
 kHorizontalDimensionType = 60162
 kVerticalDimensionType = 60163
 
 EPS = 0.0001
-OFFSET_COTA = 1.5
+OFFSET_COTA = float(OFFSET_FUERA_PIEZA_CM)
 
 FACTOR_VALIDACION_MIN = 0.80
 FACTOR_VALIDACION_MAX = 1.15
 
 
-def _clampear_punto_hoja(hoja, tg, x, y, margen=1.2):
-    """Fuerza el Point2d de texto a caer dentro del rectángulo físico de la
-    hoja con margen para número + flecha. Sin esto, Inventor acepta la cota
-    pero la cámara del JPG no la captura porque queda fuera del sheet."""
+def _clampear_punto_hoja(hoja, tg, x, y, margen=1.2, evitar_bbox=None):
+    """Point2d en sheet; no dentro de la silueta."""
+    from cota_estilo import empujar_punto_fuera_bbox, punto_dentro_bbox
+
     try:
         sheet_w = float(hoja.Width)
         sheet_h = float(hoja.Height)
-        x = max(margen, min(sheet_w - margen, x))
-        y = max(margen, min(sheet_h - margen, y))
+        x = max(margen, min(sheet_w - margen, float(x)))
+        y = max(margen, min(sheet_h - margen, float(y)))
     except Exception:
-        pass
+        x, y = float(x), float(y)
+    if evitar_bbox is not None and punto_dentro_bbox(
+        x, y, evitar_bbox, holgura=0.2
+    ):
+        try:
+            sheet_w = float(hoja.Width)
+            sheet_h = float(hoja.Height)
+            minx, maxx, miny, maxy = (
+                float(evitar_bbox[0]),
+                float(evitar_bbox[1]),
+                float(evitar_bbox[2]),
+                float(evitar_bbox[3]),
+            )
+            aire = {
+                "izq": minx - margen,
+                "der": sheet_w - margen - maxx,
+                "inf": miny - margen,
+                "sup": sheet_h - margen - maxy,
+            }
+            lado = max(aire, key=aire.get)
+        except Exception:
+            lado = "auto"
+        clr = clearance_texto_cota_cm()
+        x, y = empujar_punto_fuera_bbox(x, y, evitar_bbox, lado, clr)
+        try:
+            sheet_w = float(hoja.Width)
+            sheet_h = float(hoja.Height)
+            x = max(margen, min(sheet_w - margen, x))
+            y = max(margen, min(sheet_h - margen, y))
+        except Exception:
+            pass
     return tg.CreatePoint2d(x, y)
 
 
@@ -246,13 +281,19 @@ def _crear_cota_horizontal_por_puntos(hoja, vista, tg, datos, puntos, nombre_hoj
         return False
 
     try:
+        pieza_bb = (minx, maxx, miny, maxy)
         pt_texto = _clampear_punto_hoja(
-            hoja, tg, (minx + maxx) / 2.0, maxy + OFFSET_COTA
+            hoja,
+            tg,
+            (minx + maxx) / 2.0,
+            maxy + OFFSET_COTA,
+            evitar_bbox=pieza_bb,
         )
         dim = hoja.DrawingDimensions.GeneralDimensions.AddLinear(
             pt_texto, int_izq, int_der, kHorizontalDimensionType
         )
         aplicar_estilo_cota(dim, hoja=hoja)
+        asegurar_cota_fuera_pieza_robusto(dim, tg, pieza_bb, n_chars=10)
 
         esperado = _esperado_modelo(vista, maxx - minx)
         return _validar_dimension(dim, esperado, nombre_hoja, "horizontal")
@@ -277,13 +318,19 @@ def _crear_cota_vertical_por_puntos(hoja, vista, tg, puntos, nombre_hoja):
         return False
 
     try:
+        pieza_bb = (minx, maxx, miny, maxy)
         pt_texto = _clampear_punto_hoja(
-            hoja, tg, minx - OFFSET_COTA, (miny + maxy) / 2.0
+            hoja,
+            tg,
+            minx - OFFSET_COTA,
+            (miny + maxy) / 2.0,
+            evitar_bbox=pieza_bb,
         )
         dim = hoja.DrawingDimensions.GeneralDimensions.AddLinear(
             pt_texto, int_inf, int_sup, kVerticalDimensionType
         )
         aplicar_estilo_cota(dim, hoja=hoja)
+        asegurar_cota_fuera_pieza_robusto(dim, tg, pieza_bb, n_chars=10)
 
         esperado = _esperado_modelo(vista, maxy - miny)
         return _validar_dimension(dim, esperado, nombre_hoja, "vertical")

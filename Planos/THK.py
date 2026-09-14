@@ -1,9 +1,18 @@
 import math
 import os
+import re
 import time
 import win32com.client
 from inventor_com import conectar_inventor
-from cota_estilo import aplicar_estilo_cota
+from cota_estilo import (
+    OFFSET_FUERA_PIEZA_CM,
+    aplicar_estilo_cota,
+    asegurar_cota_fuera_pieza,
+    asegurar_cota_fuera_pieza_robusto,
+    candidatos_texto_fuera_pieza,
+    clearance_texto_cota_cm,
+    dim_solapa_pieza,
+)
 
 # Import diferido para evitar imports circulares (creador_vistas es cliente
 # de THK.py en el flujo por lotes, pero aquí sólo lo usamos como utilidad
@@ -62,7 +71,7 @@ kDefaultViewOrientation = 10753
 kHiddenLineRemovedDrawingViewStyle = 32258
 
 EPS = 0.0001
-OFFSET_COTA = 1.5
+OFFSET_COTA = float(OFFSET_FUERA_PIEZA_CM)
 
 # Inventor Curve2dTypeEnum (parcial)
 kCircularArcCurve2d = 5121
@@ -551,15 +560,36 @@ def _resolver_semicircular(hoja, vista, tg, datos, nombre_hoja):
                     hoja, tg, inner["curve"], cx + ri, cy
                 )
                 if int_o and int_i:
+                    pieza_bb = _bbox_global(datos)
+                    clr = clearance_texto_cota_cm(10) + OFFSET_COTA
+                    from cota_estilo import empujar_punto_fuera_bbox
+
+                    try:
+                        sheet_w = float(hoja.Width)
+                        sheet_h = float(hoja.Height)
+                        minx, maxx, miny, maxy = pieza_bb
+                        aire = {
+                            "der": sheet_w - maxx,
+                            "izq": minx,
+                            "sup": sheet_h - maxy,
+                            "inf": miny,
+                        }
+                        lado = max(aire, key=aire.get)
+                    except Exception:
+                        lado = "der"
+                    tx, ty = empujar_punto_fuera_bbox(
+                        cx, cy, pieza_bb, lado, clr
+                    )
                     pt = _clampear_punto_hoja(
-                        hoja, tg,
-                        cx + ro + OFFSET_COTA,
-                        cy + OFFSET_COTA,
+                        hoja, tg, tx, ty, evitar_bbox=pieza_bb
                     )
                     dim = hoja.DrawingDimensions.GeneralDimensions.AddLinear(
                         pt, int_i, int_o, kHorizontalDimensionType
                     )
                     aplicar_estilo_cota(dim, hoja=hoja)
+                    asegurar_cota_fuera_pieza_robusto(
+                        dim, tg, pieza_bb, holgura=0.6, n_chars=12
+                    )
                     origen = (
                         "catálogo" if mejor["snap"].get("desde_catalogo") else "medido"
                     )
@@ -722,6 +752,10 @@ def _espesor_desde_bbox_3d(vista):
     """
     Fallback para partes no sheet metal: usa la dimensión MÁS PEQUEÑA del
     bbox 3D de la pieza como espesor. En cm de Inventor.
+
+    OJO: en perfiles U/L (Parking) el menor del bbox suele ser el ALTO del
+    doblez (p. ej. 0.875 in), NO el canto de pared. No usar solo para
+    etiquetar THK sin validar con ``_espesor_thk_validado``.
     """
     dims = _dimensiones_bbox_3d(vista)
     if not dims:
@@ -733,30 +767,226 @@ def _espesor_desde_bbox_3d(vista):
     return menor
 
 
-def _forzar_cota_thk_desde_modelo(hoja, tg, vista, nombre_hoja):
-    """
-    Fallback final cuando ningún resolver geométrico pudo dibujar el THK.
+def _thk_duplica_referencia(thk_cm, ref_cm, tol_rel=0.12):
+    """True si thk ≈ ref (p. ej. bbox menor = alto patas→base)."""
+    if thk_cm is None or ref_cm is None:
+        return False
+    if float(thk_cm) <= EPS or float(ref_cm) <= EPS:
+        return False
+    return abs(float(thk_cm) - float(ref_cm)) / float(ref_cm) <= tol_rel
 
-    Estrategia: lee el espesor real del modelo (Thickness de sheet metal, o
-    lado más pequeño del bbox 3D si es una parte normal) y coloca una
-    ``GeneralNote`` de texto ``THK = X.XXX in`` sobre la hoja. Esto permite
-    que el JPG final tenga el dato aunque la vista sea cara plana o de
-    orientación dudosa. La hoja se renombra a ``_THK`` porque SÍ tiene el
-    espesor informado (aunque venga del modelo, no de la geometría 2D).
+
+def _espesor_pared_desde_curvas(vista, datos, alto_cm=None):
+    """
+    Candidato de pared (gap fino) desde curvas 2D, descartando gaps ≈ ALTO.
+    """
+    if not datos:
+        return None
+    candidatos = _buscar_candidatos_lineales(datos)
+    if not candidatos:
+        return None
+    vals = []
+    for c in candidatos:
+        try:
+            v = _esperado_modelo(vista, c["gap_sheet"])
+        except Exception:
+            continue
+        if v is None or v <= EPS:
+            continue
+        if alto_cm and _thk_duplica_referencia(v, alto_cm, tol_rel=0.40):
+            continue
+        # Espesores de chapa/barra típicos; evita anchos de placa.
+        if v > 1.25 * IN_TO_CM:
+            continue
+        vals.append(float(v))
+    if not vals:
+        return None
+    return min(vals)
+
+
+def _espesor_thk_validado(vista, alto_cm=None, datos=None, nombre_hoja=None):
+    """
+    Espesor usable para etiquetar/exportar como THK.
+
+    Prioridad BOARD/GIGA (nombre pieza completo):
+      1) Sheet Metal Thickness (canónico en chapa)
+      2) Gap fino de curvas 2D (pared)
+      3) Bbox 3D menor si no duplica ALTO
+
+    Prioridad tanque:
+      1) Gap fino de curvas 2D (pared)
+      2) Thickness de Sheet Metal (si no duplica el ALTO)
+      3) Bbox 3D menor SOLO si es claramente más fino que el ALTO
+
+    Si no hay ancla confiable → None (mejor omitir THK que confundir).
+    """
+    parking = _nombre_parece_parking_u(nombre_hoja)
+
+    board_giga = False
+    try:
+        from creador_vistas import get_nombre_pieza_completo
+
+        board_giga = bool(get_nombre_pieza_completo())
+    except Exception:
+        board_giga = False
+
+    if board_giga:
+        chapa = _espesor_chapa_desde_vista(vista)
+        if chapa is not None and chapa > EPS:
+            if alto_cm and _thk_duplica_referencia(chapa, alto_cm):
+                print(
+                    f"⚠️ {nombre_hoja or 'hoja'}: Thickness BOARD "
+                    f"≈ ALTO; se intenta pared/bbox."
+                )
+            else:
+                return float(chapa), "sheet_metal_thickness_board"
+        pared = _espesor_pared_desde_curvas(vista, datos, alto_cm=alto_cm)
+        if pared is not None and pared > EPS:
+            return float(pared), "curva_pared_board"
+        bbox = _espesor_desde_bbox_3d(vista)
+        if bbox is not None and bbox > EPS:
+            if not (
+                alto_cm
+                and (
+                    _thk_duplica_referencia(bbox, alto_cm)
+                    or float(bbox) >= float(alto_cm) * 0.45
+                )
+            ):
+                return float(bbox), "bbox_3d_board"
+        return None, None
+
+    pared = _espesor_pared_desde_curvas(vista, datos, alto_cm=alto_cm)
+    if pared is not None and pared > EPS:
+        return float(pared), "curva_pared"
+
+    chapa = _espesor_chapa_desde_vista(vista)
+    if chapa is not None and chapa > EPS:
+        if alto_cm and _thk_duplica_referencia(chapa, alto_cm):
+            print(
+                f"⚠️ {nombre_hoja or 'hoja'}: Thickness de chapa "
+                f"({chapa / IN_TO_CM:.4f} in) ≈ ALTO; no se usa como THK."
+            )
+        else:
+            return float(chapa), "sheet_metal_thickness"
+
+    if parking:
+        # En U Parking el bbox menor = alto del doblez con mucha frecuencia.
+        return None, None
+
+    bbox = _espesor_desde_bbox_3d(vista)
+    if bbox is None or bbox <= EPS:
+        return None, None
+    if alto_cm and (
+        _thk_duplica_referencia(bbox, alto_cm)
+        or float(bbox) >= float(alto_cm) * 0.45
+    ):
+        return None, None
+    return float(bbox), "bbox_3d_menor_validado"
+
+
+def _alinear_cota_thk_a_chapa_board(hoja, vista, nombre_hoja, meta=None):
+    """
+    En BOARD: si hay Sheet Metal Thickness y la cota dibujada difiere,
+    fuerza el texto visible al Thickness (LADO solo ancla visual).
+    """
+    try:
+        from creador_vistas import get_nombre_pieza_completo
+
+        if not get_nombre_pieza_completo():
+            return False
+    except Exception:
+        return False
+
+    chapa = _espesor_chapa_desde_vista(vista)
+    if chapa is None or chapa <= EPS:
+        return False
+
+    try:
+        from cota_estilo import texto_cota_dibujo
+
+        texto = texto_cota_dibujo(chapa, hoja)
+    except Exception:
+        texto = f"{chapa / IN_TO_CM:.4f}"
+
+    if not texto:
+        return False
+
+    cambiado = False
+    try:
+        dims = hoja.DrawingDimensions.GeneralDimensions
+        for di in range(1, dims.Count + 1):
+            dim = dims.Item(di)
+            try:
+                mv = float(dim.ModelValue)
+            except Exception:
+                mv = None
+            if mv is not None and abs(mv - chapa) / max(chapa, EPS) <= 0.03:
+                continue
+            try:
+                dim.HideValue = True
+            except Exception:
+                pass
+            bold = "True"
+            try:
+                from cota_estilo import COTA_BOLD, COTA_FONT_SIZE_CM
+
+                bold = "True" if COTA_BOLD else "False"
+                formatted = (
+                    f"<StyleOverride FontSize='{COTA_FONT_SIZE_CM}' "
+                    f"Bold='{bold}'>{texto}</StyleOverride>"
+                )
+            except Exception:
+                formatted = texto
+            try:
+                dim.Text.FormattedText = formatted
+                cambiado = True
+            except Exception:
+                try:
+                    dim.Text.Text = texto
+                    cambiado = True
+                except Exception:
+                    pass
+    except Exception:
+        return False
+
+    if cambiado:
+        if isinstance(meta, dict):
+            meta["valor_cm"] = float(chapa)
+            meta["gap_sheet"] = float(chapa)
+            meta["origen_thk"] = "sheet_metal_thickness_board_forced"
+        print(
+            f"↩️ {nombre_hoja}: THK texto alineado a Sheet Metal "
+            f"Thickness ({chapa / IN_TO_CM:.4f} in)"
+        )
+    return cambiado
+
+
+def _forzar_cota_thk_desde_modelo(hoja, tg, vista, nombre_hoja, alto_cm=None, datos=None):
+    """
+    Fallback tipográfico SOLO con espesor validado (Sheet Metal o pared 2D).
+
+    Ya no publica ``THK = …`` desde bbox 3D crudo: en perfiles U eso
+    etiquetaba el ALTO (0.875) como THK y confundía las capturas.
 
     Retorna (True, valor_cm) si logró agregar la nota, (False, None) si no.
     """
-    valor_cm = _espesor_chapa_desde_vista(vista)
-    origen = "sheet_metal_thickness"
+    valor_cm, origen = _espesor_thk_validado(
+        vista, alto_cm=alto_cm, datos=datos, nombre_hoja=nombre_hoja
+    )
     if valor_cm is None or valor_cm <= EPS:
-        valor_cm = _espesor_desde_bbox_3d(vista)
-        origen = "bbox_3d_menor"
-
-    if valor_cm is None or valor_cm <= EPS:
+        print(
+            f"⚠️ {nombre_hoja}: sin THK validado (ni Sheet Metal Thickness "
+            f"ni pared 2D); no se etiqueta como THK."
+        )
         return False, None
 
-    valor_in = valor_cm / IN_TO_CM
-    texto = f"THK = {valor_in:.3f} in"
+    try:
+        from cota_estilo import texto_cota_dibujo
+
+        texto = f"THK = {texto_cota_dibujo(valor_cm)}"
+    except Exception:
+        valor_in = valor_cm / IN_TO_CM
+        texto = f"THK = {valor_in:.3f} in"
 
     # Posición de la nota: al lado derecho de la vista, cerca de la esquina
     # superior. Se clampea al sheet para no salirse.
@@ -798,7 +1028,7 @@ def _forzar_cota_thk_desde_modelo(hoja, tg, vista, nombre_hoja):
         return False, None
 
     print(
-        f"↩️ {nombre_hoja}: THK forzado desde modelo = {valor_in:.3f} in "
+        f"↩️ {nombre_hoja}: THK forzado desde modelo = {texto} "
         f"(origen={origen})"
     )
     return True, valor_cm
@@ -809,7 +1039,7 @@ def _forzar_nota_dimension_individual(
 ):
     """
     Coloca UNA sola ``GeneralNote`` centrada bajo la vista, con el formato
-    ``ETIQUETA = X.XXX in``. Se usa como fallback cuando la cota geométrica
+    ``ETIQUETA = X.XXX in|mm``. Se usa como fallback cuando la cota geométrica
     en las hojas _ALTO / _LARGO_PATA no cabe o falla.
 
     Retorna True si logró añadir la nota, False si no.
@@ -837,8 +1067,13 @@ def _forzar_nota_dimension_individual(
         pt_y = sheet_h * 0.15
 
     pt = _clampear_punto_hoja(hoja, tg, pt_x, pt_y, margen=1.5)
-    valor_in = valor_cm / IN_TO_CM
-    texto = f"{etiqueta} = {valor_in:.3f} in"
+    try:
+        from cota_estilo import texto_cota_dibujo
+
+        texto = f"{etiqueta} = {texto_cota_dibujo(valor_cm)}"
+    except Exception:
+        valor_in = valor_cm / IN_TO_CM
+        texto = f"{etiqueta} = {valor_in:.3f} in"
 
     try:
         hoja.DrawingNotes.GeneralNotes.AddFitted(pt, texto)
@@ -846,7 +1081,7 @@ def _forzar_nota_dimension_individual(
         print(f"⚠️ {nombre_hoja}: no se pudo crear nota {etiqueta} ({exc}).")
         return False
 
-    print(f"↩️ {nombre_hoja}: {etiqueta} forzado desde bbox 3D = {valor_in:.3f} in")
+    print(f"↩️ {nombre_hoja}: {etiqueta} forzado desde bbox 3D = {texto}")
     return True
 
 
@@ -1397,21 +1632,49 @@ def _candidato_bbox_menor(datos):
     }
 
 
-def _clampear_punto_hoja(hoja, tg, x, y, margen=1.2):
-    """Devuelve un Point2d garantizado dentro de la hoja física con margen.
+def _clampear_punto_hoja(hoja, tg, x, y, margen=1.2, evitar_bbox=None):
+    """Point2d dentro del sheet; nunca dentro de la silueta de la pieza."""
+    from cota_estilo import empujar_punto_fuera_bbox, punto_dentro_bbox
 
-    Sin esto, cotas dibujadas cerca del borde quedan fuera del rectángulo que
-    la cámara exporta como JPG (Inventor las acepta pero el bitmap no las
-    incluye), y el resultado es la clásica "captura sin cota". El margen
-    (1.2 cm) da espacio al número y la flecha para caber enteros.
-    """
     try:
         sheet_w = float(hoja.Width)
         sheet_h = float(hoja.Height)
-        x = max(margen, min(sheet_w - margen, x))
-        y = max(margen, min(sheet_h - margen, y))
+        x = max(margen, min(sheet_w - margen, float(x)))
+        y = max(margen, min(sheet_h - margen, float(y)))
     except Exception:
-        pass
+        x, y = float(x), float(y)
+    if evitar_bbox is not None and punto_dentro_bbox(
+        x, y, evitar_bbox, holgura=0.2
+    ):
+        try:
+            sheet_w = float(hoja.Width)
+            sheet_h = float(hoja.Height)
+            minx, maxx, miny, maxy = (
+                float(evitar_bbox[0]),
+                float(evitar_bbox[1]),
+                float(evitar_bbox[2]),
+                float(evitar_bbox[3]),
+            )
+            aire = {
+                "izq": minx - margen,
+                "der": sheet_w - margen - maxx,
+                "inf": miny - margen,
+                "sup": sheet_h - margen - maxy,
+            }
+            lado = max(aire, key=aire.get)
+        except Exception:
+            lado = "auto"
+        clr = clearance_texto_cota_cm()
+        x, y = empujar_punto_fuera_bbox(x, y, evitar_bbox, lado, clr)
+        try:
+            sheet_w = float(hoja.Width)
+            sheet_h = float(hoja.Height)
+            x = max(margen, min(sheet_w - margen, x))
+            y = max(margen, min(sheet_h - margen, y))
+        except Exception:
+            pass
+        if punto_dentro_bbox(x, y, evitar_bbox, holgura=0.15):
+            x, y = empujar_punto_fuera_bbox(x, y, evitar_bbox, lado, clr)
     return tg.CreatePoint2d(x, y)
 
 
@@ -1428,10 +1691,21 @@ def _dibujar_cota_prismatica(hoja, tg, mejor):
             int_b = hoja.CreateGeometryIntent(b["curve"])
         x_texto = ((a["cx"] + b["cx"]) / 2.0)
         y_texto = max(a["maxy"], b["maxy"]) + OFFSET_COTA
-        pt_texto = _clampear_punto_hoja(hoja, tg, x_texto, y_texto)
+        pieza_bb = (
+            min(a["minx"], b["minx"]),
+            max(a["maxx"], b["maxx"]),
+            min(a["miny"], b["miny"]),
+            max(a["maxy"], b["maxy"]),
+        )
+        pt_texto = _clampear_punto_hoja(
+            hoja, tg, x_texto, y_texto, evitar_bbox=pieza_bb
+        )
         dim = hoja.DrawingDimensions.GeneralDimensions.AddLinear(
             pt_texto, int_a, int_b, kHorizontalDimensionType
         )
+        aplicar_estilo_cota(dim, hoja=hoja)
+        asegurar_cota_fuera_pieza(dim, tg, pieza_bb, "H")
+        return dim
     else:
         int_a = _intent_en_extremo(hoja, tg, a, "sup" if a["cy"] >= b["cy"] else "inf")
         int_b = _intent_en_extremo(hoja, tg, b, "inf" if a["cy"] >= b["cy"] else "sup")
@@ -1440,12 +1714,21 @@ def _dibujar_cota_prismatica(hoja, tg, mejor):
             int_b = hoja.CreateGeometryIntent(b["curve"])
         x_texto = min(a["minx"], b["minx"]) - OFFSET_COTA
         y_texto = ((a["cy"] + b["cy"]) / 2.0)
-        pt_texto = _clampear_punto_hoja(hoja, tg, x_texto, y_texto)
+        pieza_bb = (
+            min(a["minx"], b["minx"]),
+            max(a["maxx"], b["maxx"]),
+            min(a["miny"], b["miny"]),
+            max(a["maxy"], b["maxy"]),
+        )
+        pt_texto = _clampear_punto_hoja(
+            hoja, tg, x_texto, y_texto, evitar_bbox=pieza_bb
+        )
         dim = hoja.DrawingDimensions.GeneralDimensions.AddLinear(
             pt_texto, int_a, int_b, kVerticalDimensionType
         )
-    aplicar_estilo_cota(dim, hoja=hoja)
-    return dim
+        aplicar_estilo_cota(dim, hoja=hoja)
+        asegurar_cota_fuera_pieza(dim, tg, pieza_bb, "V")
+        return dim
 
 
 def _envolvente_espesor(datos):
@@ -1509,6 +1792,32 @@ def _nombre_parece_tierra(nombre_hoja):
 def _nombre_parece_nipple(nombre_hoja):
     u = str(nombre_hoja or "").upper()
     return "NIPPLE" in u
+
+
+def _necesita_alto_axial(nombre_hoja):
+    """
+    Cilindros / stubs / studs / bridas cuyo FRENTE es Ø y falta el largo
+    axial (``_ALTO`` / HEIGHT).
+
+    Incluye nipples, STUD, SP-751, PIPE/TUBE y bridas (PIPE FLANGE / FLANE /
+    BRIDA). Antes se excluía ``FLANGE`` y solo el typo ``FLANE`` generaba
+    HEIGHT (Vantran 0.375 sí, 0.250/1 no).
+    """
+    u = str(nombre_hoja or "").upper()
+    if _nombre_parece_nipple(u):
+        return True
+    if "STUD" in u:
+        return True
+    if "SP-751" in u:
+        return True
+    # Bridas: HEIGHT = cuerpo (hub+disco), distinto del THK del disco.
+    if _nombre_parece_brida(u):
+        return True
+    if "PIPE" in u:
+        return True
+    if re.search(r"\bTUBE\b", u) or u.endswith("TUBE") or "_TUBE" in u:
+        return True
+    return False
 
 
 def _nombre_parece_jacking_escuadra(nombre_hoja):
@@ -2118,13 +2427,16 @@ def _acotar_lado_bbox(
     ratio_ok = float(ratio_min) if ratio_min else 0.97
 
     def _pt_para_orient(a, b, dx_off, dy_off):
+        clr = clearance_texto_cota_cm()
         if orientacion == "V":
-            x = min(a["minx"], b["minx"]) - OFFSET_COTA - dx_off
+            x = min(a["minx"], b["minx"]) - clr - dx_off
             y = (miny + maxy) / 2.0 + dy_off
         else:
             x = (minx + maxx) / 2.0 + dx_off
-            y = max(a["maxy"], b["maxy"]) + OFFSET_COTA + dy_off
-        return _clampear_punto_hoja(hoja, tg, x, y)
+            y = max(a["maxy"], b["maxy"]) + clr + dy_off
+        return _clampear_punto_hoja(
+            hoja, tg, x, y, evitar_bbox=(minx, maxx, miny, maxy)
+        )
 
     def _cota_dentro_de_sheet(dim_obj):
         if sheet_w is None or sheet_h is None:
@@ -2144,6 +2456,17 @@ def _acotar_lado_bbox(
             and dminy >= margen
             and dmaxy <= sheet_h - margen
         )
+
+    def _cota_limpia(dim_obj):
+        """Fuera de la pieza Y (preferible) dentro del sheet."""
+        pieza_bb = (minx, maxx, miny, maxy)
+        if dim_solapa_pieza(dim_obj, pieza_bb):
+            asegurar_cota_fuera_pieza(
+                dim_obj, tg, pieza_bb, orientacion
+            )
+        if dim_solapa_pieza(dim_obj, pieza_bb):
+            return False
+        return _cota_dentro_de_sheet(dim_obj)
 
     ultimo_error = None
     datos_iter = list(datos)
@@ -2167,18 +2490,33 @@ def _acotar_lado_bbox(
             if int_a is None or int_b is None:
                 raise RuntimeError("GeometryIntent de borde falló")
 
-            offsets_a_probar = [
+            pieza_bb = (minx, maxx, miny, maxy)
+            clr = clearance_texto_cota_cm()
+            # Primero candidatos geométricos fuera de silueta; luego offsets.
+            offsets_a_probar = []
+            for x, y, _lado in candidatos_texto_fuera_pieza(
+                pieza_bb, orientacion, clearance=clr
+            ):
+                offsets_a_probar.append(("xy", x, y))
+            for dx_off, dy_off in (
                 (0.0, 0.0),
                 (1.5, 0.0),
                 (3.0, 0.0),
+                (4.5, 0.0),
                 (0.0, 1.5),
                 (0.0, 3.0),
-            ]
+            ):
+                offsets_a_probar.append(("d", dx_off, dy_off))
 
             dim_creado = None
             dim_fallback = None
-            for dx_off, dy_off in offsets_a_probar:
-                pt = _pt_para_orient(a, b, dx_off, dy_off)
+            for modo, v1, v2 in offsets_a_probar:
+                if modo == "xy":
+                    pt = _clampear_punto_hoja(
+                        hoja, tg, v1, v2, evitar_bbox=pieza_bb
+                    )
+                else:
+                    pt = _pt_para_orient(a, b, v1, v2)
                 try:
                     if orientacion == "V":
                         dim_test = hoja.DrawingDimensions.GeneralDimensions.AddLinear(
@@ -2194,14 +2532,25 @@ def _acotar_lado_bbox(
                 if not _validar_span_cota(
                     dim_test, span, vista, nombre_hoja, etiqueta
                 ):
+                    try:
+                        dim_test.Delete()
+                    except Exception:
+                        pass
                     continue
 
-                if _cota_dentro_de_sheet(dim_test):
+                if _cota_limpia(dim_test):
                     dim_creado = dim_test
                     break
 
-                if dim_fallback is None:
-                    dim_fallback = dim_test
+                # Preferir sin solape aunque quede cerca del borde del sheet.
+                if not dim_solapa_pieza(dim_test, pieza_bb):
+                    if dim_fallback is None:
+                        dim_fallback = dim_test
+                    else:
+                        try:
+                            dim_test.Delete()
+                        except Exception:
+                            pass
                 else:
                     try:
                         dim_test.Delete()
@@ -2209,24 +2558,30 @@ def _acotar_lado_bbox(
                         pass
 
             if dim_creado is None and dim_fallback is not None:
-                # Fallback sólo si aún cubre ≥92% de la silueta.
                 if _validar_span_cota(
                     dim_fallback, span, vista, nombre_hoja, etiqueta
-                ):
+                ) and not dim_solapa_pieza(dim_fallback, pieza_bb):
                     dim_creado = dim_fallback
                     _dbg(
-                        f"{nombre_hoja}: cota aceptada como fallback (cerca del "
-                        f"borde), mejor eso que hoja sin dimensión."
+                        f"{nombre_hoja}: cota aceptada cerca del borde "
+                        f"(sin solape con pieza)."
                     )
                 else:
+                    try:
+                        dim_fallback.Delete()
+                    except Exception:
+                        pass
                     dim_fallback = None
 
             if dim_creado is None:
                 raise RuntimeError(
-                    "no se pudo crear cota de silueta en ningún offset"
+                    "no se pudo crear cota fuera de la pieza"
                 )
 
             aplicar_estilo_cota(dim_creado, hoja=hoja)
+            asegurar_cota_fuera_pieza(
+                dim_creado, tg, pieza_bb, orientacion
+            )
 
             valor_in = _esperado_modelo(vista, span) / IN_TO_CM
             print(f"✅ {nombre_hoja}: {etiqueta} = {valor_in:.4f} in (silueta)")
@@ -2451,7 +2806,8 @@ def _finalizar_parking_patas_base(plano, hoja_lado, tg, vista, meta, nombre_lado
     """
     Tras acotar patas→base en LADO (Parking):
     1) Renombra esa hoja a ``_ALTO`` (bend deduction).
-    2) Crea ``_THK`` con cota asociativa real (no leyenda tipográfica).
+    2) Crea ``_THK`` solo si el espesor está validado (Sheet Metal o pared 2D).
+       Si no, omite THK (no inventa 0.875 desde bbox).
     """
     creadas = set()
     try:
@@ -2463,13 +2819,34 @@ def _finalizar_parking_patas_base(plano, hoja_lado, tg, vista, meta, nombre_lado
     except Exception as exc:
         print(f"⚠️ {nombre_lado}: no se pudo renombrar LADO→ALTO ({exc})")
 
+    alto_cm = (meta or {}).get("valor_cm")
+    datos_lado = None
+    try:
+        datos_lado = _obtener_curvas_validas(vista)
+    except Exception:
+        datos_lado = None
+
     thk_cm = (meta or {}).get("thk_chapa_cm")
+    origen = "meta_chapa"
+    if thk_cm is None or thk_cm <= EPS or (
+        alto_cm and _thk_duplica_referencia(thk_cm, alto_cm)
+    ):
+        thk_cm, origen = _espesor_thk_validado(
+            vista,
+            alto_cm=alto_cm,
+            datos=datos_lado,
+            nombre_hoja=nombre_lado,
+        )
     if thk_cm is None or thk_cm <= EPS:
-        thk_cm = _espesor_chapa_desde_vista(vista)
-    if thk_cm is None or thk_cm <= EPS:
-        thk_cm = _espesor_desde_bbox_3d(vista)
-    if thk_cm is None or thk_cm <= EPS:
-        print(f"⚠️ {nombre_lado}: sin espesor de chapa/barra para hoja THK")
+        print(
+            f"⚠️ {nombre_lado}: ALTO OK; THK omitido (sin espesor validado). "
+            f"Fijar Sheet Metal Thickness o mejorar vista de canto."
+        )
+        # Marcar pendiente para no renombrar/capturar un THK falso.
+        try:
+            LAST_PENDIENTES_THK.append(str(nombre_lado))
+        except Exception:
+            pass
         return creadas
 
     nombre_thk = _nombre_hoja_variante(nombre_lado, "_THK")
@@ -2500,34 +2877,54 @@ def _finalizar_parking_patas_base(plano, hoja_lado, tg, vista, meta, nombre_lado
             datos_thk = None
 
         if datos_thk:
-            ok_geom = _acotar_thk_asociativa_forzada(
+            ok_geom = _acotar_espesor_cercano_chapa(
                 hoja_thk, vista_thk, tg, datos_thk, nombre_thk, thk_cm
             )
+            if not ok_geom:
+                ok_geom = _acotar_thk_asociativa_forzada(
+                    hoja_thk, vista_thk, tg, datos_thk, nombre_thk, thk_cm
+                )
 
         if ok_geom:
             creadas.add(nombre_thk)
             print(
                 f"✅ {nombre_thk}: THK = "
-                f"{thk_cm / IN_TO_CM:.4f} in (cota asociativa)"
+                f"{thk_cm / IN_TO_CM:.4f} in (cota asociativa, {origen})"
             )
         else:
-            # Último recurso tipográfico (solo si no hay geometría usable).
             ok_nota, _ = _forzar_cota_thk_desde_modelo(
-                hoja_thk, tg, vista_thk, nombre_thk
+                hoja_thk,
+                tg,
+                vista_thk,
+                nombre_thk,
+                alto_cm=alto_cm,
+                datos=datos_thk or datos_lado,
             )
             if ok_nota:
                 creadas.add(nombre_thk)
                 print(
-                    f"⚠️ {nombre_thk}: AddLinear no viable (U/filetes); "
-                    f"se conserva nota THK = {thk_cm / IN_TO_CM:.4f} in"
+                    f"⚠️ {nombre_thk}: sin AddLinear; nota THK validada "
+                    f"= {thk_cm / IN_TO_CM:.4f} in ({origen})"
                 )
             else:
                 try:
                     hoja_thk.Delete()
                 except Exception:
                     pass
+                print(
+                    f"⚠️ {nombre_lado}: no se crea hoja THK "
+                    f"(espesor no dibujable ni validado como nota)."
+                )
+                try:
+                    LAST_PENDIENTES_THK.append(str(nombre_lado))
+                except Exception:
+                    pass
     except Exception as exc:
         print(f"⚠️ {nombre_lado}: no se pudo crear hoja THK Parking ({exc})")
+        try:
+            LAST_PENDIENTES_THK.append(str(nombre_lado))
+        except Exception:
+            pass
     return creadas
 
 
@@ -2806,13 +3203,14 @@ def _finalizar_largo_desde_vista_thk(
 
 def _finalizar_nipple_alto(plano, hoja_lado, tg, vista, datos, meta, nombre_lado):
     """
-    PIPE HALF NIPPLE: FRENTE suele ser Ø; falta la longitud axial como ``_ALTO``.
+    Cilindros / nipples / STUD / tubos: FRENTE suele ser Ø; falta longitud axial
+    como ``_ALTO``.
 
     Si LADO ya muestra el perfil (rectángulo alargado), acota el eje mayor.
     Si LADO es cara circular, prueba cámaras transversales.
     """
     creadas = set()
-    if not _nombre_parece_nipple(nombre_lado):
+    if not _necesita_alto_axial(nombre_lado):
         return creadas
 
     nombre_alto = _nombre_hoja_alto(nombre_lado)
@@ -2849,7 +3247,10 @@ def _finalizar_nipple_alto(plano, hoja_lado, tg, vista, datos, meta, nombre_lado
         if max(w, h) <= EPS:
             return False, None, None
         aspect = max(w, h) / max(min(w, h), EPS)
-        if aspect < 1.25:
+        # Bridas compactas: el cuerpo puede ser solo un poco más alto/ancho
+        # que el Ø (antes 1.25 dejaba fuera algunas PIPE FLANGE).
+        umbral = 1.12 if _nombre_parece_brida(nombre_lado) else 1.25
+        if aspect < umbral:
             return False, None, None
         orient = "V" if h >= w else "H"
         return True, orient, max(w, h)
@@ -2881,17 +3282,17 @@ def _finalizar_nipple_alto(plano, hoja_lado, tg, vista, datos, meta, nombre_lado
         except Exception:
             pass
         if _acotar_lado_bbox(
-            hoja_n, vista_n, tg, datos_n, nombre_alto, orient, "ALTO nipple"
+            hoja_n, vista_n, tg, datos_n, nombre_alto, orient, "ALTO axial"
         ):
             creadas.add(nombre_alto)
-            print(f"📐 {nombre_lado}: creada hoja {nombre_alto} (longitud nipple)")
+            print(f"📐 {nombre_lado}: creada hoja {nombre_alto} (largo axial)")
             return creadas
         try:
             hoja_n.Delete()
         except Exception:
             pass
 
-    print(f"⚠️ {nombre_lado}: no se pudo crear ALTO de longitud (nipple)")
+    print(f"⚠️ {nombre_lado}: no se pudo crear ALTO de longitud axial")
     return creadas
 
 
@@ -3333,76 +3734,9 @@ def _clonar_hoja_lado_para_cota(
                 pass
             return None, None
 
-    # Reescalar la vista de forma DEFENSIVA: la meta es que la pieza ocupe
-    # ~55 % del sheet dejando ~22 % de margen por lado para dibujar cotas.
-    # NO usamos ``escalar_vista`` de creador_vistas aquí porque su loop de
-    # verificación puede dejar la vista con escala mínima (0.001) cuando
-    # la geometría del sheet clonado es asimétrica, dando lugar a vistas
-    # inservibles (fue lo que rompió P14 en la corrida anterior).
-    try:
-        sheet_w = float(nueva.Width)
-        sheet_h = float(nueva.Height)
-    except Exception:
-        sheet_w = 0.0
-        sheet_h = 0.0
-
-    try:
-        rb_view = vista_nueva.RangeBox
-        w_v = float(rb_view.MaxPoint.X) - float(rb_view.MinPoint.X)
-        h_v = float(rb_view.MaxPoint.Y) - float(rb_view.MinPoint.Y)
-    except Exception:
-        w_v = 0.0
-        h_v = 0.0
-
-    if sheet_w > 0 and sheet_h > 0 and w_v > 0 and h_v > 0:
-        try:
-            scale_actual = float(vista_nueva.Scale)
-        except Exception:
-            scale_actual = 1.0
-        # Dimensiones reales de la pieza (independientes de escala actual).
-        real_w = w_v / max(scale_actual, EPS)
-        real_h = h_v / max(scale_actual, EPS)
-
-        # Objetivo: 55 % del sheet en cada dirección (deja 22 % por lado
-        # para cotas). Elegimos la escala más pequeña de las dos.
-        max_w_pieza = sheet_w * 0.55
-        max_h_pieza = sheet_h * 0.55
-        escala_ideal = min(
-            max_w_pieza / max(real_w, EPS),
-            max_h_pieza / max(real_h, EPS),
-        )
-
-        escalas_discretas = [
-            5.0, 4.0, 3.0, 2.0, 1.5, 1.0, 0.75, 0.5,
-            0.4, 0.3, 0.25, 0.2, 0.15, 0.1, 0.08, 0.05,
-            0.04, 0.03, 0.02, 0.015, 0.01,
-        ]
-        # Escala más grande que sea ≤ ideal.
-        escala_elegida = 0.01
-        for e in escalas_discretas:
-            if e <= escala_ideal:
-                escala_elegida = e
-                break
-
-        try:
-            vista_nueva.Scale = escala_elegida
-        except Exception:
-            pass
-
-        # Centrar la vista en el sheet.
-        try:
-            vista_nueva.Position = tg.CreatePoint2d(sheet_w / 2.0, sheet_h / 2.0)
-        except Exception:
-            pass
-
-        # Update para que Inventor materialice el cambio de escala.
-        if inv_app is not None:
-            try:
-                inv_app.ActiveDocument.Update()
-            except Exception:
-                pass
-
-    # Esperar a que Inventor materialice las DrawingCurves de la vista nueva.
+    # Reescalar la vista de forma DEFENSIVA *después* de materializar curvas.
+    # Medir RangeBox antes de que existan DrawingCurves dejaba escalas
+    # minúsculas → JPG HEIGHT/LEG borrosos / puntito en blanco (P14_2, P15_1).
     if inv_app is not None:
         try:
             inv_app.ActiveDocument.Update()
@@ -3416,7 +3750,109 @@ def _clonar_hoja_lado_para_cota(
             inv_app.UserInterfaceManager.DoEvents()
         except Exception:
             pass
-    time.sleep(0.5)
+    time.sleep(0.45)
+
+    try:
+        sheet_w = float(nueva.Width)
+        sheet_h = float(nueva.Height)
+    except Exception:
+        sheet_w = 0.0
+        sheet_h = 0.0
+
+    w_v = 0.0
+    h_v = 0.0
+    # Preferir bbox de curvas HLR (geometría real) sobre RangeBox de vista
+    # (puede incluir residuos o quedar vacío al inicio).
+    try:
+        datos_esc = _obtener_curvas_validas(vista_nueva)
+    except Exception:
+        datos_esc = None
+    if datos_esc:
+        try:
+            minx, maxx, miny, maxy = _bbox_global(datos_esc)
+            w_v = max(0.0, maxx - minx)
+            h_v = max(0.0, maxy - miny)
+        except Exception:
+            w_v = 0.0
+            h_v = 0.0
+    if w_v <= EPS or h_v <= EPS:
+        try:
+            rb_view = vista_nueva.RangeBox
+            w_v = float(rb_view.MaxPoint.X) - float(rb_view.MinPoint.X)
+            h_v = float(rb_view.MaxPoint.Y) - float(rb_view.MinPoint.Y)
+        except Exception:
+            w_v = 0.0
+            h_v = 0.0
+
+    if sheet_w > 0 and sheet_h > 0 and w_v > EPS and h_v > EPS:
+        try:
+            scale_actual = float(vista_nueva.Scale)
+        except Exception:
+            scale_actual = 1.0
+        if scale_actual <= EPS:
+            scale_actual = 1.0
+        # Dimensiones reales de la pieza (independientes de escala actual).
+        real_w = w_v / scale_actual
+        real_h = h_v / scale_actual
+
+        # Objetivo: ~50 % del sheet (margen para cotas).
+        max_w_pieza = sheet_w * 0.50
+        max_h_pieza = sheet_h * 0.50
+        escala_ideal = min(
+            max_w_pieza / max(real_w, EPS),
+            max_h_pieza / max(real_h, EPS),
+        )
+
+        escalas_discretas = [
+            5.0, 4.0, 3.0, 2.0, 1.5, 1.0, 0.75, 0.5,
+            0.4, 0.3, 0.25, 0.2, 0.15, 0.1, 0.08, 0.05,
+            0.04, 0.03, 0.02, 0.015, 0.01,
+        ]
+        escala_elegida = 0.01
+        for e in escalas_discretas:
+            if e <= escala_ideal:
+                escala_elegida = e
+                break
+
+        # Si aún quedaría demasiado pequeña (<12 % del sheet), subir un paso.
+        cob_w = (real_w * escala_elegida) / sheet_w
+        cob_h = (real_h * escala_elegida) / sheet_h
+        if max(cob_w, cob_h) < 0.12:
+            for e in reversed(escalas_discretas):
+                if e > escala_elegida:
+                    prueba_w = (real_w * e) / sheet_w
+                    prueba_h = (real_h * e) / sheet_h
+                    if max(prueba_w, prueba_h) <= 0.72:
+                        escala_elegida = e
+                        if max(prueba_w, prueba_h) >= 0.18:
+                            break
+
+        try:
+            vista_nueva.Scale = escala_elegida
+        except Exception:
+            pass
+
+        try:
+            vista_nueva.Position = tg.CreatePoint2d(sheet_w / 2.0, sheet_h / 2.0)
+        except Exception:
+            pass
+
+        if inv_app is not None:
+            try:
+                inv_app.ActiveDocument.Update()
+            except Exception:
+                pass
+
+    if inv_app is not None:
+        try:
+            inv_app.ActiveView.Update()
+        except Exception:
+            pass
+        try:
+            inv_app.UserInterfaceManager.DoEvents()
+        except Exception:
+            pass
+    time.sleep(0.35)
 
     return nueva, vista_nueva
 
@@ -3605,21 +4041,145 @@ def _crear_hoja_alto(plano, hoja_lado, tg, datos, thk_sheet, nombre_lado):
     return creadas
 
 
+def _sanear_thk_si_duplica_alto(hoja_lado, vista, tg, datos, meta, nombre_lado, extras):
+    """
+    Si tras crear ``_ALTO`` el THK de LADO ≈ alto del perfil (P04/P05),
+    sustituye por espesor real de chapa / gap fino / nota de modelo.
+
+    Evita exportar el mismo 8.00 como HEIGHT y como THK.
+    """
+    if not extras or not datos:
+        return False
+    extras_up = {str(x).upper() for x in extras}
+    if not any("_ALTO" in x for x in extras_up):
+        return False
+
+    valor_thk = (meta or {}).get("valor_cm")
+    if valor_thk is None or valor_thk <= EPS:
+        return False
+
+    minx, maxx, miny, maxy = _bbox_global(datos)
+    mayor_sheet = max(maxx - minx, maxy - miny)
+    if mayor_sheet <= EPS:
+        return False
+    mayor_model = _esperado_modelo(vista, mayor_sheet)
+    if mayor_model <= EPS:
+        return False
+    if abs(float(valor_thk) - float(mayor_model)) / mayor_model > 0.12:
+        return False
+
+    # THK midió el alto del perfil → corregir solo con espesor VALIDADO.
+    real, _origen = _espesor_thk_validado(
+        vista, alto_cm=valor_thk, datos=datos, nombre_hoja=nombre_lado
+    )
+    if real is None or real <= EPS:
+        # último recurso: lado menor del bbox 2D si es fino vs mayor
+        menor_sheet = min(maxx - minx, maxy - miny)
+        menor_model = _esperado_modelo(vista, menor_sheet)
+        if (
+            menor_model > EPS
+            and menor_model < mayor_model * 0.35
+            and abs(menor_model - valor_thk) / mayor_model > 0.12
+        ):
+            real = menor_model
+    if real is None or real <= EPS:
+        print(
+            f"⚠️ {nombre_lado}: THK≈ALTO ({valor_thk / IN_TO_CM:.3f} in) "
+            f"pero no hay espesor validado para sustituir; se deja pendiente."
+        )
+        try:
+            LAST_PENDIENTES_THK.append(str(nombre_lado))
+        except Exception:
+            pass
+        return False
+    if abs(float(real) - float(valor_thk)) / max(float(valor_thk), EPS) < 0.05:
+        return False
+
+    try:
+        dims = hoja_lado.DrawingDimensions.GeneralDimensions
+        for i in range(dims.Count, 0, -1):
+            try:
+                dims.Item(i).Delete()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    ok = _acotar_thk_asociativa_forzada(
+        hoja_lado, vista, tg, datos, nombre_lado, real
+    )
+    if not ok:
+        ok, _ = _forzar_cota_thk_desde_modelo(
+            hoja_lado,
+            tg,
+            vista,
+            nombre_lado,
+            alto_cm=valor_thk,
+            datos=datos,
+        )
+    if ok:
+        print(
+            f"↩️ {nombre_lado}: THK era duplicado de ALTO "
+            f"({valor_thk / IN_TO_CM:.3f}); corregido a "
+            f"{real / IN_TO_CM:.4f} in"
+        )
+        if isinstance(meta, dict):
+            meta["valor_cm"] = real
+            meta["gap_sheet"] = real
+        return True
+    return False
+
+
 def _resolver_circular_solid(hoja, vista, tg, outer, nombre_hoja):
     diam_cm = _esperado_modelo(vista, outer["dx"])
     snap = _snap_o_medido(diam_cm)
 
     try:
         intencion = hoja.CreateGeometryIntent(outer["curve"])
-        offset = (outer["dx"] / 2.0) + 1.0
+        # Silueta completa de la vista para no poner Ø encima de la pieza.
+        try:
+            datos_v = _obtener_curvas_validas(vista)
+            pieza_bb = _bbox_global(datos_v) if datos_v else None
+        except Exception:
+            pieza_bb = (
+                outer["minx"],
+                outer["maxx"],
+                outer["miny"],
+                outer["maxy"],
+            )
+        clr = clearance_texto_cota_cm(10) + max(1.0, float(outer["dx"]) * 0.35)
+        if pieza_bb is not None:
+            from cota_estilo import empujar_punto_fuera_bbox
+
+            try:
+                sheet_w = float(hoja.Width)
+                sheet_h = float(hoja.Height)
+                minx, maxx, miny, maxy = pieza_bb
+                aire = {
+                    "der": sheet_w - maxx,
+                    "izq": minx,
+                    "sup": sheet_h - maxy,
+                    "inf": miny,
+                }
+                lado = max(aire, key=aire.get)
+            except Exception:
+                lado = "der"
+            tx, ty = empujar_punto_fuera_bbox(
+                outer["cx"], outer["cy"], pieza_bb, lado, clr
+            )
+        else:
+            tx = outer["cx"] + (outer["dx"] / 2.0) + 1.0
+            ty = outer["cy"] + (outer["dx"] / 2.0) + 1.0
         punto_texto = _clampear_punto_hoja(
-            hoja, tg,
-            outer["cx"] + offset,
-            outer["cy"] + offset,
+            hoja, tg, tx, ty, evitar_bbox=pieza_bb
         )
 
         dim = hoja.DrawingDimensions.GeneralDimensions.AddDiameter(punto_texto, intencion)
         aplicar_estilo_cota(dim, hoja=hoja)
+        if pieza_bb is not None:
+            asegurar_cota_fuera_pieza_robusto(
+                dim, tg, pieza_bb, holgura=0.6, n_chars=12
+            )
 
         origen = "catálogo" if snap.get("desde_catalogo") else "medido"
         print(
@@ -3660,16 +4220,51 @@ def _resolver_circular_hollow(hoja, vista, tg, outer, inner, nombre_hoja):
             print(f"⚠️ {nombre_hoja}: no se pudieron crear intents radiales.")
             return False, None
 
+        try:
+            datos_v = _obtener_curvas_validas(vista)
+            pieza_bb = _bbox_global(datos_v) if datos_v else None
+        except Exception:
+            pieza_bb = (
+                outer["minx"],
+                outer["maxx"],
+                outer["miny"],
+                outer["maxy"],
+            )
+        clr = clearance_texto_cota_cm(10) + OFFSET_COTA
+        if pieza_bb is not None:
+            from cota_estilo import empujar_punto_fuera_bbox
+
+            try:
+                sheet_w = float(hoja.Width)
+                sheet_h = float(hoja.Height)
+                minx, maxx, miny, maxy = pieza_bb
+                aire = {
+                    "der": sheet_w - maxx,
+                    "izq": minx,
+                    "sup": sheet_h - maxy,
+                    "inf": miny,
+                }
+                lado = max(aire, key=aire.get)
+            except Exception:
+                lado = "der"
+            tx, ty = empujar_punto_fuera_bbox(
+                outer["cx"], outer["cy"], pieza_bb, lado, clr
+            )
+        else:
+            tx = outer["cx"] + outer_r + OFFSET_COTA
+            ty = outer["cy"] + OFFSET_COTA
         pt_texto = _clampear_punto_hoja(
-            hoja, tg,
-            outer["cx"] + outer_r + OFFSET_COTA,
-            outer["cy"] + OFFSET_COTA,
+            hoja, tg, tx, ty, evitar_bbox=pieza_bb
         )
 
         dim = hoja.DrawingDimensions.GeneralDimensions.AddLinear(
             pt_texto, int_inner, int_outer, kHorizontalDimensionType
         )
         aplicar_estilo_cota(dim, hoja=hoja)
+        if pieza_bb is not None:
+            asegurar_cota_fuera_pieza_robusto(
+                dim, tg, pieza_bb, holgura=0.6, n_chars=12
+            )
 
         origen = "catálogo" if snap.get("desde_catalogo") else "medido"
         print(
@@ -3706,6 +4301,14 @@ def acotar_thk(nombres_permitidos=None):
     if _THK_LOG:
         print("[THK_LOG] modo diagnóstico ACTIVO (THK_LOG=1)")
 
+    solo_flat = os.environ.get("SOLO_FLAT_CORTE", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    if solo_flat:
+        print("  SOLO_FLAT_CORTE: solo *_DESPLIEGUE_LADO* (no LADO doblado)")
+
     hojas_extra = set()
     permitidos_up = None
     if nombres_permitidos is not None:
@@ -3734,6 +4337,9 @@ def acotar_thk(nombres_permitidos=None):
         if permitidos_up is not None and base_up not in permitidos_up:
             continue
 
+        if solo_flat and "_DESPLIEGUE_LADO" not in nombre_hoja:
+            continue
+
         if "_LADO" not in nombre_hoja:
             continue
 
@@ -3749,22 +4355,30 @@ def acotar_thk(nombres_permitidos=None):
             pendientes.append(nombre_hoja)
             continue
 
-        # Jacking pads: LADO debe ser la escuadra (THK 0.375), no la cara.
+        # Jacking pads / escuadras L: LADO debe ser la escuadra, no la cara.
+        thk_chk = _espesor_chapa_desde_vista(vista) or _espesor_desde_bbox_3d(
+            vista
+        )
+        necesita_escuadra = False
         if _nombre_parece_jacking_escuadra(nombre_hoja):
-            thk_chk = _espesor_chapa_desde_vista(vista) or _espesor_desde_bbox_3d(
-                vista
-            )
             necesita_escuadra = (
                 _parece_silueta_franja_canto(datos)
                 or _es_vista_cara_plana(datos)
                 or not _es_perfil_u_o_l(datos, thk_chk)
             )
-            if necesita_escuadra:
-                hoja2, vista2, datos2 = _reorientar_lado_a_escuadra(
-                    plano, hoja, tg, inv_app, str(hoja.Name)
-                )
-                if datos2 is not None:
-                    hoja, vista, datos = hoja2, vista2, datos2
+        elif (
+            _parece_silueta_franja_canto(datos)
+            and vista is not None
+            and _es_perfil_por_modelo_3d(vista, thk_chk)
+        ):
+            # Escuadras genéricas (P91): bbox 3D de L pero LADO de cara.
+            necesita_escuadra = True
+        if necesita_escuadra:
+            hoja2, vista2, datos2 = _reorientar_lado_a_escuadra(
+                plano, hoja, tg, inv_app, str(hoja.Name)
+            )
+            if datos2 is not None:
+                hoja, vista, datos = hoja2, vista2, datos2
 
         tipo, outer, inner = _clasificar_lado(datos)
         print(f"🔎 {nombre_hoja}: clasificado como {tipo}")
@@ -3816,6 +4430,72 @@ def acotar_thk(nombres_permitidos=None):
             procesadas += 1
             thk_sheet = (meta or {}).get("gap_sheet")
             valor_meta = (meta or {}).get("valor_cm")
+            try:
+                if _alinear_cota_thk_a_chapa_board(
+                    hoja, vista, nombre_hoja, meta
+                ):
+                    thk_sheet = (meta or {}).get("gap_sheet") or thk_sheet
+                    valor_meta = (meta or {}).get("valor_cm") or valor_meta
+            except Exception as exc_al:
+                _dbg(f"{nombre_hoja}: alinear THK chapa falló ({exc_al})")
+            # Cara plana con "THK" enorme = midió el ancho de placa (TOP P01).
+            if (
+                valor_meta
+                and _es_vista_cara_plana(datos)
+                and tipo not in ("circular_solid", "circular_hollow")
+            ):
+                thk_real, _ = _espesor_thk_validado(
+                    vista,
+                    alto_cm=valor_meta,
+                    datos=datos,
+                    nombre_hoja=nombre_hoja,
+                )
+                if (
+                    thk_real
+                    and thk_real > EPS
+                    and float(valor_meta) > float(thk_real) * 2.5
+                ):
+                    try:
+                        dims = hoja.DrawingDimensions.GeneralDimensions
+                        for di in range(dims.Count, 0, -1):
+                            dims.Item(di).Delete()
+                    except Exception:
+                        pass
+                    if _acotar_thk_asociativa_forzada(
+                        hoja, vista, tg, datos, nombre_hoja, thk_real
+                    ) or _forzar_cota_thk_desde_modelo(
+                        hoja,
+                        tg,
+                        vista,
+                        nombre_hoja,
+                        alto_cm=valor_meta,
+                        datos=datos,
+                    )[0]:
+                        print(
+                            f"↩️ {nombre_hoja}: THK era cara plana "
+                            f"({valor_meta / IN_TO_CM:.3f} in); "
+                            f"forzado a {thk_real / IN_TO_CM:.4f} in"
+                        )
+                        if isinstance(meta, dict):
+                            meta["valor_cm"] = thk_real
+                            meta["gap_sheet"] = thk_real
+                        thk_sheet = thk_real
+                        valor_meta = thk_real
+                    else:
+                        print(
+                            f"⚠️ {nombre_hoja}: cara plana midió "
+                            f"{valor_meta / IN_TO_CM:.3f} in y no hay THK "
+                            f"validado; se deja pendiente."
+                        )
+                        try:
+                            dims = hoja.DrawingDimensions.GeneralDimensions
+                            for di in range(dims.Count, 0, -1):
+                                dims.Item(di).Delete()
+                        except Exception:
+                            pass
+                        procesadas = max(0, procesadas - 1)
+                        pendientes.append(nombre_hoja)
+                        continue
             _dbg(
                 f"{nombre_hoja}: OK "
                 f"valor={valor_meta / IN_TO_CM:.4f}in "
@@ -3842,6 +4522,12 @@ def acotar_thk(nombres_permitidos=None):
                 if extras:
                     hojas_extra.update(extras)
                     _dbg(f"{nombre_hoja}: hojas extra creadas -> {sorted(extras)}")
+                    try:
+                        _sanear_thk_si_duplica_alto(
+                            hoja, vista, tg, datos, meta, nombre_hoja, extras
+                        )
+                    except Exception as exc_san:
+                        _dbg(f"{nombre_hoja}: saneo THK/ALTO falló ({exc_san})")
 
             # Solera Jacking Pad: LARGO (eje mayor) desde la misma vista THK.
             if _nombre_parece_solera_jacking(nombre_hoja):
@@ -3857,8 +4543,8 @@ def acotar_thk(nombres_permitidos=None):
                 if extras_s:
                     hojas_extra.update(extras_s)
 
-            # Nipple: longitud axial aparte (FRENTE suele ser solo Ø).
-            if _nombre_parece_nipple(nombre_hoja):
+            # Nipple / STUD / tubo: longitud axial aparte (FRENTE suele ser solo Ø).
+            if _necesita_alto_axial(nombre_hoja):
                 extras_n = _finalizar_nipple_alto(
                     plano, hoja, tg, vista, datos, meta, str(hoja.Name)
                 )
@@ -3866,9 +4552,19 @@ def acotar_thk(nombres_permitidos=None):
                     hojas_extra.update(extras_n)
         else:
             # Preferir cota asociativa antes que leyenda tipográfica.
-            thk_fallback = _espesor_chapa_desde_vista(vista)
-            if thk_fallback is None or thk_fallback <= EPS:
-                thk_fallback = _espesor_desde_bbox_3d(vista)
+            # Nunca forzar THK desde bbox crudo si no está validado.
+            minx_f, maxx_f, miny_f, maxy_f = _bbox_global(datos) if datos else (0, 0, 0, 0)
+            alto_sil = None
+            if datos:
+                alto_sil = _esperado_modelo(
+                    vista, min(maxx_f - minx_f, maxy_f - miny_f)
+                )
+            thk_fallback, origen_fb = _espesor_thk_validado(
+                vista,
+                alto_cm=alto_sil,
+                datos=datos,
+                nombre_hoja=nombre_hoja,
+            )
             forzado_ok = False
             _valor_cm = None
             if thk_fallback and datos:
@@ -3879,15 +4575,20 @@ def acotar_thk(nombres_permitidos=None):
                     _valor_cm = thk_fallback
                     print(
                         f"↩️ {nombre_hoja}: THK asociativa forzada "
-                        f"= {thk_fallback / IN_TO_CM:.4f} in"
+                        f"= {thk_fallback / IN_TO_CM:.4f} in ({origen_fb})"
                     )
             if not forzado_ok:
                 forzado_ok, _valor_cm = _forzar_cota_thk_desde_modelo(
-                    hoja, tg, vista, nombre_hoja
+                    hoja,
+                    tg,
+                    vista,
+                    nombre_hoja,
+                    alto_cm=alto_sil,
+                    datos=datos,
                 )
             if forzado_ok:
                 procesadas += 1
-                _dbg(f"{nombre_hoja}: THK resuelto por fallback de modelo.")
+                _dbg(f"{nombre_hoja}: THK resuelto por fallback validado.")
                 # Aun con nota, intentar LARGO desde la vista de canto.
                 if _nombre_parece_solera_jacking(nombre_hoja):
                     extras_s = _finalizar_largo_desde_vista_thk(
@@ -3895,8 +4596,8 @@ def acotar_thk(nombres_permitidos=None):
                     )
                     if extras_s:
                         hojas_extra.update(extras_s)
-                # Nipple aún puede necesitar ALTO de longitud.
-                if _nombre_parece_nipple(nombre_hoja):
+                # Nipple / STUD / tubo aún puede necesitar ALTO de longitud.
+                if _necesita_alto_axial(nombre_hoja):
                     extras_n = _finalizar_nipple_alto(
                         plano, hoja, tg, vista, datos, None, str(hoja.Name)
                     )
