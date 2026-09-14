@@ -499,6 +499,78 @@ def borrar_hojas_por_nombres(doc, nombres_a_borrar, nombre_machote_protegido=Non
         print(f"  🧹 Borradas {borradas} hojas del lote tras exportar.")
     return borradas
 
+
+def purgar_hojas_dobladas_solo_flat(doc, catalogo_piezas=None):
+    """
+    SOLO_FLAT_CORTE: elimina hojas FRENTE/LADO/THK/ALTO *sin* DESPLIEGUE
+    (restos de corridas dobladas en el machote).
+    """
+    if os.environ.get("SOLO_FLAT_CORTE", "").strip().lower() not in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return 0
+    try:
+        draw_doc = win32com.client.CastTo(doc, "DrawingDocument")
+    except Exception:
+        draw_doc = doc
+
+    cat = set()
+    if catalogo_piezas:
+        for n in catalogo_piezas:
+            t = str(n or "").strip().upper()
+            if t:
+                cat.add(t)
+                # base corta sin sufijos raros
+                cat.add(t.split(":")[0].strip())
+
+    sufijos_doblados = (
+        "_FRENTE_1",
+        "_FRENTE_2",
+        "_LADO",
+        "_THK",
+        "_ALTO",
+        "_LARGO_PATA",
+        "_ESC_TMP",
+        "_OLD_FACE",
+    )
+    borradas = 0
+    try:
+        total = int(draw_doc.Sheets.Count)
+    except Exception:
+        return 0
+    for i in range(total, 0, -1):
+        try:
+            hoja = draw_doc.Sheets.Item(i)
+            nombre = str(hoja.Name)
+            up = nombre.upper().rsplit(":", 1)[0]
+        except Exception:
+            continue
+        if "_DESPLIEGUE_" in up:
+            continue
+        if not any(s in up for s in sufijos_doblados):
+            continue
+        if cat:
+            # Solo tocar hojas de piezas del catalogo flat
+            toca = False
+            for p in cat:
+                if p and p in up:
+                    toca = True
+                    break
+            if not toca:
+                continue
+        try:
+            hoja.Delete()
+            borradas += 1
+            print(f"  SOLO_FLAT: borrada hoja doblada residual '{nombre}'")
+        except Exception as exc:
+            print(f"  AVISO no se pudo borrar '{nombre}': {exc}")
+    if borradas:
+        print(f"  SOLO_FLAT: purgadas {borradas} hojas dobladas del machote")
+    return borradas
+    return borradas
+
 # ============================================================
 # RECORTE AUTOMÁTICO DEL JPG
 # ============================================================
@@ -1441,12 +1513,20 @@ def exportar_hojas_jpg(
             continue
 
         # Corrida rápida flat: X/Y (+TYP), Ø por tipo (HOLE/DIAMETRO_H) y THK.
+        # EXIGE "_DESPLIEGUE_" en la hoja: nunca exportar LADO/THK/FRENTE doblado.
         if os.environ.get("SOLO_FLAT_CORTE", "").strip().lower() in (
             "1",
             "true",
             "yes",
         ):
             nu = str(nombre_hoja).upper()
+            if "_DESPLIEGUE_" not in nu:
+                print(
+                    f"SOLO_FLAT: omitiendo '{nombre_hoja}' "
+                    f"(no es DESPLIEGUE — posible vista doblada)"
+                )
+                omitidas += 1
+                continue
             es_xy = ("XCENTRO" in nu) or ("YCENTRO" in nu)
             es_hole = ("DIAMETRO_H" in nu) or ("_HOLE" in nu)
             es_thk = (
@@ -1462,6 +1542,31 @@ def exportar_hojas_jpg(
                 )
                 omitidas += 1
                 continue
+            # Guardrail: si DESPLIEGUE_LADO/THK ya luce como perfil L/U
+            # doblado (fuga vieja de THK), no exportar esa basura.
+            if es_thk and ("_LADO" in nu or "_THK" in nu):
+                try:
+                    from THK import (
+                        _obtener_curvas_validas as _thk_curvas,
+                        _parece_silueta_franja_canto as _thk_franja,
+                        _es_perfil_u_o_l as _thk_perfil,
+                    )
+
+                    if int(hoja.DrawingViews.Count) >= 1:
+                        datos_thk = _thk_curvas(hoja.DrawingViews.Item(1))
+                        if (
+                            datos_thk
+                            and not _thk_franja(datos_thk)
+                            and _thk_perfil(datos_thk, None)
+                        ):
+                            print(
+                                f"SOLO_FLAT: BLOQUEADO perfil DOBLADO L/U "
+                                f"en '{nombre_hoja}' — no se exporta"
+                            )
+                            omitidas += 1
+                            continue
+                except Exception:
+                    pass
 
         try:
             # Un solo ciclo Activate + Update + sleep breve (antes había dos
@@ -1985,6 +2090,18 @@ def ejecutar_flujo_desde_app(
         if total_pendientes == 0:
             log("✅ Nada por hacer (todas las piezas ya tenían JPG). Fin.")
             return True
+
+        if os.environ.get("SOLO_FLAT_CORTE", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        ):
+            nombres_purge = [pn for _pd, pn in piezas_pendientes]
+            if catalogo:
+                nombres_purge.extend(catalogo)
+            n_purge = purgar_hojas_dobladas_solo_flat(doc, nombres_purge)
+            if n_purge:
+                log(f"SOLO_FLAT: purgadas {n_purge} hojas dobladas residuales")
 
         contador_global = 0
         primer_lote = True

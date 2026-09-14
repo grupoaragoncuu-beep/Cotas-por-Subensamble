@@ -66,10 +66,15 @@ def _doc_vista(vista):
 
 
 def _cuerpos_para_barrenos(doc) -> list:
-    """Preferir FlatPattern (DESPLIEGUE); si no, cuerpos del sólido."""
+    """Preferir FlatPattern (DESPLIEGUE). En SOLO_FLAT no cae al sólido doblado."""
     cuerpos = []
     if doc is None:
         return cuerpos
+    solo_flat = os.environ.get("SOLO_FLAT_CORTE", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
     try:
         cdef = doc.ComponentDefinition
     except Exception:
@@ -88,7 +93,7 @@ def _cuerpos_para_barrenos(doc) -> list:
                 pass
     except Exception:
         pass
-    if not cuerpos:
+    if not cuerpos and not solo_flat:
         try:
             for i in range(1, int(cdef.SurfaceBodies.Count) + 1):
                 cuerpos.append(cdef.SurfaceBodies.Item(i))

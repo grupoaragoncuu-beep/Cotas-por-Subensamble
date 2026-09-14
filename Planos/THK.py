@@ -3340,6 +3340,12 @@ def _es_perfil_por_modelo_3d(vista, thk_sheet=None):
 
 def _debe_generar_alto(datos, thk_sheet, vista=None):
     """U/L doblados o media caña semicircular, o perfil detectado por modelo 3D."""
+    if os.environ.get("SOLO_FLAT_CORTE", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return False
     if _es_perfil_u_o_l(datos, thk_sheet):
         return True
     # Fallback: detectar por modelo 3D. Cuando la vista LADO cae en cara
@@ -3376,7 +3382,19 @@ def _reorientar_lado_a_escuadra(plano, hoja_lado, tg, inv_app, nombre_lado):
 
     Sustituye la hoja LADO in-place (misma nombre) y devuelve
     ``(hoja, vista, datos)`` o ``(None, None, None)`` si no mejora.
+
+    Bloqueado en DESPLIEGUE / SOLO_FLAT_CORTE: esa cámara es del sólido
+    doblado y produce el perfil L con radio de doblez.
     """
+    nombre_u = str(nombre_lado or "").upper()
+    if "_DESPLIEGUE_" in nombre_u:
+        return None, None, None
+    if os.environ.get("SOLO_FLAT_CORTE", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return None, None, None
     if inv_app is None:
         return None, None, None
     try:
@@ -3879,6 +3897,15 @@ def _crear_hoja_alto(plano, hoja_lado, tg, datos, thk_sheet, nombre_lado):
     generó ninguna).
     """
     creadas = set()
+    nombre_u = str(nombre_lado or "").upper()
+    if "_DESPLIEGUE_" in nombre_u:
+        return creadas
+    if os.environ.get("SOLO_FLAT_CORTE", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return creadas
 
     inv_app = None
     try:
@@ -4308,6 +4335,10 @@ def acotar_thk(nombres_permitidos=None):
     )
     if solo_flat:
         print("  SOLO_FLAT_CORTE: solo *_DESPLIEGUE_LADO* (no LADO doblado)")
+        print(
+            "  SOLO_FLAT_CORTE: bloqueado reorientar a escuadra L/U "
+            "y hojas ALTO/LARGO_PATA"
+        )
 
     hojas_extra = set()
     permitidos_up = None
@@ -4356,11 +4387,16 @@ def acotar_thk(nombres_permitidos=None):
             continue
 
         # Jacking pads / escuadras L: LADO debe ser la escuadra, no la cara.
+        # SOLO_FLAT / DESPLIEGUE: NUNCA reorientar a perfil doblado (L/U).
+        # Eso reemplazaba el canto flat por la vista de pieza ya doblada.
         thk_chk = _espesor_chapa_desde_vista(vista) or _espesor_desde_bbox_3d(
             vista
         )
         necesita_escuadra = False
-        if _nombre_parece_jacking_escuadra(nombre_hoja):
+        es_despliegue = "_DESPLIEGUE_" in nombre_hoja
+        if solo_flat or es_despliegue:
+            necesita_escuadra = False
+        elif _nombre_parece_jacking_escuadra(nombre_hoja):
             necesita_escuadra = (
                 _parece_silueta_franja_canto(datos)
                 or _es_vista_cara_plana(datos)
@@ -4508,7 +4544,14 @@ def acotar_thk(nombres_permitidos=None):
             # separadas (una por cota) para que cada JPG traiga UNA sola
             # dimensión — así el usuario puede verificar bend deduction
             # midiendo la pieza física contra cada foto.
-            if thk_sheet and tipo != "rect_hollow":
+            # SOLO_FLAT / DESPLIEGUE: solo THK de canto flat — nada de ALTO,
+            # LARGO_PATA ni vistas de perfil doblado.
+            if (
+                thk_sheet
+                and tipo != "rect_hollow"
+                and not solo_flat
+                and not es_despliegue
+            ):
                 if (meta or {}).get("es_patas_base"):
                     # Parking: LADO ya tiene patas→base. Renombrar a ALTO y
                     # crear hoja THK real desde Thickness de chapa/barra.
@@ -4530,7 +4573,11 @@ def acotar_thk(nombres_permitidos=None):
                         _dbg(f"{nombre_hoja}: saneo THK/ALTO falló ({exc_san})")
 
             # Solera Jacking Pad: LARGO (eje mayor) desde la misma vista THK.
-            if _nombre_parece_solera_jacking(nombre_hoja):
+            if (
+                not solo_flat
+                and not es_despliegue
+                and _nombre_parece_solera_jacking(nombre_hoja)
+            ):
                 extras_s = _finalizar_largo_desde_vista_thk(
                     plano,
                     hoja,
@@ -4544,7 +4591,11 @@ def acotar_thk(nombres_permitidos=None):
                     hojas_extra.update(extras_s)
 
             # Nipple / STUD / tubo: longitud axial aparte (FRENTE suele ser solo Ø).
-            if _necesita_alto_axial(nombre_hoja):
+            if (
+                not solo_flat
+                and not es_despliegue
+                and _necesita_alto_axial(nombre_hoja)
+            ):
                 extras_n = _finalizar_nipple_alto(
                     plano, hoja, tg, vista, datos, meta, str(hoja.Name)
                 )
