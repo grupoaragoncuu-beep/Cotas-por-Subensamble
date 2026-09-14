@@ -9,6 +9,7 @@ Barrenos flat (DESPLIEGUE): X/Y + TYP al CENTRO.
 
 from __future__ import annotations
 
+import os
 import re
 import time
 
@@ -18,6 +19,8 @@ from cota_estilo import texto_cota_limpio, asegurar_unidad_cota
 from diametro import (
     _barrenos_en_vista,
     _marcar_barrenos_azules,
+    _origen_il_pieza,
+    _punto_cerca_contorno,
     _silueta_placa_vista,
     _silueta_vista,
 )
@@ -166,6 +169,13 @@ def _centros_barrenos_modelo(vista, tg, sil=None) -> list[dict]:
                 if not (
                     minx - 0.5 <= cx <= maxx + 0.5
                     and miny - 0.5 <= cy <= maxy + 0.5
+                ):
+                    continue
+                # Rechazar centros en el borde (radio de doblez / fantasma)
+                from diametro import _centro_interior_silueta
+
+                if not _centro_interior_silueta(
+                    cx, cy, minx, maxx, miny, maxy, margen_frac=0.03
                 ):
                     continue
                 clave = (round(cx, 3), round(cy, 3))
@@ -346,14 +356,47 @@ def _centros_barrenos(vista, tg) -> list[dict]:
 
     - Círculo: centro → X y Y
     - Óvalo: centro del slot (medio entre extremos) → X y Y
+
+    En SOLO_FLAT_CORTE: si hay centros del FlatPattern (modelo), NO se
+    mezclan HLR (evita barrenos fantasma de radios/líneas de doblez).
     """
-    sil = _silueta_vista(vista)
+    sil = _silueta_placa_vista(vista) or _silueta_vista(vista)
     modelo = _centros_barrenos_modelo(vista, tg, sil)
     for m in modelo:
         m.setdefault("ejes", ("X", "Y"))
+
+    solo_flat = os.environ.get("SOLO_FLAT_CORTE", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    if solo_flat and modelo:
+        # Solo geometría real del flat: sin fantasmas HLR.
+        n_oval = sum(1 for b in modelo if str(b.get("tipo") or "") == "oval")
+        n_circ = sum(1 for b in modelo if str(b.get("tipo") or "") == "circulo")
+        print(
+            f"    refs XY (modelo flat): total={len(modelo)} "
+            f"(circulos={n_circ} oval={n_oval}) [sin HLR]"
+        )
+        return modelo
+
     hlr_circ = _centros_barrenos_hlr(vista)
     ovals = _referencias_oval_xy(vista)
     fused = _fusionar_centros(modelo, hlr_circ, ovals)
+    # Descartar centros que no caen cerca del contorno/interior de placa
+    limpios = []
+    for b in fused:
+        try:
+            cx, cy = float(b["cx"]), float(b["cy"])
+        except Exception:
+            continue
+        if sil:
+            minx, maxx, miny, maxy, span = sil
+            m = max(0.02, 0.01 * span)
+            if not (minx - m <= cx <= maxx + m and miny - m <= cy <= maxy + m):
+                continue
+        limpios.append(b)
+    fused = limpios
     n_oval = sum(1 for b in fused if str(b.get("tipo") or "") == "oval")
     n_circ = sum(1 for b in fused if str(b.get("tipo") or "") == "circulo")
     if fused:
@@ -873,7 +916,24 @@ def acotar_barrenos_xy_despliegue(nombres_frente_ok=None):
         if not sil:
             print(f"  ⚠️ {nombre}: sin silueta")
             continue
-        origen_x, _maxx, origen_y, _maxy, _span = sil
+        origen = _origen_il_pieza(vista)
+        if origen is None:
+            origen_x, _maxx, origen_y, _maxy, _span = sil
+        else:
+            origen_x, origen_y = origen
+            _maxx, _maxy, _span = sil[1], sil[3], sil[4]
+            # Guardrail: si el AABB (minx,miny) no toca geometría y nuestro
+            # IL sí, loguear — típico jog/S.
+            aabb_il = (float(sil[0]), float(sil[2]))
+            if (
+                abs(aabb_il[0] - origen_x) > 0.05
+                or abs(aabb_il[1] - origen_y) > 0.05
+            ):
+                print(
+                    f"    origen IL sobre geometria "
+                    f"({origen_x:.3f},{origen_y:.3f}) "
+                    f"≠ AABB ({aabb_il[0]:.3f},{aabb_il[1]:.3f})"
+                )
 
         barrenos = _centros_barrenos(vista, tg)
         if not barrenos:
@@ -965,7 +1025,12 @@ def acotar_barrenos_xy_despliegue(nombres_frente_ok=None):
                     )
                     creadas_nombres.append(str(nueva.Name).rsplit(":", 1)[0])
                     continue
-                ox, _mx, oy, _my, _ = sil_n
+                origen_n = _origen_il_pieza(vista_n)
+                if origen_n is None:
+                    ox, _mx, oy, _my, _ = sil_n
+                else:
+                    ox, oy = origen_n
+                    _mx, _my = sil_n[1], sil_n[3]
 
                 # Reproyectar centros en la hoja copia
                 barrenos_n = _centros_barrenos(vista_n, tg)

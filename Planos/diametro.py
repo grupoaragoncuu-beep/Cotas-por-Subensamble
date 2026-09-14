@@ -208,12 +208,122 @@ def _silueta_vista(vista, solo_lineas=False):
     return minx, maxx, miny, maxy, span
 
 
+def _vertices_contorno_placa(vista):
+    """
+    Extremos de curvas de contorno (líneas), sin círculos/arcos de barreno.
+
+    Sirve para anclar el origen IL a un vértice REAL de la pieza (p. ej. con
+    jog/desfase el AABB (minx,miny) queda en el vacío).
+    """
+    pts = []
+    try:
+        n = int(vista.DrawingCurves.Count)
+    except Exception:
+        return pts
+    for j in range(1, n + 1):
+        try:
+            curva = vista.DrawingCurves.Item(j)
+            try:
+                ct = int(curva.CurveType)
+            except Exception:
+                ct = None
+            if ct in _TIPOS_CIRCULO or ct in _TIPOS_ARCO:
+                continue
+            # Preferir extremos reales; si no, esquinas del RangeBox.
+            try:
+                sp = curva.StartPoint
+                ep = curva.EndPoint
+                pts.append((float(sp.X), float(sp.Y)))
+                pts.append((float(ep.X), float(ep.Y)))
+                continue
+            except Exception:
+                pass
+            try:
+                caja = curva.Evaluator2D.RangeBox
+                x0, x1 = float(caja.MinPoint.X), float(caja.MaxPoint.X)
+                y0, y1 = float(caja.MinPoint.Y), float(caja.MaxPoint.Y)
+                # Solo extremos de segmentos cortos/medios (evitar diagonal AABB)
+                dx, dy = abs(x1 - x0), abs(y1 - y0)
+                if dx < 1e-9 and dy < 1e-9:
+                    continue
+                if dx < 1e-6:  # vertical
+                    pts.append((x0, y0))
+                    pts.append((x0, y1))
+                elif dy < 1e-6:  # horizontal
+                    pts.append((x0, y0))
+                    pts.append((x1, y0))
+                else:
+                    pts.append((x0, y0))
+                    pts.append((x1, y0))
+                    pts.append((x0, y1))
+                    pts.append((x1, y1))
+            except Exception:
+                continue
+        except Exception:
+            continue
+    # Dedup
+    out = []
+    vistos = set()
+    for x, y in pts:
+        k = (round(x, 4), round(y, 4))
+        if k in vistos:
+            continue
+        vistos.add(k)
+        out.append((x, y))
+    return out
+
+
+def _origen_il_pieza(vista):
+    """
+    Esquina inferior-izquierda SOBRE la geometría (toca el material).
+
+    En placas con jog/S/offset, el rincón AABB (minx,miny) suele flotar en
+    el vacío a la izquierda del tramo inferior. Aquí: banda inferior de
+    vértices de contorno → el de menor X (empate: menor Y).
+    """
+    pts = _vertices_contorno_placa(vista)
+    sil = _silueta_vista(vista, solo_lineas=True) or _silueta_vista(vista)
+    if not pts:
+        if not sil:
+            return None
+        return float(sil[0]), float(sil[2])
+    ys = [p[1] for p in pts]
+    xs = [p[0] for p in pts]
+    miny = min(ys)
+    span = max(max(xs) - min(xs), max(ys) - min(ys), 1e-6)
+    banda_tol = max(0.05, 0.02 * span)
+    banda = [p for p in pts if p[1] <= miny + banda_tol]
+    if not banda:
+        banda = pts
+    ox, oy = min(banda, key=lambda p: (p[0], p[1]))
+    return float(ox), float(oy)
+
+
 def _silueta_placa_vista(vista):
-    """Silueta de PLACA (sin barrenos); fallback a bbox total si no hay líneas."""
+    """
+    Silueta de PLACA + origen IL sobre geometría.
+
+    Devuelve (minx, maxx, miny, maxy, span) del bbox de líneas, pero el
+    consumidor de cotas debe preferir ``_origen_il_pieza`` para (ox, oy).
+    """
     sil = _silueta_vista(vista, solo_lineas=True)
     if sil is not None:
         return sil
     return _silueta_vista(vista, solo_lineas=False)
+
+
+def _punto_cerca_contorno(vista, x, y, tol=None) -> bool:
+    """True si (x,y) está cerca de un vértice/contorno real de la placa."""
+    pts = _vertices_contorno_placa(vista)
+    if not pts:
+        return True
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    span = max(max(xs) - min(xs), max(ys) - min(ys), 1e-6)
+    if tol is None:
+        tol = max(0.08, 0.02 * span)
+    dmin = min(((x - px) ** 2 + (y - py) ** 2) ** 0.5 for px, py in pts)
+    return dmin <= tol
 
 
 def _arco_casi_cerrado(curva, tam_caja):

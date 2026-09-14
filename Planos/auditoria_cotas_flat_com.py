@@ -133,11 +133,16 @@ def _coincide(valor: float, candidatos: Iterable[float], tol: float = _TOL_MM) -
 
 def _niveles_esperados_mm(vista, hoja, eje: str) -> list[float]:
     from barrenos_xy_despliegue import _centros_barrenos
+    from diametro import _origen_il_pieza
 
     sil = _silueta_placa_vista(vista)
-    if not sil:
+    origen = _origen_il_pieza(vista)
+    if origen is not None:
+        ox, oy = origen
+    elif sil:
+        ox, _mx, oy, _my, _ = sil
+    else:
         return []
-    ox, _mx, oy, _my, _ = sil
     try:
         tg = hoja.Parent.Application.TransientGeometry
     except Exception:
@@ -186,10 +191,42 @@ def _pasos_entre_barrenos_mm(vista, hoja, eje: str) -> list[float]:
 
 
 def _hoja_xy_falla(hoja, vista, eje: str) -> tuple[bool, str]:
+    from diametro import _origen_il_pieza, _punto_cerca_contorno
+
+    # 1) Origen IL real vs AABB flotante (piezas con jog/S)
+    origen = _origen_il_pieza(vista)
+    sil = _silueta_placa_vista(vista)
+    if origen is not None and sil is not None:
+        ox, oy = origen
+        aabb_ox, aabb_oy = float(sil[0]), float(sil[2])
+        if abs(aabb_ox - ox) > 0.08 or abs(aabb_oy - oy) > 0.08:
+            # Si el valor medido cuadra con AABB pero NO con IL → cota vieja mala
+            pass  # se valida abajo con esperados desde IL
+        if not _punto_cerca_contorno(vista, ox, oy):
+            return True, "origen IL no toca esquina de la pieza"
+
     texto = _leer_texto_cota_hoja(hoja)
     medido = _parse_mm(texto)
     if medido is None:
         return True, "sin texto numerico"
+
+    # 2) Fantasmas: mas refs HLR que modelo flat
+    try:
+        from barrenos_xy_despliegue import (
+            _centros_barrenos_modelo,
+            _centros_barrenos,
+        )
+
+        tg = hoja.Parent.Application.TransientGeometry
+        modelo = _centros_barrenos_modelo(vista, tg)
+        actual = _centros_barrenos(vista, tg)
+        if modelo and len(actual) > len(modelo) + 1:
+            return True, (
+                f"barrenos fantasma sospechosos "
+                f"(vista={len(actual)} modelo={len(modelo)})"
+            )
+    except Exception:
+        pass
 
     esperados = _niveles_esperados_mm(vista, hoja, eje)
     if not esperados:
@@ -207,6 +244,35 @@ def _hoja_xy_falla(hoja, vista, eje: str) -> tuple[bool, str]:
             dec = re.split(r"\D", dec)[0]
             if len(dec) < 3:
                 return True, f"pocos decimales ({texto})"
+        # 3) Si AABB ≠ IL y el valor cuadra con AABB pero no con IL → origen flotante
+        if origen is not None and sil is not None:
+            ox, oy = origen
+            aabb_ox, aabb_oy = float(sil[0]), float(sil[2])
+            if abs(aabb_ox - ox) > 0.08 or abs(aabb_oy - oy) > 0.08:
+                try:
+                    tg = hoja.Parent.Application.TransientGeometry
+                    from barrenos_xy_despliegue import _centros_barrenos
+
+                    bars = _centros_barrenos(vista, tg)
+                    aabb_vals = []
+                    for b in bars:
+                        d = (
+                            float(b["cx"]) - aabb_ox
+                            if eje == "X"
+                            else float(b["cy"]) - aabb_oy
+                        )
+                        if d >= 0.05:
+                            aabb_vals.append(_cm_hoja_a_mm(d, vista))
+                    if aabb_vals and _coincide(
+                        medido, aabb_vals, tol=max(_TOL_MM, 0.05)
+                    ):
+                        if not _coincide(medido, esperados, tol=max(_TOL_MM, 0.05)):
+                            return True, (
+                                "origen AABB flotante "
+                                "(no toca esquina inferior-izquierda)"
+                            )
+                except Exception:
+                    pass
         return False, "ok"
 
     pasos = _pasos_entre_barrenos_mm(vista, hoja, eje)
@@ -224,12 +290,16 @@ def _reparar_hoja_xy(hoja, vista, inv_app, tg, eje: str) -> bool:
         _valor_desde_hoja,
         _tol_coincidencia_hoja,
     )
-    from diametro import _marcar_barrenos_azules
+    from diametro import _marcar_barrenos_azules, _origen_il_pieza
 
     sil = _silueta_placa_vista(vista)
-    if not sil:
+    origen = _origen_il_pieza(vista)
+    if origen is not None:
+        ox, oy = origen
+    elif sil:
+        ox, _mx, oy, _my, _ = sil
+    else:
         return False
-    ox, _mx, oy, _my, _ = sil
     barrenos = _centros_barrenos(vista, tg)
     if not barrenos:
         return False
