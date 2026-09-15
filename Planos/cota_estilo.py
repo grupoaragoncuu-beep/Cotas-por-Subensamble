@@ -349,6 +349,22 @@ def letra_typ_indice(indice):
     return letra_typ_indice(i // 26 - 1) + chr(ord("A") + (i % 26))
 
 
+# Cotas TYP con letras A/B/C: ON por defecto (caras / subensamble / etc.).
+# Flujo Abigail PIEZAS (COTAS_ILOGIC_ABIGAIL → generador_piezas) las apaga.
+_ENV_TYP_LETRAS = "COTAS_TYP_LETRAS"
+
+
+def typ_letras_habilitadas() -> bool:
+    """True → dibujar A/B/C en marcas TYP. False en Abigail/piezas."""
+    v = str(os.environ.get(_ENV_TYP_LETRAS, "1") or "1").strip().lower()
+    return v not in ("0", "false", "no", "off")
+
+
+def set_typ_letras_habilitadas(activado: bool) -> None:
+    """Activa/desactiva letras TYP (proceso actual)."""
+    os.environ[_ENV_TYP_LETRAS] = "1" if activado else "0"
+
+
 def clearance_texto_cota_cm(n_chars=8):
     """
     Separación mínima silueta → texto para que el número no monte la pieza.

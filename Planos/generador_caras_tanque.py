@@ -41,6 +41,7 @@ from cota_estilo import (
     letra_typ_indice,
     offset_letra_typ,
     texto_cota_limpio,
+    typ_letras_habilitadas,
 )
 from generador_vistas import (
     ALTO_EXPORTACION,
@@ -4939,6 +4940,9 @@ def _marcas_typ_en_accesorios(
     def _poner_letras(centros_radio):
         """centros_radio: lista (x, y, radio_exterior) YA ordenada cerca→lejos."""
         if not etiquetar_letras or inv_app is None:
+            return
+        # Abigail/piezas apaga A/B/C; caras/subensamble las mantienen.
+        if not typ_letras_habilitadas():
             return
         if len(centros_radio) < 2:
             return

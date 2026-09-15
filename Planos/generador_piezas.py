@@ -161,6 +161,15 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
     print(" COTAS ABIGAIL - SOLO PIEZAS (PIEZAS_ACOTADAS)")
     print("=" * 62)
 
+    # TYP de piezas Abigail: sin letras A/B/C (otros flujos las conservan).
+    try:
+        from cota_estilo import set_typ_letras_habilitadas
+
+        set_typ_letras_habilitadas(False)
+        print("  TYP piezas: sin nomenclatura A/B/C (solo anillos / texto TYP).")
+    except Exception:
+        pass
+
     pythoncom.CoInitialize()
     inv_app = None
     ok = False
@@ -372,7 +381,14 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
                 print(f"AVISO dossier sync post-reorg: {err_dos}")
 
         # Kits OTC: solo en tanque completo. En BOARD no aplica.
+        # Re-activar A/B/C TYP: ensambles independientes las siguen usando.
         if not solo and not es_board:
+            try:
+                from cota_estilo import set_typ_letras_habilitadas
+
+                set_typ_letras_habilitadas(True)
+            except Exception:
+                pass
             try:
                 from ensambles_independientes import (
                     ejecutar_ensambles_independientes,
@@ -396,9 +412,10 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
         return ok
     finally:
         try:
-            from cota_estilo import set_unidad_cota
+            from cota_estilo import set_unidad_cota, set_typ_letras_habilitadas
 
             set_unidad_cota("in")
+            set_typ_letras_habilitadas(True)
         except Exception:
             pass
         try:
