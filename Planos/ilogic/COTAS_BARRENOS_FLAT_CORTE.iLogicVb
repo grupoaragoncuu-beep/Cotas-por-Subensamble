@@ -1,14 +1,15 @@
 ' =============================================================================
 ' COTAS_BARRENOS_FLAT_CORTE
 ' =============================================================================
-' SOLO para piezas flat (JPGS\Corte\Corte):
-'   1) Barrenos TYP en X e Y  →  XCENTRO / YCENTRO (+ _TYP)  [centro circulo/ovalo H|V]
-'   2) Ø por tipo de tamaño   →  HOLE## (circulo y ovalo separados; mm exactos ≥6 dec)
+' Re-acota SOLO barrenos flat (cualquier job; tipico GIGA Board):
+'   1) Barrenos TYP en X e Y  →  XCENTRO / YCENTRO (+ _TYP)
+'   2) Ø por tipo de tamaño   →  HOLE## (circulo ≠ ovalo; mm ≥6 dec)
 '   3) Espesor               →  THK
-'   4) Auditoría COM al final → revalida XY/HOLE/THK; repara desfazadas
-'      y THK no desdoblados (recrea DESPLIEGUE_LADO flat + reacota)
+'   4) Auditoría COM al final → revalida / repara
 '
 ' NO genera LENGTH, WIDTH, Doblado ni Estañado.
+' El flujo normal Abigail (generador_piezas) YA crea DESPLIEGUE + barrenos
+' cuando la chapa tiene huecos; esta regla es re-trabajo / SOLO flat.
 ' Lanza: Planos\_reacotar_barrenos_flat_corte.py
 ' =============================================================================
 
@@ -71,17 +72,15 @@ Sub Main()
 
     Dim resp As System.Windows.Forms.DialogResult = _
         System.Windows.Forms.MessageBox.Show( _
-            "Esta regla SOLO hace esto (piezas flat Corte\Corte):" & vbCrLf & vbCrLf & _
+            "Re-trabajo SOLO flat (barrenos):" & vbCrLf & vbCrLf & _
             "  1. Barrenos TYP en X/Y  (centro circulo/ovalo)" & vbCrLf & _
             "  2. Ø por tipo de tamaño (HOLE; circulo ≠ ovalo)" & vbCrLf & _
             "  3. Espesor THK" & vbCrLf & vbCrLf & _
-            "Precision ≥3 decimales (mm). Ovalos H y V." & vbCrLf & _
-            "NO hace Length ni Width." & vbCrLf & _
-            "Reemplaza JPG en el servidor y actualiza la DB." & vbCrLf & vbCrLf & _
-            "Requisitos:" & vbCrLf & _
-            "  - Machote activo" & vbCrLf & _
-            "  - Ensamble Board abierto" & vbCrLf & _
-            "  - Sin Python de cotas colgado" & vbCrLf & vbCrLf & _
+            "Precision ≥6 decimales (mm)." & vbCrLf & _
+            "NO hace Length ni Width ni Doblado." & vbCrLf & _
+            "El flujo Abigail normal ya aplica barrenos en chapas con huecos;" & vbCrLf & _
+            "usa esta regla para re-acotar / SOLO flat." & vbCrLf & vbCrLf & _
+            "Requisitos: machote activo + ensamble abierto." & vbCrLf & vbCrLf & _
             "Continuar?", _
             titulo, _
             System.Windows.Forms.MessageBoxButtons.YesNo, _

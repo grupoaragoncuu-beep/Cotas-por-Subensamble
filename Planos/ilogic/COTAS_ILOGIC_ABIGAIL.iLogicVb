@@ -2,8 +2,13 @@
 ' Regla externa: COTAS_ILOGIC_ABIGAIL
 '
 ' Tanque: seleccion Top+SEGM+BASE y acota piezas por cara.
-' BOARD/GIGA: sin picks; acota TODAS las piezas. Solo cobre ABB/GENE/RLG
-'   genera 2 JPG por cota (con dimensión + SIN_COTA, misma vista).
+' BOARD/GIGA: sin picks; acota TODAS las piezas.
+'
+' Barrenos (cualquier producto: tanque, board, etc.):
+'   Si la chapa tiene barrenos/cortes interiores → vistas DESPLIEGUE
+'   + XCENTRO/YCENTRO (+TYP) + HOLE + THK (misma logica flat GIGA).
+' Cobre exclusivo GIGA (ABB/GENE/RLG): 2 JPG (cota + SIN_COTA) y
+'   vista ESTANIADO isometrica.
 '
 ' Rutas: NO hardcodear C:\Proyectos\...  Usar COTAS_ABIGAIL_DIR /
 ' config_planos.txt / ExternalRuleDirectories (instalador).
@@ -704,8 +709,9 @@ Sub LanzarFlujoPiezasBoard( _
 
     System.Windows.Forms.MessageBox.Show( _
         "BOARD detectado: se acotaran piezas sin picks de tanque." & vbCrLf & _
-        "Piezas cobre (ABB, GENE, GEN1, …): 2 capturas por cota" & vbCrLf & _
-        "(con dimension + SIN_COTA).", _
+        "Barrenos en chapa: DESPLIEGUE + X/Y + HOLE + THK." & vbCrLf & _
+        "Cobre (ABB/GENE/RLG): 2 capturas por cota" & vbCrLf & _
+        "(con dimension + SIN_COTA) y ESTANIADO.", _
         titulo)
 
     Dim pythonExeFinal As String = ResolverPythonExe(planosDirFinal)

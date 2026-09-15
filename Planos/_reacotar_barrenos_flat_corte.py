@@ -9,7 +9,7 @@ REGLA RAPIDA flat — SOLO lo pedido:
 
 Nada de LENGTH, WIDTH, Doblado ni Estañado.
 
-Piezas = carpetas en JPGS\\Corte\\Corte (sin ``Copia de``).
+Piezas = carpetas flat (Plasma y Laser/Corte metal + Maquinado/Corte Busbar).
 Reemplaza esos JPG en el servidor + filas DB.
 
 Inventor: machote activo + ensamble Board abierto.
@@ -24,20 +24,18 @@ import sys
 
 import pythoncom
 
-ROOT_JPGS_CORTE = (
-    r"\\192.168.2.80\Users\Administrator\Desktop\Grupo Arga Metals"
-    r"\ARGA METALS CORPORATE SYSTEM\ENCLOSURES NEMA 1\GIGA"
-    r"\9919-BOARD2_2\DOSSIER FILES\JPGS\Corte\Corte"
+from rutas_arbol_giga import (  # noqa: E402
+    ROOT_JPGS_BOARD2,
+    catalogo_piezas_flat,
+    dest_flat,
+    roots_flat,
 )
-ALT_CORTE = (
-    r"\\192.168.2.80\Users\Administrator\Desktop\Grupo Arga Metals"
-    r"\ARGA METALS CORPORATE SYSTEM\ENCLOSURES NEMA 1\GIGA"
-    r"\9919-BOARD2_2\DOSSIER FILES\9919-BOARD2_2\Corte\Corte"
-)
+
+ROOT_JPGS = ROOT_JPGS_BOARD2
 JOB = "9919-Board 2"
 
 # Solo estos tokens se borran/reemplazan (no LENGTH/WIDTH).
-_TOKENS_REEMPLAZO = ("__XCENTRO", "__YCENTRO", "__THK_", "__HOLE")
+_TOKENS_REEMPLAZO = ("__XCENTRO", "__YCENTRO", "__XMIN", "__YMIN", "__THK_", "__HOLE")
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -46,25 +44,11 @@ def _raiz() -> str:
     env = os.environ.get("CORTE_CORTE_ROOT", "").strip()
     if env and os.path.isdir(env):
         return env
-    if os.path.isdir(ROOT_JPGS_CORTE):
-        return ROOT_JPGS_CORTE
-    if os.path.isdir(ALT_CORTE):
-        return ALT_CORTE
-    return ROOT_JPGS_CORTE
+    return ROOT_JPGS
 
 
 def _piezas(raiz: str) -> list[str]:
-    if not os.path.isdir(raiz):
-        return []
-    out = []
-    for n in sorted(os.listdir(raiz)):
-        p = os.path.join(raiz, n)
-        if not os.path.isdir(p):
-            continue
-        if n.upper().startswith("COPIA DE") or n.startswith("_"):
-            continue
-        out.append(n)
-    return out
+    return catalogo_piezas_flat(raiz)
 
 
 def _es_captura_objetivo(fn: str) -> bool:
@@ -150,7 +134,10 @@ def _publicar_y_db(local_corte: str, share: str, piezas: list[str]) -> tuple[int
     )
     import psycopg2
 
-    dossier_jpgs = os.path.dirname(os.path.dirname(share))
+    dossier_jpgs = share if os.path.basename(share).upper() == "JPGS" else os.path.dirname(
+        os.path.dirname(share)
+    )
+    # share = .../DOSSIER FILES/JPGS  → job = .../9919-BOARD2_2
     job_root = os.path.dirname(os.path.dirname(dossier_jpgs))
     prod, cli = producto_cliente_desde_job_root(job_root)
     if not cli:
@@ -159,11 +146,20 @@ def _publicar_y_db(local_corte: str, share: str, piezas: list[str]) -> tuple[int
     pubs = 0
     rows = []
     for pieza in piezas:
-        src = os.path.join(local_corte, pieza) if local_corte else ""
-        if not os.path.isdir(src):
-            # buscar en staging
+        src = ""
+        if local_corte:
+            # local puede ser PIEZAS_ACOTADAS o ya flat anidado
+            cand = [
+                os.path.join(local_corte, pieza),
+                dest_flat(local_corte, pieza),
+            ]
+            for c in cand:
+                if os.path.isdir(c):
+                    src = c
+                    break
+        if not src or not os.path.isdir(src):
             continue
-        dst = os.path.join(share, pieza)
+        dst = dest_flat(share, pieza)
         os.makedirs(dst, exist_ok=True)
         for fn in os.listdir(src):
             if not fn.lower().endswith((".jpg", ".jpeg", ".png")):
@@ -171,7 +167,8 @@ def _publicar_y_db(local_corte: str, share: str, piezas: list[str]) -> tuple[int
             if not _es_captura_objetivo(fn) and "__THK_" not in fn.upper():
                 # aceptar solo XY/THK/HOLE
                 if not any(
-                    t in fn.upper() for t in ("XCENTRO", "YCENTRO", "__THK_")
+                    t in fn.upper()
+                    for t in ("XCENTRO", "YCENTRO", "XMIN", "YMIN", "__THK_")
                 ):
                     continue
             s = os.path.join(src, fn)
@@ -185,21 +182,26 @@ def _publicar_y_db(local_corte: str, share: str, piezas: list[str]) -> tuple[int
 
     # También recolectar desde staging local si reorg no movió
     if local_corte:
-        staging = os.path.join(os.path.dirname(os.path.dirname(local_corte)), "_STAGING_DESPLIEGUE")
-        # PIEZAS_ACOTADAS/_STAGING_DESPLIEGUE
-        base_piezas = os.path.dirname(os.path.dirname(local_corte))  # Corte -> PIEZAS
-        if os.path.basename(os.path.dirname(local_corte)).upper() == "CORTE":
-            base_piezas = os.path.dirname(os.path.dirname(local_corte))
-        # local_corte = .../PIEZAS_ACOTADAS/Corte/Corte
-        staging = os.path.join(
-            os.path.dirname(os.path.dirname(local_corte)), "_STAGING_DESPLIEGUE"
-        )
-        if os.path.isdir(staging):
+        # Buscar PIEZAS_ACOTADAS/_STAGING_DESPLIEGUE subiendo
+        staging = ""
+        cur = local_corte
+        for _ in range(5):
+            cand = os.path.join(cur, "_STAGING_DESPLIEGUE")
+            if os.path.isdir(cand):
+                staging = cand
+                break
+            parent = os.path.dirname(cur)
+            if parent == cur:
+                break
+            cur = parent
+        if staging and os.path.isdir(staging):
             for fn in os.listdir(staging):
                 if not fn.lower().endswith((".jpg", ".jpeg", ".png")):
                     continue
                 up = fn.upper()
-                if not any(t in up for t in ("XCENTRO", "YCENTRO", "__THK_")):
+                if not any(
+                    t in up for t in ("XCENTRO", "YCENTRO", "XMIN", "YMIN", "__THK_")
+                ):
                     continue
                 # item desde nombre JOB__ITEM__MEDIDA
                 item = ""
@@ -220,7 +222,7 @@ def _publicar_y_db(local_corte: str, share: str, piezas: list[str]) -> tuple[int
                         break
                 if not pieza_match:
                     continue
-                dst_dir = os.path.join(share, pieza_match)
+                dst_dir = dest_flat(share, pieza_match)
                 os.makedirs(dst_dir, exist_ok=True)
                 d = os.path.join(dst_dir, fn)
                 try:
@@ -239,7 +241,8 @@ def _publicar_y_db(local_corte: str, share: str, piezas: list[str]) -> tuple[int
                     tipo, n_spot = clasificar_type_y_spoteos(fn)
                     if "_TYP" in fn.upper():
                         n_spot = max(n_spot, 2)
-                    clase = proceso_desde_ruta(ruta) or "Corte/Corte"
+                    clase = proceso_desde_ruta(ruta) or ""
+
                     cur.execute(
                         """
                         INSERT INTO public.cotas_dossier
@@ -283,7 +286,7 @@ def main() -> int:
         piezas = [p.strip() for p in filtro.split(",") if p.strip()]
     print(f"[1] piezas flat: {len(piezas)}")
     if not piezas:
-        print("ERROR: no hay piezas en Corte/Corte")
+        print("ERROR: no hay piezas flat")
         return 1
 
     print("[2] limpiar HOLE/XCENTRO/YCENTRO/THK en share")
@@ -301,7 +304,14 @@ def main() -> int:
     os.environ["SOLO_FLAT_CORTE"] = "1"  # solo FRENTE_1+LADO; export solo XY/THK
     os.environ["ENSAMBLES_INDEPENDIENTES"] = "0"
     os.environ["COTAS_JOB_OVERRIDE"] = JOB
-    print("[4] SOLO_FLAT_CORTE=1  COTAS_JOB_OVERRIDE=", JOB)
+    from cota_estilo import set_unidad_cota, get_unidad_cota
+
+    set_unidad_cota("mm")
+    print(
+        "[4] SOLO_FLAT_CORTE=1  COTAS_JOB_OVERRIDE=",
+        JOB,
+        f" unidad={get_unidad_cota()}",
+    )
 
     pythoncom.CoInitialize()
     ok = False
@@ -447,7 +457,7 @@ def main() -> int:
             if "__HOLE" in up:
                 hole += 1
     print(
-        f"\n=== RESULTADO share Corte/Corte: "
+        f"\n=== RESULTADO share flat: "
         f"XCENTRO/YCENTRO={xy}  HOLE={hole}  THK={thk} ==="
     )
     if xy == 0:

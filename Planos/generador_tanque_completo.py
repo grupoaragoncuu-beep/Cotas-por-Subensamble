@@ -64,13 +64,39 @@ SUBCARPETAS_CLASIFICACION_PIEZAS = (
 )
 SUBCARPETA_SIN_CLASIFICAR = "SIN CLASIFICACION"
 
-# Anidado solo bajo Corte/ (flujo Abigail BOARD/cobre):
-#   Corte/Corte/<PIEZA>/     ← flat pattern (recién cortadas)
-#   Corte/Doblado/<PIEZA>/   ← modelo doblado (comportamiento actual)
-#   Corte/Estañado/*.jpg     ← cobre SIN_COTA isométrica (suelta, sin carpeta pieza)
+# Árbol acordado (GIGA BOARD / cobre):
+#   Corte/Plasma y Laser/Corte metal/<PIEZA>/   ← flat metal
+#   Corte/Plasma y Laser/Corte Busbar/<PIEZA>/  ← (secundario)
+#   Corte/Maquinado/Maquinados metal/<PIEZA>/
+#   Corte/Maquinado/Corte Busbar/<PIEZA>/      ← flat cobre
+#   Doblado/Metal/<PIEZA>/  |  Doblado/Busbar/<PIEZA>/
+#   Estañado Busbar/*.jpg                      ← cobre isométrico SIN_COTA
+# Legacy (migración): Corte/Corte|Doblado|Estañado
+SUBCARPETAS_CORTE_PLASMA = ("Corte metal", "Corte Busbar")
+SUBCARPETAS_CORTE_MAQUINADO = ("Maquinados metal", "Corte Busbar")
+SUBCARPETAS_DOBLADO_ANIDADAS = ("Metal", "Busbar")
+SUBCARPETA_ESTANIADO_BUSBAR = "Estañado Busbar"
+# Legacy names kept for cleanup/migración de carpetas viejas.
 SUBCARPETAS_CORTE_ANIDADAS = ("Corte", "Doblado", "Estañado")
 STAGING_DESPLIEGUE = "_STAGING_DESPLIEGUE"
 STAGING_ESTANIADO = "_STAGING_ESTANIADO"
+
+# Claves de conteo / clasificacion (ruta lógica).
+CLASIFICACIONES_LOG = (
+    "Almacén",
+    "Corte/Plasma y Laser/Corte metal",
+    "Corte/Plasma y Laser/Corte Busbar",
+    "Corte/Maquinado/Maquinados metal",
+    "Corte/Maquinado/Corte Busbar",
+    "Doblado/Metal",
+    "Doblado/Busbar",
+    SUBCARPETA_ESTANIADO_BUSBAR,
+    "Maquinado",
+    "Doblado",
+    "Plasma",
+    "Plasma Doblado",
+    SUBCARPETA_SIN_CLASIFICAR,
+)
 
 # Sufijos que agrega el flujo de piezas al final del nombre del JPG. Se usan
 # para separar "pieza" de "tipo de cota" y así crear una carpeta por pieza.
@@ -90,6 +116,10 @@ _SUFIJOS_JPG_PIEZA = (
     "YCENTRO_TYP",
     "XCENTRO",
     "YCENTRO",
+    "XMIN_TYP",
+    "YMIN_TYP",
+    "XMIN",
+    "YMIN",
     "HOLE\\d{2}",
     "DIAMETRO_EXTERIOR",
     "DIAMETRO_INTERIOR",
@@ -141,6 +171,7 @@ def _limpiar_exportacion_piezas(carpeta, incremental=False):
         c.casefold() for c in SUBCARPETAS_CLASIFICACION_PIEZAS
     }
     clasificaciones_ci.add(SUBCARPETA_SIN_CLASIFICAR.casefold())
+    clasificaciones_ci.add(SUBCARPETA_ESTANIADO_BUSBAR.casefold())
     staging_ci = {
         STAGING_DESPLIEGUE.casefold(),
         STAGING_ESTANIADO.casefold(),
@@ -584,7 +615,7 @@ def _clasificacion_para_pieza(nombre_archivo, mapa_por_clasificacion):
 
 
 def _es_jpg_despliegue(nombre_archivo, staging_marker=None):
-    """True si la captura viene del flat pattern (Corte/Corte)."""
+    """True si la captura viene del flat pattern (corte plano)."""
     marker = str(staging_marker or "").upper()
     nombre_u = str(nombre_archivo or "").upper()
     if STAGING_DESPLIEGUE.upper() in marker or "DESPLIEGUE" in marker:
@@ -593,7 +624,7 @@ def _es_jpg_despliegue(nombre_archivo, staging_marker=None):
 
 
 def _es_jpg_estanado(nombre_archivo, staging_marker=None, nombre_pieza=None):
-    """True si debe ir a Corte/Estañado (cobre SIN_COTA / hoja ESTANIADO)."""
+    """True si debe ir a Estañado Busbar (cobre SIN_COTA / hoja ESTANIADO)."""
     marker = str(staging_marker or "").upper()
     nombre_u = str(nombre_archivo or "").upper()
     if STAGING_ESTANIADO.upper() in marker or "ESTANIADO" in marker:
@@ -607,6 +638,17 @@ def _es_jpg_estanado(nombre_archivo, staging_marker=None, nombre_pieza=None):
         return bool(es_pieza_cobre(pieza))
     except Exception:
         return "SIN_COTA" in nombre_u
+
+
+def _es_cobre_nombre(nombre_archivo, nombre_pieza=None):
+    """True si el JPG pertenece a pieza cobre (ABB/GENE/RLG)."""
+    try:
+        from piezas_cobre import es_pieza_cobre
+
+        pieza = nombre_pieza or _extraer_pieza_de_jpg(nombre_archivo)
+        return bool(es_pieza_cobre(pieza))
+    except Exception:
+        return False
 
 
 def _iter_jpgs_para_reorg(carpeta_piezas):
@@ -644,55 +686,116 @@ def _destino_dirs_clasificacion(
     """
     Devuelve ``(destino_dir, clave_conteo, con_carpeta_pieza)``.
 
-    Bajo Corte/ anida Corte|Doblado|Estañado. Estañado: JPG sueltos.
+    Árbol acordado (ver ``CLASIFICACIONES_LOG``). Estañado Busbar: JPG sueltos.
     """
     pieza = _extraer_pieza_de_jpg(nombre_archivo)
     pieza_folder = _nombre_carpeta_pieza(pieza)
-    if str(destino_sub).casefold() == "corte":
-        if _es_jpg_estanado(nombre_archivo, staging_marker, pieza):
+    cobre = _es_cobre_nombre(nombre_archivo, pieza)
+    dest = str(destino_sub or "").casefold()
+
+    if _es_jpg_estanado(nombre_archivo, staging_marker, pieza):
+        destino_dir = os.path.join(carpeta_piezas, SUBCARPETA_ESTANIADO_BUSBAR)
+        return destino_dir, SUBCARPETA_ESTANIADO_BUSBAR, False
+
+    # Flat (despliegue): metal → Plasma y Laser; cobre → Maquinado/Corte Busbar.
+    if _es_jpg_despliegue(nombre_archivo, staging_marker) or dest in (
+        "plasma",
+        "plasma doblado",
+    ):
+        if cobre:
             destino_dir = os.path.join(
-                carpeta_piezas, "Corte", "Estañado"
+                carpeta_piezas,
+                "Corte",
+                "Maquinado",
+                "Corte Busbar",
+                pieza_folder,
             )
-            return destino_dir, "Corte/Estañado", False
-        if _es_jpg_despliegue(nombre_archivo, staging_marker):
-            destino_dir = os.path.join(
-                carpeta_piezas, "Corte", "Corte", pieza_folder
-            )
-            return destino_dir, "Corte/Corte", True
+            return destino_dir, "Corte/Maquinado/Corte Busbar", True
         destino_dir = os.path.join(
-            carpeta_piezas, "Corte", "Doblado", pieza_folder
+            carpeta_piezas,
+            "Corte",
+            "Plasma y Laser",
+            "Corte metal",
+            pieza_folder,
         )
-        return destino_dir, "Corte/Doblado", True
+        return destino_dir, "Corte/Plasma y Laser/Corte metal", True
+
+    if dest == "maquinado":
+        if cobre:
+            destino_dir = os.path.join(
+                carpeta_piezas,
+                "Corte",
+                "Maquinado",
+                "Corte Busbar",
+                pieza_folder,
+            )
+            return destino_dir, "Corte/Maquinado/Corte Busbar", True
+        destino_dir = os.path.join(
+            carpeta_piezas,
+            "Corte",
+            "Maquinado",
+            "Maquinados metal",
+            pieza_folder,
+        )
+        return destino_dir, "Corte/Maquinado/Maquinados metal", True
+
+    # Doblado (iProp Doblado) o Corte doblado histórico → Doblado/Metal|Busbar.
+    if dest in ("doblado", "corte"):
+        if cobre:
+            destino_dir = os.path.join(
+                carpeta_piezas, "Doblado", "Busbar", pieza_folder
+            )
+            return destino_dir, "Doblado/Busbar", True
+        destino_dir = os.path.join(
+            carpeta_piezas, "Doblado", "Metal", pieza_folder
+        )
+        return destino_dir, "Doblado/Metal", True
+
     destino_dir = os.path.join(carpeta_piezas, destino_sub, pieza_folder)
     return destino_dir, destino_sub, True
 
 
+def _preparar_arbol_clasificacion(carpeta_piezas):
+    """Crea carpetas raíz + anidadas del árbol acordado."""
+    os.makedirs(carpeta_piezas, exist_ok=True)
+    for sub in SUBCARPETAS_CLASIFICACION_PIEZAS + (SUBCARPETA_SIN_CLASIFICAR,):
+        os.makedirs(os.path.join(carpeta_piezas, sub), exist_ok=True)
+    os.makedirs(
+        os.path.join(carpeta_piezas, SUBCARPETA_ESTANIADO_BUSBAR), exist_ok=True
+    )
+    for nest in SUBCARPETAS_CORTE_PLASMA:
+        os.makedirs(
+            os.path.join(carpeta_piezas, "Corte", "Plasma y Laser", nest),
+            exist_ok=True,
+        )
+    for nest in SUBCARPETAS_CORTE_MAQUINADO:
+        os.makedirs(
+            os.path.join(carpeta_piezas, "Corte", "Maquinado", nest),
+            exist_ok=True,
+        )
+    for nest in SUBCARPETAS_DOBLADO_ANIDADAS:
+        os.makedirs(
+            os.path.join(carpeta_piezas, "Doblado", nest), exist_ok=True
+        )
+
+
 def _reorganizar_piezas_por_clasificacion(carpeta_piezas, mapa_por_clasificacion):
     """
-    Mueve cada JPG a ``<CLASIFICACIÓN>/<PIEZA>/<archivo>.jpg``.
+    Mueve cada JPG a su carpeta del árbol acordado.
 
     Estructura resultante en PIEZAS_ACOTADAS:
         Almacén/<PIEZA>/*.jpg
-        Corte/Corte/<PIEZA>/*.jpg       (flat / recién cortadas)
-        Corte/Doblado/<PIEZA>/*.jpg    (dobladas)
-        Corte/Estañado/*.jpg           (cobre SIN_COTA isométrica, suelta)
-        Maquinado/<PIEZA>/*.jpg
-        Doblado/<PIEZA>/*.jpg
-        Plasma/<PIEZA>/*.jpg
-        Plasma Doblado/<PIEZA>/*.jpg
+        Corte/Plasma y Laser/Corte metal/<PIEZA>/*.jpg
+        Corte/Maquinado/Corte Busbar/<PIEZA>/*.jpg
+        Corte/Maquinado/Maquinados metal/<PIEZA>/*.jpg
+        Doblado/Metal/<PIEZA>/*.jpg | Doblado/Busbar/<PIEZA>/*.jpg
+        Estañado Busbar/*.jpg
         SIN CLASIFICACION/<PIEZA>/*.jpg
 
     Piezas sin match en el mapa caen en ``SIN CLASIFICACION/``.
     """
-    subcarpetas = SUBCARPETAS_CLASIFICACION_PIEZAS + (SUBCARPETA_SIN_CLASIFICAR,)
     try:
-        os.makedirs(carpeta_piezas, exist_ok=True)
-        for sub in subcarpetas:
-            os.makedirs(os.path.join(carpeta_piezas, sub), exist_ok=True)
-        for nest in SUBCARPETAS_CORTE_ANIDADAS:
-            os.makedirs(
-                os.path.join(carpeta_piezas, "Corte", nest), exist_ok=True
-            )
+        _preparar_arbol_clasificacion(carpeta_piezas)
     except OSError as err:
         print(
             f"AVISO: no se pudieron preparar subcarpetas de PIEZAS_ACOTADAS "
@@ -700,14 +803,8 @@ def _reorganizar_piezas_por_clasificacion(carpeta_piezas, mapa_por_clasificacion
         )
         return {}
 
-    conteo = {sub: 0 for sub in subcarpetas}
-    conteo["Corte/Corte"] = 0
-    conteo["Corte/Doblado"] = 0
-    conteo["Corte/Estañado"] = 0
-    piezas_por_clase = {sub: set() for sub in subcarpetas}
-    piezas_por_clase["Corte/Corte"] = set()
-    piezas_por_clase["Corte/Doblado"] = set()
-    piezas_por_clase["Corte/Estañado"] = set()
+    conteo = {sub: 0 for sub in CLASIFICACIONES_LOG}
+    piezas_por_clase = {sub: set() for sub in CLASIFICACIONES_LOG}
 
     clases_validas_cf = {c.casefold() for c in SUBCARPETAS_CLASIFICACION_PIEZAS}
 
@@ -757,18 +854,7 @@ def _reorganizar_piezas_por_clasificacion(carpeta_piezas, mapa_por_clasificacion
                 pass
 
     print("  PIEZAS_ACOTADAS por clasificación:")
-    orden_log = (
-        "Almacén",
-        "Corte/Corte",
-        "Corte/Doblado",
-        "Corte/Estañado",
-        "Maquinado",
-        "Doblado",
-        "Plasma",
-        "Plasma Doblado",
-        SUBCARPETA_SIN_CLASIFICAR,
-    )
-    for sub in orden_log:
+    for sub in CLASIFICACIONES_LOG:
         n = conteo.get(sub, 0)
         n_piezas = len(piezas_por_clase.get(sub, ()))
         print(f"    {sub}: {n} JPG en {n_piezas} piezas")

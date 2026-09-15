@@ -20,13 +20,34 @@ import os
 import re
 from typing import Iterable
 
-from cota_estilo import texto_cota_limpio, asegurar_unidad_cota, get_unidad_cota
+from cota_estilo import (
+    texto_cota_limpio,
+    asegurar_unidad_cota,
+    get_unidad_cota,
+    set_unidad_cota,
+)
 from diametro import _silueta_placa_vista, _agrupar_diametros_grupos, _barrenos_en_vista
 
 _RE_NUM = re.compile(r"[-+]?\d+(?:[.,]\d+)?")
+_RE_PULGADAS = re.compile(r"(?:^|\s)(in|pulg\.?)(?:\s|$)", re.IGNORECASE)
 _TOL_MM = 0.0005
 _TOL_THK_MM = 0.05  # Thickness vs cota: margen de lectura
 _MAX_PASADAS = 2
+
+
+def _forzar_mm_flat() -> None:
+    """GIGA Board flat: cotas siempre en mm (nunca in)."""
+    os.environ["SOLO_FLAT_CORTE"] = "1"
+    set_unidad_cota("mm")
+
+
+def _texto_en_pulgadas(texto) -> bool:
+    t = str(texto or "")
+    if _RE_PULGADAS.search(t):
+        return True
+    # Número chico típico de pulgada cuando la unidad activa es mm
+    # (p.ej. 3.5 in mostrado sin sufijo) — se valida aparte vs esperados.
+    return False
 
 
 def _escala(vista) -> float:
@@ -131,9 +152,39 @@ def _coincide(valor: float, candidatos: Iterable[float], tol: float = _TOL_MM) -
     return any(abs(valor - c) <= tol for c in candidatos)
 
 
+def _tg_desde_hoja_vista(hoja, vista):
+    """TransientGeometry robusto; puede ser None (HLR no lo necesita)."""
+    for getter in (
+        lambda: hoja.Parent.Application.TransientGeometry,
+        lambda: vista.Parent.Parent.Application.TransientGeometry,
+        lambda: getattr(vista, "Application", None)
+        and vista.Application.TransientGeometry,
+    ):
+        try:
+            tg = getter()
+            if tg is not None:
+                return tg
+        except Exception:
+            continue
+    try:
+        from inventor_com import conectar_inventor
+
+        return conectar_inventor().TransientGeometry
+    except Exception:
+        return None
+
+
 def _niveles_esperados_mm(vista, hoja, eje: str) -> list[float]:
-    from barrenos_xy_despliegue import _centros_barrenos
-    from diametro import _origen_il_pieza
+    """
+    Niveles X/Y esperados en mm desde origen IL.
+    NUNCA retornar [] solo porque falle TransientGeometry: HLR basta.
+    """
+    from barrenos_xy_despliegue import (
+        _centros_barrenos,
+        _centros_barrenos_hlr,
+        _referencias_oval_xy,
+    )
+    from diametro import _origen_il_pieza, _barrenos_en_vista
 
     sil = _silueta_placa_vista(vista)
     origen = _origen_il_pieza(vista)
@@ -143,11 +194,39 @@ def _niveles_esperados_mm(vista, hoja, eje: str) -> list[float]:
         ox, _mx, oy, _my, _ = sil
     else:
         return []
+
+    # HLR primero (no depende de tg) — bug previo: return [] si fallaba tg
+    barrenos = []
     try:
-        tg = hoja.Parent.Application.TransientGeometry
+        barrenos = list(_centros_barrenos_hlr(vista)) + list(
+            _referencias_oval_xy(vista)
+        )
     except Exception:
-        return []
-    barrenos = _centros_barrenos(vista, tg)
+        barrenos = []
+
+    tg = _tg_desde_hoja_vista(hoja, vista)
+    if tg is not None:
+        try:
+            fused = list(_centros_barrenos(vista, tg) or [])
+            if fused:
+                barrenos = fused
+        except Exception:
+            pass
+
+    if not barrenos:
+        try:
+            for a in _barrenos_en_vista(vista) or []:
+                barrenos.append(
+                    {
+                        "cx": float(a["cx"]),
+                        "cy": float(a["cy"]),
+                        "tamaño": float(a.get("tamaño") or 0.2),
+                        "tipo": str(a.get("tipo") or "circulo"),
+                    }
+                )
+        except Exception:
+            pass
+
     vals = []
     for b in barrenos:
         try:
@@ -155,14 +234,17 @@ def _niveles_esperados_mm(vista, hoja, eje: str) -> list[float]:
         except Exception:
             continue
         d_cm = (cx - ox) if eje == "X" else (cy - oy)
-        if d_cm < 0.05:
+        if abs(d_cm) < 0.02:
             continue
-        vals.append(_cm_hoja_a_mm(d_cm, vista))
+        try:
+            vals.append(_cm_hoja_a_mm(d_cm, vista))
+        except Exception:
+            continue
     vals.sort()
     unicos = []
-    for v in vals:
-        if not unicos or abs(v - unicos[-1]) > _TOL_MM:
-            unicos.append(v)
+    for val in vals:
+        if not unicos or abs(val - unicos[-1]) > _TOL_MM:
+            unicos.append(val)
     return unicos
 
 
@@ -190,27 +272,85 @@ def _pasos_entre_barrenos_mm(vista, hoja, eje: str) -> list[float]:
     return pasos
 
 
-def _hoja_xy_falla(hoja, vista, eje: str) -> tuple[bool, str]:
-    from diametro import _origen_il_pieza, _punto_cerca_contorno
+def _activar_hoja(hoja) -> None:
+    """Activa la hoja y espera a que la vista tenga curvas (HLR listo)."""
+    import time
 
-    # 1) Origen IL real vs AABB flotante (piezas con jog/S)
+    try:
+        hoja.Activate()
+    except Exception:
+        pass
+    try:
+        vista = hoja.DrawingViews.Item(1)
+    except Exception:
+        return
+    # Update() no existe en todos los wrappers; no tumbar la ref
+    for meth in ("_Update", "Update"):
+        try:
+            getattr(vista, meth)()
+            break
+        except Exception:
+            pass
+    for _ in range(8):
+        try:
+            if int(vista.DrawingCurves.Count) > 0:
+                return
+        except Exception:
+            pass
+        time.sleep(0.05)
+
+
+def _hoja_xy_falla(hoja, vista, eje: str) -> tuple[bool, str]:
+    from diametro import (
+        _origen_il_pieza,
+        _punto_cerca_contorno,
+        _origen_flota_en_vacio,
+    )
+
+    _activar_hoja(hoja)
+    try:
+        vista = hoja.DrawingViews.Item(1)
+    except Exception:
+        pass
+
+    if str(hoja.Name).upper().startswith("COPIA DE"):
+        return True, "hoja Copia de (basura)"
+
+    # 1) Origen DEBE existir y tocar geometría — nunca AABB flotante
     origen = _origen_il_pieza(vista)
     sil = _silueta_placa_vista(vista)
-    if origen is not None and sil is not None:
-        ox, oy = origen
+    if origen is None:
+        return True, "sin origen IL sobre geometria"
+    ox, oy = origen
+    if _origen_flota_en_vacio(vista, ox, oy) or not _punto_cerca_contorno(
+        vista, ox, oy
+    ):
+        return True, "origen IL flota en vacio (no toca pieza)"
+
+    # Si AABB ≠ IL: el valor NO puede ser el del AABB (cota vieja mala)
+    if sil is not None:
         aabb_ox, aabb_oy = float(sil[0]), float(sil[2])
-        if abs(aabb_ox - ox) > 0.08 or abs(aabb_oy - oy) > 0.08:
-            # Si el valor medido cuadra con AABB pero NO con IL → cota vieja mala
+        aabb_flota = _origen_flota_en_vacio(vista, aabb_ox, aabb_oy)
+        if aabb_flota and (
+            abs(aabb_ox - ox) > 0.05 or abs(aabb_oy - oy) > 0.05
+        ):
+            # forzar que el texto coincida con IL, no con AABB
             pass  # se valida abajo con esperados desde IL
-        if not _punto_cerca_contorno(vista, ox, oy):
-            return True, "origen IL no toca esquina de la pieza"
 
     texto = _leer_texto_cota_hoja(hoja)
+    if _texto_en_pulgadas(texto):
+        return True, f"unidad IN (debe ser mm): {texto!r}"
+    if get_unidad_cota() != "mm":
+        _forzar_mm_flat()
     medido = _parse_mm(texto)
     if medido is None:
         return True, "sin texto numerico"
+    # Valor en pulgadas colado con sufijo mm / sin unidad (p.ej. 3.5 en vez de 88.9)
+    if medido < 12.0 and "MM" not in str(texto).upper():
+        # sospechoso: se confirma abajo si cuadra con esperados/25.4
+        pass
 
-    # 2) Fantasmas: mas refs HLR que modelo flat
+    # 2) Fantasmas
     try:
         from barrenos_xy_despliegue import (
             _centros_barrenos_modelo,
@@ -230,59 +370,80 @@ def _hoja_xy_falla(hoja, vista, eje: str) -> tuple[bool, str]:
 
     esperados = _niveles_esperados_mm(vista, hoja, eje)
     if not esperados:
-        return True, "sin barrenos/silueta placa"
+        nb = -1
+        try:
+            from barrenos_xy_despliegue import _centros_barrenos
 
-    if _coincide(medido, esperados):
-        pasos = _pasos_entre_barrenos_mm(vista, hoja, eje)
-        err_esp = min(abs(medido - e) for e in esperados)
-        if pasos:
-            err_paso = min(abs(medido - p) for p in pasos)
-            if err_paso + 1e-9 < err_esp and err_paso <= _TOL_MM:
-                return True, f"parece PASO entre barrenos ({medido})"
-        if "." in str(texto):
-            dec = str(texto).split(".", 1)[1]
-            dec = re.split(r"\D", dec)[0]
-            if len(dec) < 3:
-                return True, f"pocos decimales ({texto})"
-        # 3) Si AABB ≠ IL y el valor cuadra con AABB pero no con IL → origen flotante
-        if origen is not None and sil is not None:
-            ox, oy = origen
+            tg = hoja.Parent.Application.TransientGeometry
+            nb = len(_centros_barrenos(vista, tg) or [])
+        except Exception:
+            try:
+                from diametro import _barrenos_en_vista
+
+                nb = len(_barrenos_en_vista(vista) or [])
+            except Exception:
+                nb = -1
+        if nb <= 0:
+            return True, "sin barrenos detectados en vista (HLR no listo)"
+        return True, (
+            f"origen mal ubicado (barrenos={nb} pero ninguna cota >0 "
+            f"desde IL)"
+        )
+    # Si el número cuadra con esperados/25.4 → se dibujó en pulgadas
+    if medido < 50.0:
+        en_in = [e / 25.4 for e in esperados if e >= 0.05]
+        if en_in and _coincide(medido, en_in, tol=0.02):
+            return True, f"valor en pulgadas ({medido}) — debe ser mm"
+
+    # 3) Valor debe ser desde IL real
+    if not _coincide(medido, esperados, tol=max(_TOL_MM, 0.05)):
+        # ¿Cuadra con AABB flotante? → origen malo explícito
+        if sil is not None:
             aabb_ox, aabb_oy = float(sil[0]), float(sil[2])
-            if abs(aabb_ox - ox) > 0.08 or abs(aabb_oy - oy) > 0.08:
-                try:
-                    tg = hoja.Parent.Application.TransientGeometry
-                    from barrenos_xy_despliegue import _centros_barrenos
+            try:
+                tg = hoja.Parent.Application.TransientGeometry
+                from barrenos_xy_despliegue import _centros_barrenos
 
-                    bars = _centros_barrenos(vista, tg)
-                    aabb_vals = []
-                    for b in bars:
-                        d = (
-                            float(b["cx"]) - aabb_ox
-                            if eje == "X"
-                            else float(b["cy"]) - aabb_oy
-                        )
-                        if d >= 0.05:
-                            aabb_vals.append(_cm_hoja_a_mm(d, vista))
-                    if aabb_vals and _coincide(
-                        medido, aabb_vals, tol=max(_TOL_MM, 0.05)
-                    ):
-                        if not _coincide(medido, esperados, tol=max(_TOL_MM, 0.05)):
-                            return True, (
-                                "origen AABB flotante "
-                                "(no toca esquina inferior-izquierda)"
-                            )
-                except Exception:
-                    pass
-        return False, "ok"
+                bars = _centros_barrenos(vista, tg)
+                aabb_vals = []
+                for b in bars:
+                    d = (
+                        float(b["cx"]) - aabb_ox
+                        if eje == "X"
+                        else float(b["cy"]) - aabb_oy
+                    )
+                    if d >= 0.05:
+                        aabb_vals.append(_cm_hoja_a_mm(d, vista))
+                if aabb_vals and _coincide(medido, aabb_vals, tol=0.05):
+                    return True, (
+                        "origen AABB flotante "
+                        "(no toca esquina inferior-izquierda)"
+                    )
+            except Exception:
+                pass
+        pasos = _pasos_entre_barrenos_mm(vista, hoja, eje)
+        if _coincide(medido, pasos, tol=max(_TOL_MM, 0.05)):
+            return True, f"PASO entre barrenos {medido}"
+        preview = ", ".join(f"{e:.3f}" for e in esperados[:5])
+        return True, f"valor {medido} desfazado vs IL [{preview}]"
 
     pasos = _pasos_entre_barrenos_mm(vista, hoja, eje)
-    if _coincide(medido, pasos, tol=max(_TOL_MM, 0.05)):
-        return True, f"PASO entre barrenos {medido} (esperado origen→centro)"
-    preview = ", ".join(f"{e:.3f}" for e in esperados[:5])
-    return True, f"valor {medido} desfazado vs niveles [{preview}]"
+    err_esp = min(abs(medido - e) for e in esperados)
+    if pasos:
+        err_paso = min(abs(medido - p) for p in pasos)
+        if err_paso + 1e-9 < err_esp and err_paso <= _TOL_MM:
+            return True, f"parece PASO entre barrenos ({medido})"
+    # Decimales: exigir al menos 3 si hay punto (no fallar por tener 6)
+    if "." in str(texto):
+        dec = str(texto).split(".", 1)[1]
+        dec = re.split(r"\D", dec)[0]
+        if len(dec) < 6:
+            return True, f"pocos decimales (se exigen 6): {texto}"
+    return False, "ok"
 
 
 def _reparar_hoja_xy(hoja, vista, inv_app, tg, eje: str) -> bool:
+    _forzar_mm_flat()
     from barrenos_xy_despliegue import (
         _centros_barrenos,
         _dibujar_cota_centro_sketch,
@@ -294,12 +455,11 @@ def _reparar_hoja_xy(hoja, vista, inv_app, tg, eje: str) -> bool:
 
     sil = _silueta_placa_vista(vista)
     origen = _origen_il_pieza(vista)
-    if origen is not None:
-        ox, oy = origen
-    elif sil:
-        ox, _mx, oy, _my, _ = sil
-    else:
+    from diametro import _origen_flota_en_vacio
+
+    if origen is None or _origen_flota_en_vacio(vista, origen[0], origen[1]):
         return False
+    ox, oy = origen
     barrenos = _centros_barrenos(vista, tg)
     if not barrenos:
         return False
@@ -315,7 +475,7 @@ def _reparar_hoja_xy(hoja, vista, inv_app, tg, eje: str) -> bool:
         except Exception:
             continue
         d_cm = (cx - ox) if eje == "X" else (cy - oy)
-        if d_cm < 0.05:
+        if abs(d_cm) < 0.05:
             continue
         mm = _cm_hoja_a_mm(d_cm, vista)
         score = abs(mm - medido) if medido is not None else mm
@@ -408,6 +568,8 @@ def _reparar_hoja_xy(hoja, vista, inv_app, tg, eje: str) -> bool:
 
 def _hoja_hole_falla(hoja, vista) -> tuple[bool, str]:
     texto = _leer_texto_cota_hoja(hoja)
+    if _texto_en_pulgadas(texto):
+        return True, f"Ø en IN (debe mm): {texto!r}"
     medido = _parse_mm(texto)
     if medido is None:
         return True, "sin texto Ø"
@@ -469,6 +631,8 @@ def _hoja_thk_falla(hoja, vista) -> tuple[bool, str]:
         return True, "THK DESFAZADO: no es canto flat (parece cara/escuadra)"
 
     texto = _leer_texto_cota_hoja(hoja)
+    if _texto_en_pulgadas(texto):
+        return True, f"THK en IN (debe mm): {texto!r}"
     medido = _parse_mm(texto)
     thk_cm = _espesor_chapa_desde_vista(vista)
     if thk_cm and thk_cm > 1e-9:
@@ -691,11 +855,13 @@ def auditar_y_reparar_plano(inv_app, plano, max_pasadas: int = _MAX_PASADAS):
     -------
     (ok_global, nombres_reparados)
     """
-    os.environ.setdefault("SOLO_FLAT_CORTE", "1")
+    _forzar_mm_flat()
+    print(f"  Unidades de cota: {get_unidad_cota()} (flat GIGA = mm)")
     tg = inv_app.TransientGeometry
     reparadas: list[str] = []
 
     for pasada in range(1, max_pasadas + 1):
+        _forzar_mm_flat()
         print(f"\n[AUDIT COM] pasada {pasada}/{max_pasadas} — XY + HOLE + THK")
         pend_xy = []
         pend_thk = []
@@ -711,6 +877,13 @@ def auditar_y_reparar_plano(inv_app, plano, max_pasadas: int = _MAX_PASADAS):
                 continue
             nombre = str(hoja.Name)
             up = nombre.upper()
+            if up.startswith("COPIA DE"):
+                try:
+                    hoja.Delete()
+                    print(f"  DEL  basura {nombre.rsplit(':', 1)[0]}")
+                except Exception:
+                    pass
+                continue
             if int(getattr(hoja.DrawingViews, "Count", 0) or 0) < 1:
                 continue
             # Solo flat DESPLIEGUE (nunca hojas dobladas residuales)
@@ -719,10 +892,11 @@ def auditar_y_reparar_plano(inv_app, plano, max_pasadas: int = _MAX_PASADAS):
                 # si no, igual auditar si el token está.
                 if "DIAMETRO_H" not in up:
                     continue
+            _activar_hoja(hoja)
             vista = hoja.DrawingViews.Item(1)
 
-            if "XCENTRO" in up or "YCENTRO" in up:
-                eje = "X" if "XCENTRO" in up else "Y"
+            if "XCENTRO" in up or "YCENTRO" in up or "XMIN" in up or "YMIN" in up:
+                eje = "X" if ("XCENTRO" in up or "XMIN" in up) else "Y"
                 falla, motivo = _hoja_xy_falla(hoja, vista, eje)
                 if falla:
                     print(f"  FAIL XY  {nombre.rsplit(':', 1)[0]}: {motivo}")
@@ -796,8 +970,8 @@ def auditar_y_reparar_plano(inv_app, plano, max_pasadas: int = _MAX_PASADAS):
             vista = hoja.DrawingViews.Item(1)
             falla = False
             motivo = ""
-            if "XCENTRO" in up or "YCENTRO" in up:
-                eje = "X" if "XCENTRO" in up else "Y"
+            if "XCENTRO" in up or "YCENTRO" in up or "XMIN" in up or "YMIN" in up:
+                eje = "X" if ("XCENTRO" in up or "XMIN" in up) else "Y"
                 falla, motivo = _hoja_xy_falla(hoja, vista, eje)
             elif _es_hoja_thk(up):
                 falla, motivo = _hoja_thk_falla(hoja, vista)

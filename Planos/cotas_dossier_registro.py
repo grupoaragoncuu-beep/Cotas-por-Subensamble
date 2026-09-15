@@ -634,10 +634,27 @@ _PROCESOS = (
     "Plasma Doblado",
     "Estañado",
     "Estanado",
+    "Estañado Busbar",
+    "Estanado Busbar",
     "SIN CLASIFICACION",
 )
 
-# Anidados bajo Corte/ (Abigail BOARD): clasificacion = "Corte/Corte" etc.
+# Rutas lógicas nuevas (más específicas primero) + legacy Corte/*.
+_CLASIF_RUTAS = (
+    "Corte/Plasma y Laser/Corte metal",
+    "Corte/Plasma y Laser/Corte Busbar",
+    "Corte/Maquinado/Maquinados metal",
+    "Corte/Maquinado/Corte Busbar",
+    "Doblado/Metal",
+    "Doblado/Busbar",
+    "Estañado Busbar",
+    # Legacy
+    "Corte/Corte",
+    "Corte/Doblado",
+    "Corte/Estañado",
+)
+
+# Anidados legacy bajo Corte/ (migración / compat).
 _CORTE_ANIDADOS = {
     "corte": "Corte",
     "doblado": "Doblado",
@@ -666,32 +683,56 @@ def clasificar_type_y_spoteos(
 
 def proceso_desde_ruta(ruta: str) -> str:
     """
-    Extrae clasificación desde JPGS/<proceso>/[anidado]/...
+    Extrae clasificación desde JPGS/<proceso>/[anidados]/...
 
-    Ejemplos:
-      .../JPGS/Almacén/... → Almacén
-      .../JPGS/Corte/Doblado/<pieza>/... → Corte/Doblado
-      .../JPGS/Corte/Estañado/... → Corte/Estañado
-      .../JPGS/Corte/Corte/<pieza>/... → Corte/Corte
+    Ejemplos (árbol acordado):
+      .../JPGS/Corte/Plasma y Laser/Corte metal/<pieza>/...
+        → Corte/Plasma y Laser/Corte metal
+      .../JPGS/Corte/Maquinado/Corte Busbar/<pieza>/...
+        → Corte/Maquinado/Corte Busbar
+      .../JPGS/Doblado/Metal/<pieza>/... → Doblado/Metal
+      .../JPGS/Estañado Busbar/... → Estañado Busbar
+    Legacy: Corte/Corte, Corte/Doblado, Corte/Estañado.
     """
     try:
         parts = [p for p in os.path.normpath(ruta).replace("/", "\\").split("\\") if p]
         low = [p.casefold() for p in parts]
-        canon = {}
-        for proc in _PROCESOS:
-            key = proc.casefold()
-            # Unificar Almacen/Almacén → Almacén
-            if key in ("almacen", "almacén"):
-                canon[key] = "Almacén"
-            elif key in ("estanado", "estañado"):
-                canon[key] = "Estañado"
-            else:
-                canon[key] = proc
 
         def _es_archivo(cand: str) -> bool:
             return "." in cand and cand.lower().endswith(
                 (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff")
             )
+
+        # Match longest known classification path anywhere in parts.
+        for clasif in _CLASIF_RUTAS:
+            segs = clasif.split("/")
+            n = len(segs)
+            for i in range(len(parts) - n + 1):
+                if all(
+                    parts[i + j].casefold() == segs[j].casefold()
+                    for j in range(n)
+                ):
+                    # Canonical accents
+                    if clasif.casefold() in (
+                        "estañado busbar",
+                        "estanado busbar",
+                    ):
+                        return "Estañado Busbar"
+                    if clasif.casefold() == "corte/estañado":
+                        return "Corte/Estañado"
+                    return clasif
+
+        canon = {}
+        for proc in _PROCESOS:
+            key = proc.casefold()
+            if key in ("almacen", "almacén"):
+                canon[key] = "Almacén"
+            elif key in ("estanado", "estañado"):
+                canon[key] = "Estañado"
+            elif key in ("estanado busbar", "estañado busbar"):
+                canon[key] = "Estañado Busbar"
+            else:
+                canon[key] = proc
 
         if "jpgs" in low:
             i = low.index("jpgs")
@@ -703,19 +744,62 @@ def proceso_desde_ruta(ruta: str) -> str:
                 if hit == "Corte" and i + 2 < len(parts):
                     nest = parts[i + 2]
                     if not _es_archivo(nest):
+                        # Plasma y Laser / Maquinado (árbol nuevo)
+                        if nest.casefold() == "plasma y laser" and i + 3 < len(
+                            parts
+                        ):
+                            leaf = parts[i + 3]
+                            if leaf.casefold() in (
+                                "corte metal",
+                                "corte busbar",
+                            ):
+                                return f"Corte/Plasma y Laser/{leaf}"
+                        if nest.casefold() == "maquinado" and i + 3 < len(
+                            parts
+                        ):
+                            leaf = parts[i + 3]
+                            if leaf.casefold() in (
+                                "maquinados metal",
+                                "corte busbar",
+                            ):
+                                return f"Corte/Maquinado/{leaf}"
                         nest_hit = _CORTE_ANIDADOS.get(nest.casefold())
                         if nest_hit:
                             return f"Corte/{nest_hit}"
+                if hit == "Doblado" and i + 2 < len(parts):
+                    nest = parts[i + 2]
+                    if nest.casefold() in ("metal", "busbar") and not _es_archivo(
+                        nest
+                    ):
+                        return f"Doblado/{nest}"
                 if hit:
                     return hit
                 return ""
-        # Fallback: buscar Corte/<anidado> en cualquier parte de la ruta.
+        # Fallback: primer proceso conocido en la ruta.
         for idx, part in enumerate(parts):
-            if part.casefold() == "corte" and idx + 1 < len(parts):
-                nest_hit = _CORTE_ANIDADOS.get(parts[idx + 1].casefold())
-                if nest_hit and not _es_archivo(parts[idx + 1]):
-                    return f"Corte/{nest_hit}"
             hit = canon.get(part.casefold())
+            if hit == "Corte" and idx + 1 < len(parts):
+                nest = parts[idx + 1]
+                if nest.casefold() == "plasma y laser" and idx + 2 < len(parts):
+                    leaf = parts[idx + 2]
+                    if leaf.casefold() in ("corte metal", "corte busbar"):
+                        return f"Corte/Plasma y Laser/{leaf}"
+                if nest.casefold() == "maquinado" and idx + 2 < len(parts):
+                    leaf = parts[idx + 2]
+                    if leaf.casefold() in (
+                        "maquinados metal",
+                        "corte busbar",
+                    ):
+                        return f"Corte/Maquinado/{leaf}"
+                nest_hit = _CORTE_ANIDADOS.get(nest.casefold())
+                if nest_hit and not _es_archivo(nest):
+                    return f"Corte/{nest_hit}"
+            if hit == "Doblado" and idx + 1 < len(parts):
+                nest = parts[idx + 1]
+                if nest.casefold() in ("metal", "busbar") and not _es_archivo(
+                    nest
+                ):
+                    return f"Doblado/{nest}"
             if hit and hit != "Corte":
                 return hit
             if hit == "Corte":
@@ -1243,6 +1327,21 @@ def _smoke_self() -> int:
     assert clasificar_type_y_spoteos("a__LENGTH_1.jpg") == ("TYP", 1)
     assert clasificar_type_y_spoteos("a__HOLE01_2.jpg", 3) == ("TYP", 3)
     assert clasificar_type_y_spoteos("a__LENGTH_SIN_COTA_1.jpg") == ("TYP", 1)
+    assert (
+        proceso_desde_ruta(
+            r"X:\JPGS\Corte\Plasma y Laser\Corte metal\P\a.jpg"
+        )
+        == "Corte/Plasma y Laser/Corte metal"
+    )
+    assert (
+        proceso_desde_ruta(r"X:\JPGS\Corte\Maquinado\Corte Busbar\P\a.jpg")
+        == "Corte/Maquinado/Corte Busbar"
+    )
+    assert proceso_desde_ruta(r"X:\JPGS\Doblado\Metal\P\a.jpg") == "Doblado/Metal"
+    assert (
+        proceso_desde_ruta(r"X:\JPGS\Estañado Busbar\a.jpg") == "Estañado Busbar"
+    )
+    # Legacy
     assert (
         proceso_desde_ruta(r"X:\JPGS\Corte\Doblado\P\a.jpg") == "Corte/Doblado"
     )

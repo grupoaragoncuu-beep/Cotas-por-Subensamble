@@ -1,3 +1,4 @@
+import os
 import re
 import math
 
@@ -8,8 +9,19 @@ COTA_NAVY_RGB = (0, 0, 128)
 COTA_BOLD = True
 # Unidad de visualización: tanques Abigail = in; GIGA/BOARD = mm.
 # Cambiar con ``set_unidad_cota("mm"|"in")`` al inicio del flujo.
+# SOLO_FLAT_CORTE=1 fuerza mm siempre (GIGA Board flat).
 COTA_UNIDAD = "in"
 _UNIDAD_ACTIVA = "in"
+
+
+def _env_fuerza_mm() -> bool:
+    return os.environ.get("SOLO_FLAT_CORTE", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "si",
+        "on",
+    )
 # Holgura mínima entre el texto/línea de cota y la silueta de la pieza.
 # Con fuente grande, 1.5 cm era insuficiente (Vantran PIPE FLANGE: texto
 # encima del filete / cota horizontal atravesando el cuerpo).
@@ -42,20 +54,19 @@ def set_unidad_cota(unidad="in"):
 
 
 def get_unidad_cota():
+    # Flat Corte/Corte GIGA: NUNCA pulgadas, aunque alguien resetee a "in".
+    if _env_fuerza_mm():
+        return "mm"
     return str(_UNIDAD_ACTIVA or COTA_UNIDAD or "in")
 
 
 def _precision_dimension(dimension):
-    """Precision Inventor: piso 6 (sin perder digitos en GIGA)."""
-    try:
-        p = max(0, int(dimension.Precision))
-    except Exception:
-        p = 6
-    return max(6, p)
+    """Precision de dibujo: 6 decimales exactos."""
+    return _precision_default()
 
 
 def _precision_default():
-    """6 decimales exactos (GIGA: sin redondeo corto)."""
+    """6 decimales exactos (sin recortar)."""
     return 6
 
 
@@ -86,10 +97,10 @@ def texto_cota_limpio(valor, hoja=None, precision=None):
     """
     Convierte un valor numerico (cm de Inventor) a texto de cota sin unidad.
 
-    Exacto desde DB Inventor (cm), SIN redondeo intermedio:
+    Exacto desde DB Inventor (cm):
       mm = cm * 10
       in = cm / 2.54
-    Minimo 6 decimales (GIGA / vernier).
+    6 decimales (más exacto; no truncar a 3).
     """
     try:
         valor = abs(float(valor))
@@ -235,12 +246,12 @@ def aplicar_estilo_cota(dimension, inv_app=None, hoja=None, solo_color=False):
 
     _limpiar_prefijos_cota(dimension)
 
-    # Forzar precision Inventor ≥6
+    # Forzar precision Inventor = 6
     try:
-        dimension.Precision = max(6, int(getattr(dimension, "Precision", 0) or 0))
+        dimension.Precision = 6
     except Exception:
         try:
-            dimension.Precision = 6
+            dimension.Precision = _precision_default()
         except Exception:
             pass
 

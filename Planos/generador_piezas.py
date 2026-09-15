@@ -269,10 +269,13 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
 
         # BOARD: acota TODAS las piezas únicas. Cobre (ABB/GENE/RLG) = solo
         # doble captura SIN_COTA al exportar; no limita qué se procesa.
+        # Barrenos: cualquier chapa con huecos → DESPLIEGUE + X/Y/HOLE/THK
+        # (también en tanques vía creador_vistas._debe_crear_despliegue).
         if es_board and catalogo_filtro is None:
             print(
                 "  BOARD: alcance completo (todas las piezas únicas). "
-                "Cobre ABB/GENE/RLG → JPG + SIN_COTA."
+                "Barrenos en chapa → DESPLIEGUE X/Y/HOLE/THK. "
+                "Cobre ABB/GENE/RLG → JPG + SIN_COTA + ESTANIADO."
             )
 
         print(
@@ -297,8 +300,9 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
                 _cv_corte.configurar_piezas_corte(nombres_corte)
                 if nombres_corte:
                     print(
-                        f"  Corte anidado: {len(nombres_corte)} piezas → "
-                        "flat + Doblado (+ Estañado cobre)."
+                        f"  Corte iProp: {len(nombres_corte)} piezas → "
+                        "DESPLIEGUE forzado. "
+                        "Otras chapas con barrenos también van a flat."
                     )
             except Exception as exc_corte:
                 print(f"  AVISO configurar piezas Corte: {exc_corte}")

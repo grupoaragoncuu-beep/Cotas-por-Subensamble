@@ -238,8 +238,13 @@ def _convertir_nombre_tecnico_hoja(
     elif "_DIAMETRO_H" in base_up:
         pass  # barrenos de placa (DIAMETRO_H01, …)
 
-    elif "_XCENTRO" in base_up or "_YCENTRO" in base_up:
-        pass  # barrenos flat X/Y (+ TYP) desde esquina IL
+    elif (
+        "_XCENTRO" in base_up
+        or "_YCENTRO" in base_up
+        or "_XMIN" in base_up
+        or "_YMIN" in base_up
+    ):
+        pass  # barrenos/cortes flat X/Y (+ TYP) desde esquina IL
 
     elif "_DESPLIEGUE_LADO" in base:
         if base_up in hojas_lado_sin_thk_bases:
@@ -254,10 +259,27 @@ def _convertir_nombre_tecnico_hoja(
         base = base.replace("_DESPLIEGUE_FRENTE_2", "_DESPLIEGUE_DIAMETRO_INTERIOR")
 
     elif "_DESPLIEGUE_FRENTE_1" in base:
-        base = base.replace("_DESPLIEGUE_FRENTE_1", "_DESPLIEGUE_LARGO")
+        # Flat Corte/Corte: no convertir a LARGO (rompe re-acotar XY)
+        solo_flat = os.environ.get("SOLO_FLAT_CORTE", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "si",
+            "on",
+        )
+        if not solo_flat:
+            base = base.replace("_DESPLIEGUE_FRENTE_1", "_DESPLIEGUE_LARGO")
 
     elif "_DESPLIEGUE_FRENTE_2" in base:
-        base = base.replace("_DESPLIEGUE_FRENTE_2", "_DESPLIEGUE_ANCHO")
+        solo_flat = os.environ.get("SOLO_FLAT_CORTE", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "si",
+            "on",
+        )
+        if not solo_flat:
+            base = base.replace("_DESPLIEGUE_FRENTE_2", "_DESPLIEGUE_ANCHO")
 
     elif "_ESTANIADO" in base_up:
         pass  # captura SIN_COTA isométrica; no renombrar
@@ -385,6 +407,10 @@ _SUFIJOS_JPG_PIEZA_EXPORTADA = (
     "YCENTRO_TYP",
     "XCENTRO",
     "YCENTRO",
+    "XMIN_TYP",
+    "YMIN_TYP",
+    "XMIN",
+    "YMIN",
     r"HOLE\d{2}",
     "DIAMETRO_EXTERIOR",
     "DIAMETRO_INTERIOR",
@@ -1186,7 +1212,23 @@ def _hoja_exportable(hoja, nombre_hoja):
         minx, maxx, miny, maxy = bbox
         bw = maxx - minx
         bh = maxy - miny
-        if bw < 0.05 or bh < 0.05:
+        # Flat THK = canto aplanado muy fino (H≈0.03–0.04 cm a esc baja).
+        # No rechazar si hay ancho usable y es hoja _THK/_LADO.
+        solo_flat = False
+        try:
+            solo_flat = os.environ.get("SOLO_FLAT_CORTE", "").strip().lower() in (
+                "1",
+                "true",
+                "yes",
+                "si",
+                "on",
+            )
+        except Exception:
+            pass
+        min_bh = 0.012 if (
+            solo_flat and any(t in nombre_up for t in ("_THK", "_LADO"))
+        ) else 0.05
+        if bw < 0.05 or bh < min_bh:
             return False, "bbox 2D degenerado"
     except Exception:
         return False, "bbox inválido"
@@ -1527,7 +1569,9 @@ def exportar_hojas_jpg(
                 )
                 omitidas += 1
                 continue
-            es_xy = ("XCENTRO" in nu) or ("YCENTRO" in nu)
+            es_xy = any(
+                t in nu for t in ("XCENTRO", "YCENTRO", "XMIN", "YMIN")
+            )
             es_hole = ("DIAMETRO_H" in nu) or ("_HOLE" in nu)
             es_thk = (
                 "_THK" in nu

@@ -34,10 +34,18 @@ _TIPOS_HOJA_A_EXPORT = (
     ("DESPLIEGUE_YCENTRO_TYP", "YCENTRO_TYP"),
     ("DESPLIEGUE_XCENTRO", "XCENTRO"),
     ("DESPLIEGUE_YCENTRO", "YCENTRO"),
+    ("DESPLIEGUE_XMIN_TYP", "XMIN_TYP"),
+    ("DESPLIEGUE_YMIN_TYP", "YMIN_TYP"),
+    ("DESPLIEGUE_XMIN", "XMIN"),
+    ("DESPLIEGUE_YMIN", "YMIN"),
     ("XCENTRO_TYP", "XCENTRO_TYP"),
     ("YCENTRO_TYP", "YCENTRO_TYP"),
     ("XCENTRO", "XCENTRO"),
     ("YCENTRO", "YCENTRO"),
+    ("XMIN_TYP", "XMIN_TYP"),
+    ("YMIN_TYP", "YMIN_TYP"),
+    ("XMIN", "XMIN"),
+    ("YMIN", "YMIN"),
     ("DESPLIEGUE_ANCHO", "WIDTH"),
     ("DESPLIEGUE_LARGO", "LENGTH"),
     ("DESPLIEGUE_THK", "THK"),
@@ -73,6 +81,10 @@ _TIPOS_PIEZA_CORE = (
     "YCENTRO_TYP",
     "XCENTRO",
     "YCENTRO",
+    "XMIN_TYP",
+    "YMIN_TYP",
+    "XMIN",
+    "YMIN",
     "DIAMETRO_EXTERIOR",
     "DIAMETRO_INTERIOR",
     "LARGO_PATA",
@@ -156,7 +168,7 @@ def formatear_valor_en_nombre(valor) -> str:
     """
     Valor de cota → sufijo de archivo.
 
-    Exacto a 6 decimales (sin recortar): 10.998200 | 38.100000
+    Exacto a 6 decimales: 10.998200 | 38.100000 | 25.400000
     """
     if valor is None:
         return "0.000000"

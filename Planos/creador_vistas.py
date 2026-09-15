@@ -14,6 +14,8 @@ kDefaultViewOrientation = 10753
 kHiddenLineRemovedDrawingViewStyle = 32258
 
 # Piezas con iProperty Corte: segunda pasada flat + Estañado (cobre).
+# DESPLIEGUE (XCENTRO/YCENTRO/HOLE/THK) también se crea para cualquier
+# chapa con barrenos/cortes interiores, no solo Corte/GIGA.
 _PIEZAS_CORTE_KEYS = set()
 
 
@@ -60,6 +62,41 @@ def _es_pieza_cobre_nombre(part_name):
         return bool(es_pieza_cobre(part_name))
     except Exception:
         return False
+
+
+def _sm_tiene_barrenos_o_cortes(part_doc) -> bool:
+    """
+    True si el sólido tiene loops interiores (barrenos / recortes).
+
+    Sirve para tanques y boards: si hay chapa con huecos, se crean
+    vistas DESPLIEGUE y corren XCENTRO/YCENTRO/HOLE/THK.
+    No Unfold (rápido sobre modelo doblado).
+    """
+    try:
+        cdef = part_doc.ComponentDefinition
+        for i in range(1, int(cdef.SurfaceBodies.Count) + 1):
+            body = cdef.SurfaceBodies.Item(i)
+            for j in range(1, int(body.Faces.Count) + 1):
+                face = body.Faces.Item(j)
+                try:
+                    if int(face.EdgeLoops.Count) > 1:
+                        return True
+                except Exception:
+                    continue
+    except Exception:
+        return False
+    return False
+
+
+def _debe_crear_despliegue(part_name, part_doc, is_sm) -> bool:
+    """Corte iProp O chapa con barrenos/cortes → flat DESPLIEGUE."""
+    if not is_sm:
+        return False
+    if _es_pieza_corte(part_name):
+        return True
+    if _sm_tiene_barrenos_o_cortes(part_doc):
+        return True
+    return False
 
 def _log(msg):
     if getattr(sys, 'frozen', False):
@@ -615,9 +652,15 @@ def crear_vistas_lote(
                                     f"falló ({exc_r})"
                                 )
 
-            # --- Corte: segunda pasada flat (mismas vistas/medidas) ---
+            # --- Flat DESPLIEGUE: Corte iProp O chapa con barrenos/cortes ---
+            # (cualquier producto: tanque, board, etc.). Cobre/Estañado aparte.
             es_corte = _es_pieza_corte(part_name)
-            if es_corte and is_sm:
+            if _debe_crear_despliegue(part_name, part_doc, is_sm):
+                if not es_corte:
+                    _log(
+                        f"  {part_name}: chapa con barrenos/cortes → "
+                        f"DESPLIEGUE (X/Y + HOLE + THK)"
+                    )
                 try:
                     _crear_vistas_despliegue_corte(
                         machote_doc,
@@ -636,8 +679,8 @@ def crear_vistas_lote(
                 finally:
                     _asegurar_modelo_doblado(part_doc, is_sm)
 
-            # --- Corte cobre: hoja ESTANIADO isométrica (cara mayor) ---
-            if es_corte and _es_pieza_cobre_nombre(part_name):
+            # --- Cobre (GIGA): hoja ESTANIADO isométrica (cara mayor) ---
+            if _es_pieza_cobre_nombre(part_name):
                 try:
                     _crear_vista_estanado_iso(
                         machote_doc,
@@ -726,7 +769,7 @@ def preparar_geometria(part_doc, is_sm, to):
 
 def preparar_geometria_flat(part_doc, is_sm, to):
     """
-    Prepara caras del Flat Pattern (Corte/Corte). Devuelve None si no aplica.
+    Prepara caras del Flat Pattern (DESPLIEGUE). Devuelve None si no aplica.
     """
     if not is_sm:
         return None

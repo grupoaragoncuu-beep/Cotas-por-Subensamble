@@ -210,10 +210,8 @@ def _silueta_vista(vista, solo_lineas=False):
 
 def _vertices_contorno_placa(vista):
     """
-    Extremos de curvas de contorno (líneas), sin círculos/arcos de barreno.
-
-    Sirve para anclar el origen IL a un vértice REAL de la pieza (p. ej. con
-    jog/desfase el AABB (minx,miny) queda en el vacío).
+    SOLO extremos reales (Start/End) de curvas de línea — NUNCA esquinas
+    de RangeBox (en diagonales del jog inventan el rincón AABB vacío).
     """
     pts = []
     try:
@@ -229,39 +227,23 @@ def _vertices_contorno_placa(vista):
                 ct = None
             if ct in _TIPOS_CIRCULO or ct in _TIPOS_ARCO:
                 continue
-            # Preferir extremos reales; si no, esquinas del RangeBox.
             try:
                 sp = curva.StartPoint
                 ep = curva.EndPoint
-                pts.append((float(sp.X), float(sp.Y)))
-                pts.append((float(ep.X), float(ep.Y)))
-                continue
             except Exception:
-                pass
+                continue
             try:
-                caja = curva.Evaluator2D.RangeBox
-                x0, x1 = float(caja.MinPoint.X), float(caja.MaxPoint.X)
-                y0, y1 = float(caja.MinPoint.Y), float(caja.MaxPoint.Y)
-                # Solo extremos de segmentos cortos/medios (evitar diagonal AABB)
-                dx, dy = abs(x1 - x0), abs(y1 - y0)
-                if dx < 1e-9 and dy < 1e-9:
-                    continue
-                if dx < 1e-6:  # vertical
-                    pts.append((x0, y0))
-                    pts.append((x0, y1))
-                elif dy < 1e-6:  # horizontal
-                    pts.append((x0, y0))
-                    pts.append((x1, y0))
-                else:
-                    pts.append((x0, y0))
-                    pts.append((x1, y0))
-                    pts.append((x0, y1))
-                    pts.append((x1, y1))
+                x0, y0 = float(sp.X), float(sp.Y)
+                x1, y1 = float(ep.X), float(ep.Y)
             except Exception:
                 continue
+            # Descartar segmentos degenerados
+            if abs(x1 - x0) < 1e-9 and abs(y1 - y0) < 1e-9:
+                continue
+            pts.append((x0, y0))
+            pts.append((x1, y1))
         except Exception:
             continue
-    # Dedup
     out = []
     vistos = set()
     for x, y in pts:
@@ -275,28 +257,71 @@ def _vertices_contorno_placa(vista):
 
 def _origen_il_pieza(vista):
     """
-    Esquina inferior-izquierda SOBRE la geometría (toca el material).
+    Esquina inferior-izquierda SOBRE el material (toca la pieza).
 
-    En placas con jog/S/offset, el rincón AABB (minx,miny) suele flotar en
-    el vacío a la izquierda del tramo inferior. Aquí: banda inferior de
-    vértices de contorno → el de menor X (empate: menor Y).
+    1) Vértices reales (Start/End) del contorno.
+    2) Banda inferior estrecha (≤8% del alto o 3 mm hoja).
+    3) En esa banda: menor X (izquierda del tramo inferior — no el AABB
+       global que en jog/S flota a la izquierda del pad de abajo).
+    4) Validar que el punto está cerca de un extremo real; si el AABB
+       (minx,miny) no toca geometría, NUNCA usarlo.
     """
     pts = _vertices_contorno_placa(vista)
     sil = _silueta_vista(vista, solo_lineas=True) or _silueta_vista(vista)
     if not pts:
-        if not sil:
-            return None
-        return float(sil[0]), float(sil[2])
+        # Sin extremos reales no inventar origen AABB (suele flotar).
+        return None
     ys = [p[1] for p in pts]
     xs = [p[0] for p in pts]
     miny = min(ys)
-    span = max(max(xs) - min(xs), max(ys) - min(ys), 1e-6)
-    banda_tol = max(0.05, 0.02 * span)
+    maxy = max(ys)
+    minx = min(xs)
+    maxx = max(xs)
+    span_y = max(maxy - miny, 1e-6)
+    span = max(maxx - minx, span_y, 1e-6)
+    # Banda inferior ESTRECHA: solo el borde de abajo de la pieza
+    banda_tol = max(0.03, min(0.08 * span_y, 0.12))
     banda = [p for p in pts if p[1] <= miny + banda_tol]
+    if len(banda) < 2:
+        banda_tol = max(banda_tol, 0.12 * span_y)
+        banda = [p for p in pts if p[1] <= miny + banda_tol]
     if not banda:
-        banda = pts
+        banda = [p for p in pts if p[1] <= miny + 0.20 * span_y] or pts
     ox, oy = min(banda, key=lambda p: (p[0], p[1]))
+    # Si por ruido quedó igual al AABB vacío, empujar al punto de banda
+    # más cercano a un extremo con soporte vertical (mismo X ± tol).
+    if sil is not None:
+        aabb_ox, aabb_oy = float(sil[0]), float(sil[2])
+        # ¿AABB toca algún vértice real?
+        aabb_ok = any(
+            abs(px - aabb_ox) <= 0.06 and abs(py - aabb_oy) <= 0.06
+            for px, py in pts
+        )
+        if not aabb_ok and (
+            abs(ox - aabb_ox) < 0.08 and abs(oy - aabb_oy) < 0.08
+        ):
+            # Elegir de nuevo ignorando cercanía al AABB fantasma
+            cand = [
+                p
+                for p in banda
+                if abs(p[0] - aabb_ox) > 0.08 or abs(p[1] - aabb_oy) > 0.08
+            ]
+            if cand:
+                ox, oy = min(cand, key=lambda p: (p[0], p[1]))
     return float(ox), float(oy)
+
+
+def _origen_flota_en_vacio(vista, ox, oy) -> bool:
+    """True si (ox,oy) NO está sobre un vértice/borde real de la placa."""
+    pts = _vertices_contorno_placa(vista)
+    if not pts:
+        return True
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    span = max(max(xs) - min(xs), max(ys) - min(ys), 1e-6)
+    tol = max(0.06, 0.015 * span)
+    dmin = min(((ox - px) ** 2 + (oy - py) ** 2) ** 0.5 for px, py in pts)
+    return dmin > tol
 
 
 def _silueta_placa_vista(vista):
@@ -313,17 +338,8 @@ def _silueta_placa_vista(vista):
 
 
 def _punto_cerca_contorno(vista, x, y, tol=None) -> bool:
-    """True si (x,y) está cerca de un vértice/contorno real de la placa."""
-    pts = _vertices_contorno_placa(vista)
-    if not pts:
-        return True
-    xs = [p[0] for p in pts]
-    ys = [p[1] for p in pts]
-    span = max(max(xs) - min(xs), max(ys) - min(ys), 1e-6)
-    if tol is None:
-        tol = max(0.08, 0.02 * span)
-    dmin = min(((x - px) ** 2 + (y - py) ** 2) ** 0.5 for px, py in pts)
-    return dmin <= tol
+    """True si (x,y) está cerca de un vértice real de la placa."""
+    return not _origen_flota_en_vacio(vista, float(x), float(y))
 
 
 def _arco_casi_cerrado(curva, tam_caja):
@@ -357,11 +373,32 @@ def _arco_casi_cerrado(curva, tam_caja):
 
 def _min_tam_hoja(vista, piso=0.05):
     """Umbral mínimo en cm de hoja (~3 mm de modelo × escala)."""
+    # Flat GIGA: barrenos chicos (Ø~1–2 mm) deben pasar
+    solo_flat = False
+    try:
+        import os
+
+        solo_flat = os.environ.get("SOLO_FLAT_CORTE", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "si",
+            "on",
+        )
+    except Exception:
+        pass
+    if solo_flat:
+        # Ø~1.27 mm (0.05") a Scale=0.1 → ~0.0127 cm en hoja
+        piso = min(float(piso), 0.004)
     try:
         sc = abs(float(vista.Scale))
         if sc > 1e-9:
             # A escala baja (0.1) un slot Ø~0.5" mide ~0.05 cm: no subir el piso.
-            return max(min(float(piso), 0.04), 0.25 * sc)
+            base = max(min(float(piso), 0.04), 0.25 * sc)
+            if solo_flat:
+                # Piso en hoja ≈ 0.8 mm modelo × escala (cubre Ø1.27 mm @ esc≥0.1)
+                return max(0.003, min(float(piso), 0.8 * sc, 0.012))
+            return base
     except Exception:
         pass
     return float(piso)
@@ -376,12 +413,46 @@ def _centro_interior_silueta(cx, cy, minx, maxx, miny, maxy, margen_frac=0.10):
     return (minx + m) <= cx <= (maxx - m) and (miny + m) <= cy <= (maxy - m)
 
 
+def _es_barreno_circular_interior(cx, cy, radio_hoja, sil) -> bool:
+    """
+    True solo si el círculo es un corte REAL dentro de la placa.
+
+    Rechaza arcos/círculos de muescas de borde (notches): su centro cae
+    cerca del contorno y el radio “sale” de la silueta. Un barreno real
+    queda contenido con holgura en ambas direcciones del AABB.
+    """
+    if not sil:
+        return False
+    try:
+        minx, maxx, miny, maxy, span = sil
+        r = abs(float(radio_hoja))
+        cx = float(cx)
+        cy = float(cy)
+    except Exception:
+        return False
+    if span <= 1e-9 or r <= 0:
+        return False
+    dx = maxx - minx
+    dy = maxy - miny
+    if dx <= 1e-9 or dy <= 1e-9:
+        return False
+    # Holgura: al menos el radio + 8% del lado menor (o 0.02 cm hoja).
+    # Así un notch lateral (centro pegado al canto) nunca pasa.
+    holgura = max(r * 1.15, 0.08 * min(dx, dy), 0.02)
+    if (cx - r) < (minx + holgura) or (cx + r) > (maxx - holgura):
+        return False
+    if (cy - r) < (miny + holgura) or (cy + r) > (maxy - holgura):
+        return False
+    return True
+
+
 def _anillos_en_vista(vista, min_tam=None, max_frac=0.55):
     """
     Círculos/elipses cerradas (barrenos redondos).
 
     Incluye CurveType 5122 (circle) y 5124 (ellipse full) — típicos en HLR GIGA.
-    Excluye radios de doblez (arcos abiertos / centros en esquina).
+    Excluye radios de doblez (arcos abiertos / centros en esquina) y muescas
+    de borde cuyo arco parece círculo pero no es un corte interior.
     """
     anillos = []
     sil = _silueta_vista(vista)
@@ -425,9 +496,8 @@ def _anillos_en_vista(vista, min_tam=None, max_frac=0.55):
                 pass  # elipse/círculo full: OK
             elif ct is None and not _arco_casi_cerrado(curva, tam):
                 continue
-            if not _centro_interior_silueta(
-                cx, cy, minx, maxx, miny, maxy, margen_frac=0.03
-            ):
+            # Solo barrenos/cortes CIRCULARES interiores (no muescas de canto).
+            if not _es_barreno_circular_interior(cx, cy, tam * 0.5, sil):
                 continue
             anillos.append(
                 {
@@ -485,9 +555,7 @@ def _arcos_extremos_ranura(vista, min_tam=None, max_frac=0.45):
             diam = major
             cx = (float(caja.MaxPoint.X) + float(caja.MinPoint.X)) / 2.0
             cy = (float(caja.MaxPoint.Y) + float(caja.MinPoint.Y)) / 2.0
-            if not _centro_interior_silueta(
-                cx, cy, minx, maxx, miny, maxy, margen_frac=0.02
-            ):
+            if not _es_barreno_circular_interior(cx, cy, diam * 0.5, sil):
                 continue
             if _arco_casi_cerrado(curva, major):
                 continue
@@ -578,7 +646,45 @@ def _ranuras_en_vista(vista, min_tam=None, max_frac=0.45):
 
 
 def _barrenos_en_vista(vista):
-    """Círculos + óvalos/ranuras unificados para HOLE##."""
+    """
+    Círculos + óvalos/ranuras unificados para HOLE##.
+
+    En SOLO_FLAT: preferir círculos del FlatPattern en bucles INTERIORES
+    (cortes reales). El HLR solo se usa si el modelo no aporta, y nunca
+    para rescatar arcos de muescas de borde.
+    """
+    import os
+
+    solo_flat = os.environ.get("SOLO_FLAT_CORTE", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "si",
+        "on",
+    )
+    if solo_flat:
+        try:
+            from inventor_com import conectar_inventor
+            from barrenos_xy_despliegue import _centros_barrenos_modelo
+
+            inv = conectar_inventor()
+            tg = inv.TransientGeometry
+            modelo = _centros_barrenos_modelo(vista, tg)
+            if modelo:
+                # Solo circulares/óvalos de loops interiores
+                return [
+                    {
+                        "cx": float(m["cx"]),
+                        "cy": float(m["cy"]),
+                        "tamaño": float(m.get("tamaño") or 0.2),
+                        "tipo": str(m.get("tipo") or "circulo"),
+                        "fuente": "modelo",
+                    }
+                    for m in modelo
+                    if str(m.get("tipo") or "") in ("circulo", "oval", "")
+                ]
+        except Exception:
+            pass
     return list(_anillos_en_vista(vista)) + list(_ranuras_en_vista(vista))
 
 

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Reinserta las 987 rutas (incluye mismo nombre en carpetas distintas)."""
+"""Reinserta rutas JPGS Board2 (excluye staging y Nueva carpeta)."""
 from __future__ import annotations
 
 import os
@@ -11,6 +11,12 @@ ROOT = (
     r"\9919-BOARD2_2\DOSSIER FILES\JPGS"
 )
 JOB = "9919-Board 2"
+_SKIP_TOP = {
+    "nueva carpeta",
+    "_staging_despliegue",
+    "_staging_estanado",
+    "_staging_estañado",
+}
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cotas_dossier_registro import (  # noqa: E402
@@ -30,7 +36,13 @@ def main() -> int:
         cli, prod = "GIGA", "ENCLOSURES NEMA 1"
 
     archivos = []
-    for dp, _, fs in os.walk(ROOT):
+    for dp, dns, fs in os.walk(ROOT):
+        rel = os.path.relpath(dp, ROOT)
+        top = rel.split(os.sep)[0].casefold() if rel != "." else ""
+        if top in _SKIP_TOP:
+            dns[:] = []
+            continue
+        dns[:] = [d for d in dns if d.casefold() not in _SKIP_TOP]
         for fn in fs:
             if fn.lower().endswith((".jpg", ".jpeg", ".png")):
                 archivos.append(os.path.join(dp, fn))
