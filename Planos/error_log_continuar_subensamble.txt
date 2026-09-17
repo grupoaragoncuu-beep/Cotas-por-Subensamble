@@ -1,0 +1,19 @@
+Continuar Subensamble @ 2026-09-17 00:38:59
+Esperando fin de Abigail (generador_piezas)...
+Abigail parece OK (648 JPG en PIEZAS); continúo.
+
+================================================================
+ INICIO: Acomodar PIEZAS post-Abigail
+================================================================
+ FIN: Acomodar PIEZAS post-Abigail | exit=1 | 0.0 min
+
+================================================================
+ INICIO: Subensamble (COTAS_POR_REFERENCIA) + fix SEGM2
+================================================================
+ FIN: Subensamble (COTAS_POR_REFERENCIA) + fix SEGM2 | exit=0 | 47.0 min
+
+================================================================
+ INICIO: Acomodar final
+================================================================
+ FIN: Acomodar final | exit=1 | 0.0 min
+RESUMEN exit codes: [1, 0, 1]

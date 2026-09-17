@@ -1,0 +1,697 @@
+{
+  "apply": true,
+  "cobre_unicos": 179,
+  "antes": {
+    "Doblado": 80,
+    "Corte": 98,
+    "SIN": 1
+  },
+  "despues": {
+    "Corte": 179
+  },
+  "corregidos": 81,
+  "saved": 81,
+  "residual_no_corte": [],
+  "cambios": [
+    {
+      "pieza": "GENE-HFM-10-102",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 10,
+      "app_ok": 10
+    },
+    {
+      "pieza": "GENE-VFM-20-101",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 8,
+      "app_ok": 8
+    },
+    {
+      "pieza": "GENE-VFM-20-102",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 8,
+      "app_ok": 8
+    },
+    {
+      "pieza": "GENE-BKT-101",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 32,
+      "app_ok": 32
+    },
+    {
+      "pieza": "GENE-DF-08-202",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 8,
+      "app_ok": 8
+    },
+    {
+      "pieza": "GENE-DF-10-201",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 4,
+      "app_ok": 4
+    },
+    {
+      "pieza": "GENE-OP-1010-211",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-OP-1020-308",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 2,
+      "app_ok": 2
+    },
+    {
+      "pieza": "GENE-SIHC-32-32-102",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 4,
+      "app_ok": 4
+    },
+    {
+      "pieza": "GENE-SIVC-32-32-118",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 4,
+      "app_ok": 4
+    },
+    {
+      "pieza": "GENE-BKT-304",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 8,
+      "app_ok": 8
+    },
+    {
+      "pieza": "GENE-BKT-306",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 8,
+      "app_ok": 8
+    },
+    {
+      "pieza": "GENE-SIVC-32-32-104",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 7,
+      "app_ok": 7
+    },
+    {
+      "pieza": "GENE-BKT-245",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 2,
+      "app_ok": 2
+    },
+    {
+      "pieza": "GENE-BKT-246",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-BKT-247",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 2,
+      "app_ok": 2
+    },
+    {
+      "pieza": "GENE-BKT-248",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-VS-20-151",
+      "prefijo": "GENE",
+      "de": null,
+      "a": "Corte",
+      "occs": 4,
+      "app_ok": 4
+    },
+    {
+      "pieza": "GENE-BKT-153",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 8,
+      "app_ok": 8
+    },
+    {
+      "pieza": "GENE-SIHC-40-40-162",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-BKS-10-001",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-SIHC-40-40-119",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-BKT-287",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 2,
+      "app_ok": 2
+    },
+    {
+      "pieza": "GENE-DF-10-162",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-DF-10-129",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-DF-10-128",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-DF-10-166",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-SIHC-40-40-163",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-SIHC-40-40-164",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-GS-1020-403",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-GS-0820-404",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 2,
+      "app_ok": 2
+    },
+    {
+      "pieza": "GENE-SIVC-32-32-114",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 2,
+      "app_ok": 2
+    },
+    {
+      "pieza": "GENE-BKT-198",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 2,
+      "app_ok": 2
+    },
+    {
+      "pieza": "GENE-BKT-199",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 2,
+      "app_ok": 2
+    },
+    {
+      "pieza": "GENE-BKT-295",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-BKT-294",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 2,
+      "app_ok": 2
+    },
+    {
+      "pieza": "GENE-BKT-297",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 2,
+      "app_ok": 2
+    },
+    {
+      "pieza": "GENE-BKT-299",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 2,
+      "app_ok": 2
+    },
+    {
+      "pieza": "GENE-OP-1010-311",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-BKT-262",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-SIVC-40-40-136",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-BKT-308",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-SIVC-40-40-112",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-BKT-261",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-BKT-239",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-BKT-240",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-SIVC-40-40-113",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 2,
+      "app_ok": 2
+    },
+    {
+      "pieza": "GENE-SIHC-40-40-126",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 2,
+      "app_ok": 2
+    },
+    {
+      "pieza": "GENE-SIHC-40-40-125",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-BKT-241",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 2,
+      "app_ok": 2
+    },
+    {
+      "pieza": "GENE-DF-20-201",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-DF-20-202",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-DF-10-RLG-2S-101",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-DF-10-RLG-2S-102",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-DF-10-RLG-2S-103",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-BKT-RLG-122",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 2,
+      "app_ok": 2
+    },
+    {
+      "pieza": "GENE-BKT-RLG-123",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 2,
+      "app_ok": 2
+    },
+    {
+      "pieza": "GENE-OP-1012-311",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-HFM-12-102",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 2,
+      "app_ok": 2
+    },
+    {
+      "pieza": "GENE-DF-1222-201",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 4,
+      "app_ok": 4
+    },
+    {
+      "pieza": "GENE-SIVC-32-32-102",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 4,
+      "app_ok": 4
+    },
+    {
+      "pieza": "GENE-SIHC-48-40-103",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 4,
+      "app_ok": 4
+    },
+    {
+      "pieza": "GENE-BKS-F-22-12-301",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 2,
+      "app_ok": 2
+    },
+    {
+      "pieza": "GENE-DF-12-260",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 2,
+      "app_ok": 2
+    },
+    {
+      "pieza": "GENE-DF-12-151",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 4,
+      "app_ok": 4
+    },
+    {
+      "pieza": "GENE-DF-12-153",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 2,
+      "app_ok": 2
+    },
+    {
+      "pieza": "GENE-SIVC-32-40-101",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 4,
+      "app_ok": 4
+    },
+    {
+      "pieza": "GENE-BKT-150",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 8,
+      "app_ok": 8
+    },
+    {
+      "pieza": "GENE-SIHC-48-40-112",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 2,
+      "app_ok": 2
+    },
+    {
+      "pieza": "GENE-BKT-149",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 4,
+      "app_ok": 4
+    },
+    {
+      "pieza": "GENE-SIHC-48-40-114",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 2,
+      "app_ok": 2
+    },
+    {
+      "pieza": "GENE-BKT-224",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 2,
+      "app_ok": 2
+    },
+    {
+      "pieza": "GENE-BKT-223",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 2,
+      "app_ok": 2
+    },
+    {
+      "pieza": "GENE-OP-1012-211",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-OP-10-114",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 3,
+      "app_ok": 3
+    },
+    {
+      "pieza": "GENE-DF-RLG-103",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-DF-10-RLG-1S-131",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    },
+    {
+      "pieza": "GENE-DF-RLG-104",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 8,
+      "app_ok": 8
+    },
+    {
+      "pieza": "GENE-DF-10-RLG-1S-140",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 8,
+      "app_ok": 8
+    },
+    {
+      "pieza": "GENE-DF-10-RLG-1S-120",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 2,
+      "app_ok": 2
+    },
+    {
+      "pieza": "GENE-DF-10-RLG-1S-111",
+      "prefijo": "GENE",
+      "de": "Doblado",
+      "a": "Corte",
+      "occs": 1,
+      "app_ok": 1
+    }
+  ],
+  "ok_ya_corte_sample": [
+    "GENE-OP-1020-115",
+    "GENE-OP-10-116",
+    "GENE-GS-0820-708",
+    "GENE-FCU-5-102",
+    "GENE-FCU-5-120",
+    "GENE-FCU-5-104",
+    "GENE-FCU-5-103",
+    "GENE-FCU-5-109",
+    "GENE-FCU-4-306",
+    "GENE-FCU-2.25-101",
+    "GENE-FCU-2-105",
+    "GENE-FCU-6-113",
+    "ABB-62-10-BCK-35",
+    "ABB-62-10-BCK-34",
+    "ABB-62-10-BCK-33",
+    "ABB-62-10-BCK-41",
+    "ABB-62-10-BCK-40",
+    "ABB-62-10-BCK-39",
+    "ABB-62-10-BCK-47",
+    "ABB-62-10-BCK-46",
+    "ABB-62-10-BCK-45",
+    "ABB-62-10-BCK-62",
+    "ABB-62-10-BCK-61",
+    "ABB-62-10-BCK-60",
+    "ABB-62-10-BCK-59",
+    "ABB-62-10-BCK-58",
+    "ABB-62-10-BCK-57",
+    "ABB-62-10-BCK-38",
+    "ABB-62-10-BCK-37",
+    "ABB-62-10-BCK-36"
+  ]
+}

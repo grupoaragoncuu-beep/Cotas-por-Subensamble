@@ -15,7 +15,12 @@ import time
 
 import win32com.client
 
-from cota_estilo import texto_cota_limpio, asegurar_unidad_cota
+from cota_estilo import (
+    texto_cota_limpio,
+    asegurar_unidad_cota,
+    set_typ_letras_habilitadas,
+    typ_letras_habilitadas,
+)
 from diametro import (
     _barrenos_en_vista,
     _marcar_barrenos_azules,
@@ -28,6 +33,24 @@ from inventor_com import conectar_inventor
 from nomenclatura_capturas import formatear_valor_en_nombre
 
 _EPS = 1e-6
+
+
+def _pieza_desde_hoja_despliegue(nombre_hoja: str) -> str:
+    """``PART_DESPLIEGUE_FRENTE_1`` → ``PART``."""
+    base = str(nombre_hoja or "").rsplit(":", 1)[0]
+    base = re.sub(r"_DESPLIEGUE_FRENTE_[12]$", "", base, flags=re.IGNORECASE)
+    if base.upper().endswith("_DESPLIEGUE"):
+        base = base[: -len("_DESPLIEGUE")]
+    return base.strip() or ""
+
+
+def _es_cobre_hoja(nombre_hoja: str) -> bool:
+    try:
+        from piezas_cobre import es_pieza_cobre
+
+        return bool(es_pieza_cobre(_pieza_desde_hoja_despliegue(nombre_hoja)))
+    except Exception:
+        return False
 _MIN_DIST_HOJA = 0.05
 _PREFIJO_SKETCH = "COTAS_XY_"
 
@@ -268,6 +291,8 @@ def _cortes_internos_inicio(vista, tg, sil=None) -> list[dict]:
                 "ymin": float(y0),
                 "xmax": float(x1),
                 "ymax": float(y1),
+                "dx": float(dx),  # ancho del hueco (hoja)
+                "dy": float(dy),  # largo del hueco (hoja)
                 "tamaño": float(min(dx, dy)),
                 "fuente": "corte_interno",
                 "tipo": "corte",
@@ -1124,6 +1149,192 @@ def _forzar_vista_lista(inv_app, hoja, vista) -> None:
             pass
 
 
+def _dibujar_cota_tramo_sketch(
+    hoja,
+    vista,
+    tg,
+    inv_app,
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+    texto: str,
+    eje: str,
+):
+    """
+    Cota de tramo (largo/ancho de hueco) con sketch: línea entre (x1,y1)-(x2,y2)
+    y texto con el valor.
+    """
+    try:
+        sketch = hoja.Sketches.Add()
+        sketch.Name = f"{_PREFIJO_SKETCH}CUT_{eje}"
+        sketch.Edit()
+    except Exception:
+        try:
+            sketch = hoja.DrawingSketches.Add()
+            sketch.Edit()
+        except Exception:
+            return False
+
+    color = None
+    try:
+        color = inv_app.TransientObjects.CreateColor(0, 90, 0)
+    except Exception:
+        pass
+
+    try:
+        left = float(vista.Left)
+        right = left + float(vista.Width)
+        top = float(vista.Top)
+        bot = top - float(vista.Height)
+    except Exception:
+        left, right, top, bot = min(x1, x2) - 1, max(x1, x2) + 1, max(y1, y2) + 1, min(y1, y2) - 1
+
+    offset = 1.8
+    ok = False
+    try:
+        if eje.upper() == "X":  # ancho horizontal
+            y_dim = min(y1, y2) - offset
+            if y_dim < bot + 0.3:
+                y_dim = max(y1, y2) + offset
+            ok = bool(_linea(sketch, tg, x1, y_dim, x2, y_dim, color))
+            ok = _linea(sketch, tg, x1, y1, x1, y_dim, color) or ok
+            ok = _linea(sketch, tg, x2, y2, x2, y_dim, color) or ok
+            _texto(sketch, tg, (x1 + x2) * 0.5, y_dim - 0.3, texto, inv_app)
+        else:  # largo vertical
+            x_dim = min(x1, x2) - offset
+            if x_dim < left + 0.3:
+                x_dim = max(x1, x2) + offset
+            ok = bool(_linea(sketch, tg, x_dim, y1, x_dim, y2, color))
+            ok = _linea(sketch, tg, x1, y1, x_dim, y1, color) or ok
+            ok = _linea(sketch, tg, x2, y2, x_dim, y2, color) or ok
+            _texto(
+                sketch, tg, x_dim - 0.3, (y1 + y2) * 0.5, texto, inv_app, vertical=True
+            )
+    except Exception as exc:
+        print(f"    cut-tramo sketch fallo: {exc}")
+        ok = False
+    finally:
+        try:
+            sketch.ExitEdit()
+        except Exception:
+            pass
+    return ok
+
+
+def _emitir_tamanos_corte(
+    plano,
+    hoja,
+    vista,
+    tg,
+    inv_app,
+    barrenos: list,
+    base_nombre: str,
+    creadas_nombres: list,
+):
+    """
+    Por cada hueco rectangular: hojas CUT_WIDTH (dx) y CUT_LENGTH (dy).
+    """
+    cortes = [b for b in barrenos if str(b.get("tipo") or "") == "corte"]
+    if not cortes:
+        return
+    vistos = set()
+    for idx, c in enumerate(cortes, start=1):
+        try:
+            x0, y0 = float(c["xmin"]), float(c["ymin"])
+            x1, y1 = float(c["xmax"]), float(c["ymax"])
+        except Exception:
+            continue
+        dx = abs(x1 - x0)
+        dy = abs(y1 - y0)
+        if dx < _MIN_DIST_HOJA or dy < _MIN_DIST_HOJA:
+            continue
+        clave = (round(x0, 2), round(y0, 2), round(dx, 2), round(dy, 2))
+        if clave in vistos:
+            continue
+        vistos.add(clave)
+        suf = "" if len(cortes) <= 1 else f"_{idx:02d}"
+        for etiqueta, eje, a0, b0, a1, b1 in (
+            (f"CUT_WIDTH{suf}", "X", x0, y0, x1, y0),
+            (f"CUT_LENGTH{suf}", "Y", x0, y0, x0, y1),
+        ):
+            nombre_nueva = f"{base_nombre}_{etiqueta}"
+            _borrar_hojas_prefijo(plano, nombre_nueva)
+            try:
+                nueva = hoja.CopyTo(plano)
+            except Exception as exc:
+                print(f"⚠️ {nombre_nueva}: CopyTo falló ({exc})")
+                continue
+            try:
+                nueva.Name = nombre_nueva
+            except Exception:
+                pass
+            if nueva.DrawingViews.Count < 1:
+                try:
+                    nueva.Delete()
+                except Exception:
+                    pass
+                continue
+            vista_n = nueva.DrawingViews.Item(1)
+            _forzar_vista_lista(inv_app, nueva, vista_n)
+            _limpiar_dims_y_sketches(nueva)
+            # Reproyectar bbox del mismo corte
+            try:
+                cortes_n = [
+                    b
+                    for b in _centros_barrenos(vista_n, tg)
+                    if str(b.get("tipo") or "") == "corte"
+                ]
+            except Exception:
+                cortes_n = []
+            mejor = None
+            mejor_d = 1e9
+            for bn in cortes_n:
+                try:
+                    bx0, by0 = float(bn["xmin"]), float(bn["ymin"])
+                except Exception:
+                    continue
+                d = (bx0 - x0) ** 2 + (by0 - y0) ** 2
+                if d < mejor_d:
+                    mejor_d = d
+                    mejor = bn
+            if mejor is not None:
+                try:
+                    x0 = float(mejor["xmin"])
+                    y0 = float(mejor["ymin"])
+                    x1 = float(mejor["xmax"])
+                    y1 = float(mejor["ymax"])
+                except Exception:
+                    pass
+            if eje == "X":
+                val_txt = _valor_desde_hoja(vista_n, nueva, x0, x1)
+                ok = _dibujar_cota_tramo_sketch(
+                    nueva, vista_n, tg, inv_app, x0, y0, x1, y0, asegurar_unidad_cota(val_txt), "X"
+                )
+            else:
+                val_txt = _valor_desde_hoja(vista_n, nueva, y0, y1)
+                ok = _dibujar_cota_tramo_sketch(
+                    nueva, vista_n, tg, inv_app, x0, y0, x0, y1, asegurar_unidad_cota(val_txt), "Y"
+                )
+            try:
+                nota = nueva.DrawingNotes.GeneralNotes.AddFitted(
+                    tg.CreatePoint2d(0.4, 0.4),
+                    f"CUT={val_txt}",
+                )
+                try:
+                    nota.Visible = False
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            if ok:
+                kind = "WIDTH" if "WIDTH" in etiqueta.upper() else "LENGTH"
+                print(f"✅ {nombre_nueva}: {kind}={val_txt} [cut]")
+            else:
+                print(f"⚠️ {nombre_nueva}: sketch cut falló (hoja conservada)")
+            creadas_nombres.append(str(nueva.Name).rsplit(":", 1)[0])
+
+
 def _base_despliegue_desde_frente(nombre_hoja: str) -> str:
     base = str(nombre_hoja).rsplit(":", 1)[0]
     return re.sub(r"_FRENTE_[12]$", "", base, flags=re.IGNORECASE)
@@ -1247,6 +1458,31 @@ def acotar_barrenos_xy_despliegue(nombres_frente_ok=None):
             print(f"  ⚠️ {nombre}: sin barrenos (modelo ni HLR)")
             continue
 
+        # TANQUE + iProp Corte: solo huecos no-redondos (XMIN/YMIN + CUT_*).
+        # Circulares → omitidos (HOLE ya se bloquea en diametro.py).
+        try:
+            from creador_vistas import producto_flujo_actual, _es_pieza_corte
+
+            pieza = _pieza_desde_hoja_despliegue(nombre)
+            if producto_flujo_actual() == "TANQUE" and _es_pieza_corte(pieza):
+                n_antes = len(barrenos)
+                barrenos = [
+                    b for b in barrenos if str(b.get("tipo") or "") == "corte"
+                ]
+                if n_antes != len(barrenos):
+                    print(
+                        f"  {nombre.rsplit(':',1)[0]}: TANQUE/Corte → "
+                        f"solo cortes internos ({len(barrenos)}/{n_antes})"
+                    )
+                if not barrenos:
+                    print(
+                        f"  {nombre.rsplit(':',1)[0]}: TANQUE/Corte sin "
+                        f"hueco rectangular → omitido XY"
+                    )
+                    continue
+        except Exception:
+            pass
+
         fuente = barrenos[0].get("fuente", "?")
         print(
             f"  {nombre.rsplit(':',1)[0]}: {len(barrenos)} centros "
@@ -1288,6 +1524,20 @@ def acotar_barrenos_xy_despliegue(nombres_frente_ok=None):
 
         grupos_x = _agrupar_coincidencias(mems_x, vista)
         grupos_y = _agrupar_coincidencias(mems_y, vista)
+        base_nombre = _base_despliegue_desde_frente(nombre)
+
+        # Largo×ancho del hueco aunque no haya X/Y (p.ej. corte en origen).
+        _emitir_tamanos_corte(
+            plano,
+            hoja,
+            vista,
+            tg,
+            inv_app,
+            barrenos,
+            base_nombre,
+            creadas_nombres,
+        )
+
         if not grupos_x and not grupos_y:
             continue
         print(
@@ -1295,7 +1545,11 @@ def acotar_barrenos_xy_despliegue(nombres_frente_ok=None):
             f"(tol≈{_tol_coincidencia_hoja(vista, barrenos):.4f} cm hoja)"
         )
 
-        base_nombre = _base_despliegue_desde_frente(nombre)
+        es_cobre = _es_cobre_hoja(nombre)
+        letras_prev = typ_letras_habilitadas()
+        if es_cobre:
+            # Cobre/busbar: TYP sin nomenclatura A/B/C.
+            set_typ_letras_habilitadas(False)
 
         def _emitir(eje: str, grupos: list[dict]) -> None:
             nonlocal creadas_nombres
@@ -1327,6 +1581,17 @@ def acotar_barrenos_xy_despliegue(nombres_frente_ok=None):
                     if len(grupos) <= 1
                     else f"{base_nombre}_{suf}_{idx:02d}"
                 )
+                # Calidad: primeras 2 posiciones CENTRO (no MIN) en cobre.
+                if (
+                    es_cobre
+                    and not es_inicio
+                    and idx <= 2
+                    and "CENTRO" in etiqueta
+                ):
+                    print(
+                        f"    Seleccionadas(calidad): {nombre_nueva} "
+                        f"({eje}#{idx} desde 0,0)"
+                    )
                 _borrar_hojas_prefijo(plano, nombre_nueva)
                 try:
                     nueva = hoja.CopyTo(plano)
@@ -1499,8 +1764,12 @@ def acotar_barrenos_xy_despliegue(nombres_frente_ok=None):
 
                 creadas_nombres.append(str(nueva.Name).rsplit(":", 1)[0])
 
-        _emitir("X", grupos_x)
-        _emitir("Y", grupos_y)
+        try:
+            _emitir("X", grupos_x)
+            _emitir("Y", grupos_y)
+        finally:
+            if es_cobre:
+                set_typ_letras_habilitadas(letras_prev)
 
     print(
         f"✅ barrenos_xy_despliegue: {len(creadas_nombres)} hojas X/Y creadas"

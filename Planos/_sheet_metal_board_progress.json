@@ -1,0 +1,75 @@
+{
+  "procesadas_nuevas": 25,
+  "unicas_ok_nuevas": 18,
+  "skip_ya_ok": 103,
+  "stats": {
+    "fail": 7,
+    "closed": 25,
+    "dup": 2376,
+    "skip_ya_ok": 103,
+    "ok": 18
+  },
+  "last": "GENE-OP-1010-311",
+  "filas_tail": [
+    {
+      "pieza": "HW-BLT-ZN-TF-M5-12MM_94209A326",
+      "espesor": "n/d",
+      "regla": "(sin espesor)",
+      "estado": "✔ Optimizado y Desplegado (Unfold clásico)"
+    },
+    {
+      "pieza": "92865A540_Medium-Strength Grade 5 Steel H",
+      "espesor": "n/d",
+      "regla": "(sin espesor)",
+      "estado": "✔ Optimizado y Desplegado (Unfold clásico)"
+    },
+    {
+      "pieza": "GENE-BKT-297",
+      "espesor": "n/d",
+      "regla": "(sin espesor)",
+      "estado": "✔ Desplegado con Factor K"
+    },
+    {
+      "pieza": "GENE-BKT-299",
+      "espesor": "n/d",
+      "regla": "(sin espesor)",
+      "estado": "✔ Desplegado con Factor K"
+    },
+    {
+      "pieza": "Exiscan XPM 10X2.5",
+      "espesor": "n/d",
+      "regla": "(sin espesor)",
+      "estado": "✔ Desplegado con Factor K"
+    },
+    {
+      "pieza": "ECRAN.stp",
+      "espesor": "n/d",
+      "regla": "(sin espesor)",
+      "estado": "✔ Desplegado con Factor K"
+    },
+    {
+      "pieza": "CONNECTEURS.stp",
+      "espesor": "n/d",
+      "regla": "(sin espesor)",
+      "estado": "❌ No se pudo generar Flat Pattern: (-2147352567, 'Ocurrió una excepción.', (0, None, None, None, 0, -2147467259), None)"
+    },
+    {
+      "pieza": "CORPUS_3.stp",
+      "espesor": "n/d",
+      "regla": "(sin espesor)",
+      "estado": "✔ Desplegado con Factor K"
+    },
+    {
+      "pieza": "GENE-OP-1020-116",
+      "espesor": "n/d",
+      "regla": "(sin espesor)",
+      "estado": "✔ Desplegado con Factor K"
+    },
+    {
+      "pieza": "GENE-OP-1010-311",
+      "espesor": "n/d",
+      "regla": "(sin espesor)",
+      "estado": "✔ Desplegado con Factor K"
+    }
+  ]
+}

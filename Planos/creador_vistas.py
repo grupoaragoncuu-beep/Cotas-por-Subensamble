@@ -13,10 +13,23 @@ kArbitraryViewOrientation = 10763
 kDefaultViewOrientation = 10753
 kHiddenLineRemovedDrawingViewStyle = 32258
 
-# Piezas con iProperty Corte: segunda pasada flat + Estañado (cobre).
-# DESPLIEGUE (XCENTRO/YCENTRO/HOLE/THK) también se crea para cualquier
-# chapa con barrenos/cortes interiores, no solo Corte/GIGA.
+# Clasificación iProperty + tipo de producto (TANQUE vs BOARD/GIGA).
+# BOARD/GIGA: Corte o chapa con huecos → DESPLIEGUE (flat + barrenos).
+# TANQUE (OTC/Vantran): Corte se OMITE (no flat / no barrenos / no cortes
+# internos); Doblado sí → dims generales + holes/cortes en flat si aplica.
 _PIEZAS_CORTE_KEYS = set()
+_PIEZAS_DOBLADO_KEYS = set()
+_PRODUCTO_TIPO = ""  # "TANQUE" | "BOARD" | ""
+
+
+def configurar_producto_flujo(tipo):
+    """``TANQUE`` / ``BOARD`` / vacío. Afecta regla DESPLIEGUE."""
+    global _PRODUCTO_TIPO
+    _PRODUCTO_TIPO = str(tipo or "").strip().upper()
+
+
+def producto_flujo_actual() -> str:
+    return str(_PRODUCTO_TIPO or "").strip().upper()
 
 
 def configurar_piezas_corte(nombres):
@@ -30,6 +43,17 @@ def configurar_piezas_corte(nombres):
     _PIEZAS_CORTE_KEYS = keys
 
 
+def configurar_piezas_doblado(nombres):
+    """Registra nombres de piezas clasificadas como Doblado (Abigail)."""
+    global _PIEZAS_DOBLADO_KEYS
+    keys = set()
+    for n in nombres or []:
+        k = _clave_pieza_simple(n)
+        if k:
+            keys.add(k)
+    _PIEZAS_DOBLADO_KEYS = keys
+
+
 def _clave_pieza_simple(texto):
     limpio = str(texto or "").upper()
     limpio = re.sub(r"\.IPT$", "", limpio)
@@ -37,8 +61,8 @@ def _clave_pieza_simple(texto):
     return limpio
 
 
-def _es_pieza_corte(part_name):
-    if not _PIEZAS_CORTE_KEYS:
+def _nombre_en_keys(part_name, keys) -> bool:
+    if not keys:
         return False
     candidatos = [part_name]
     try:
@@ -49,10 +73,18 @@ def _es_pieza_corte(part_name):
         k = _clave_pieza_simple(cand)
         if not k:
             continue
-        for ck in _PIEZAS_CORTE_KEYS:
+        for ck in keys:
             if ck == k or ck in k or k in ck:
                 return True
     return False
+
+
+def _es_pieza_corte(part_name):
+    return _nombre_en_keys(part_name, _PIEZAS_CORTE_KEYS)
+
+
+def _es_pieza_doblado(part_name):
+    return _nombre_en_keys(part_name, _PIEZAS_DOBLADO_KEYS)
 
 
 def _es_pieza_cobre_nombre(part_name):
@@ -68,8 +100,6 @@ def _sm_tiene_barrenos_o_cortes(part_doc) -> bool:
     """
     True si el sólido tiene loops interiores (barrenos / recortes).
 
-    Sirve para tanques y boards: si hay chapa con huecos, se crean
-    vistas DESPLIEGUE y corren XCENTRO/YCENTRO/HOLE/THK.
     No Unfold (rápido sobre modelo doblado).
     """
     try:
@@ -89,9 +119,25 @@ def _sm_tiene_barrenos_o_cortes(part_doc) -> bool:
 
 
 def _debe_crear_despliegue(part_name, part_doc, is_sm) -> bool:
-    """Corte iProp O chapa con barrenos/cortes → flat DESPLIEGUE."""
+    """
+    ¿Crear vistas DESPLIEGUE (flat + X/Y/HOLE/THK)?
+
+    - BOARD/GIGA: Corte iProp **o** chapa con barrenos/cortes.
+    - TANQUE: Corte con hueco → flat solo para XMIN/YMIN + CUT_* (sin HOLE).
+      Doblado con huecos → flat (holes / cortes). Otras clases → no flat.
+    """
     if not is_sm:
         return False
+    tipo = producto_flujo_actual()
+    if tipo == "TANQUE":
+        if _es_pieza_corte(part_name):
+            # Flat permitido SOLO para acotar huecos no-redondos (XMIN/YMIN +
+            # CUT_LENGTH/CUT_WIDTH). Barrenos Ø siguen omitidos en diametro.py.
+            return _sm_tiene_barrenos_o_cortes(part_doc)
+        if _es_pieza_doblado(part_name):
+            return _sm_tiene_barrenos_o_cortes(part_doc)
+        return False
+    # BOARD / desconocido: comportamiento GIGA histórico
     if _es_pieza_corte(part_name):
         return True
     if _sm_tiene_barrenos_o_cortes(part_doc):
@@ -652,11 +698,18 @@ def crear_vistas_lote(
                                     f"falló ({exc_r})"
                                 )
 
-            # --- Flat DESPLIEGUE: Corte iProp O chapa con barrenos/cortes ---
-            # (cualquier producto: tanque, board, etc.). Cobre/Estañado aparte.
+            # --- Flat DESPLIEGUE ---
+            # BOARD: Corte o chapa con huecos.
+            # TANQUE: Corte omitido; Doblado + huecos → flat (holes/cortes).
             es_corte = _es_pieza_corte(part_name)
+            es_doblado = _es_pieza_doblado(part_name)
             if _debe_crear_despliegue(part_name, part_doc, is_sm):
-                if not es_corte:
+                if producto_flujo_actual() == "TANQUE" and es_doblado:
+                    _log(
+                        f"  {part_name}: TANQUE/Doblado con barrenos/cortes → "
+                        f"DESPLIEGUE (X/Y + HOLE + THK)"
+                    )
+                elif not es_corte:
                     _log(
                         f"  {part_name}: chapa con barrenos/cortes → "
                         f"DESPLIEGUE (X/Y + HOLE + THK)"
@@ -678,6 +731,11 @@ def crear_vistas_lote(
                     )
                 finally:
                     _asegurar_modelo_doblado(part_doc, is_sm)
+            elif producto_flujo_actual() == "TANQUE" and es_corte and is_sm:
+                _log(
+                    f"  {part_name}: TANQUE/Corte → omitido flat "
+                    f"(sin DESPLIEGUE / barrenos / cortes internos)"
+                )
 
             # --- Cobre (GIGA): hoja ESTANIADO isométrica (cara mayor) ---
             if _es_pieza_cobre_nombre(part_name):

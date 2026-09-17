@@ -1,0 +1,335 @@
+{
+  "rules": {
+    "ABB-*-BCK": {
+      "top": "Corte",
+      "votes": {
+        "Corte": 25
+      },
+      "n": 25
+    },
+    "FB-*": {
+      "top": "Doblado",
+      "votes": {
+        "Doblado": 1
+      },
+      "n": 1
+    },
+    "GENE-BCU": {
+      "top": "Corte",
+      "votes": {
+        "Corte": 6
+      },
+      "n": 6
+    },
+    "GENE-BKS": {
+      "top": "Doblado",
+      "votes": {
+        "Doblado": 1
+      },
+      "n": 1
+    },
+    "GENE-BKT": {
+      "top": "Doblado",
+      "votes": {
+        "Doblado": 17
+      },
+      "n": 17
+    },
+    "GENE-DF": {
+      "top": "Doblado",
+      "votes": {
+        "Doblado": 9
+      },
+      "n": 9
+    },
+    "GENE-FCU": {
+      "top": "Corte",
+      "votes": {
+        "Corte": 10
+      },
+      "n": 10
+    },
+    "GENE-GS": {
+      "top": "Doblado",
+      "votes": {
+        "Corte": 1,
+        "Doblado": 2
+      },
+      "n": 3
+    },
+    "GENE-HFM": {
+      "top": "Doblado",
+      "votes": {
+        "Doblado": 1
+      },
+      "n": 1
+    },
+    "GENE-OP": {
+      "top": "Corte",
+      "votes": {
+        "Corte": 4,
+        "Doblado": 4
+      },
+      "n": 8
+    },
+    "GENE-SIHC": {
+      "top": "Doblado",
+      "votes": {
+        "Doblado": 7
+      },
+      "n": 7
+    },
+    "GENE-SIVC": {
+      "top": "Doblado",
+      "votes": {
+        "Doblado": 8
+      },
+      "n": 8
+    },
+    "GENE-VFM": {
+      "top": "Doblado",
+      "votes": {
+        "Doblado": 2
+      },
+      "n": 2
+    },
+    "HW-*": {
+      "top": "Almacén",
+      "votes": {
+        "Almacén": 13
+      },
+      "n": 13
+    },
+    "McMaster": {
+      "top": "Almacén",
+      "votes": {
+        "Almacén": 23
+      },
+      "n": 23
+    },
+    "OTHER:1SDH001252R0167": {
+      "top": "Almacén",
+      "votes": {
+        "Almacén": 1
+      },
+      "n": 1
+    },
+    "OTHER:2": {
+      "top": "Almacén",
+      "votes": {
+        "Almacén": 1
+      },
+      "n": 1
+    },
+    "OTHER:CITEL": {
+      "top": "Almacén",
+      "votes": {
+        "Almacén": 1
+      },
+      "n": 1
+    },
+    "OTHER:CONNECTEURS.STP": {
+      "top": "Almacén",
+      "votes": {
+        "Almacén": 1
+      },
+      "n": 1
+    },
+    "OTHER:CORPUS": {
+      "top": "Almacén",
+      "votes": {
+        "Almacén": 1
+      },
+      "n": 1
+    },
+    "OTHER:CT200": {
+      "top": "Almacén",
+      "votes": {
+        "Almacén": 1
+      },
+      "n": 1
+    },
+    "OTHER:ECRAN.STP": {
+      "top": "Almacén",
+      "votes": {
+        "Almacén": 1
+      },
+      "n": 1
+    },
+    "OTHER:EXISCAN": {
+      "top": "Almacén",
+      "votes": {
+        "Almacén": 1
+      },
+      "n": 1
+    },
+    "OTHER:GEN1": {
+      "top": "Corte",
+      "votes": {
+        "Corte": 1
+      },
+      "n": 1
+    },
+    "OTHER:ISO1": {
+      "top": "Almacén",
+      "votes": {
+        "Almacén": 1
+      },
+      "n": 1
+    },
+    "OTHER:ISO2": {
+      "top": "Almacén",
+      "votes": {
+        "Almacén": 1
+      },
+      "n": 1
+    }
+  },
+  "mapa": {
+    "FB-10-10-A": "Doblado",
+    "GENE-HFM-10-102": "Doblado",
+    "GENE-VFM-20-101": "Doblado",
+    "GENE-VFM-20-102": "Doblado",
+    "GENE-BKT-101": "Doblado",
+    "HW-BLT-ZN-G8-M10-35MM_91280A100": "Almacén",
+    "HW-NUT-ZN-G8-M10_90591A171": "Almacén",
+    "HW-FW-SS-M10-A_91116A170": "Almacén",
+    "HW-LW-SS-M10_92148A210": "Almacén",
+    "GENE-DF-08-202": "Doblado",
+    "GENE-DF-10-201": "Doblado",
+    "GENE-OP-1020-115": "Corte",
+    "GENE-OP-1010-211": "Doblado",
+    "GENE-OP-1020-308": "Doblado",
+    "GENE-OP-10-116": "Corte",
+    "HW-LE-ZN-AS-M14-45MM_4843T16": "Almacén",
+    "HW-BLT-ZN-TF-1024-375_93882A228": "Almacén",
+    "HW-BLT-SS-CB-M8-30MM_93180A918": "Almacén",
+    "HW-FW-SS-M8-A_91116A160": "Almacén",
+    "HW-NUT-SS-G8-M8_91028A419": "Almacén",
+    "HW-BLT-SS-CB-M8-20MM_98930A216": "Almacén",
+    "HW-BLT-SS-CB-M8-40MM_93180A919": "Almacén",
+    "GENE-GS-0820-708": "Corte",
+    "HW-NUT-ZN-G8-M14_96194A112": "Almacén",
+    "GENE-SIHC-40-40-141": "Doblado",
+    "GENE-SIVC-40-40-150": "Doblado",
+    "GENE-SIVC-40-40-153": "Doblado",
+    "GENE-SIVC-40-40-151": "Doblado",
+    "GENE-BKT-306": "Doblado",
+    "GENE-BKT-304": "Doblado",
+    "GENE-SIHC-40-40-142": "Doblado",
+    "GENE-SIVC-40-40-152": "Doblado",
+    "GENE-BKT-321": "Doblado",
+    "GENE-BKT-320": "Doblado",
+    "GENE-FCU-5-126": "Corte",
+    "GENE-FCU-5-127": "Corte",
+    "GENE-FCU-5-103": "Corte",
+    "GENE-FCU-5-109": "Corte",
+    "GENE-FCU-5-118": "Corte",
+    "GENE-FCU-5-108": "Corte",
+    "GENE-BCU-5-165": "Corte",
+    "GENE-BCU-5-166": "Corte",
+    "GENE-BCU-5-167": "Corte",
+    "GENE-BCU-5-168": "Corte",
+    "GENE-BCU-5-169": "Corte",
+    "GENE-BCU-5-170": "Corte",
+    "ISO1-38-38": "Almacén",
+    "ISO2-38-16": "Almacén",
+    "92865A623_MEDIUM-STRENGTH GRADE 5 STEEL HEX HEAD SCREW_92865A623": "Almacén",
+    "95462A031_MEDIUM-STRENGTH STEEL HEX NUT_95462A031": "Almacén",
+    "91102A760_ZINC-PLATED STEEL SPLIT LOCK WASHER_91102A760": "Almacén",
+    "90126A031_ZINC-PLATED STEEL SAE WASHER_90126A031": "Almacén",
+    "91090A112_ZINC-PLATED STEEL OVERSIZED WASHER_91090A112": "Almacén",
+    "91247A630_MEDIUM-STRENGTH GRADE 5 STEEL HEX HEAD SCREW_91247A630": "Almacén",
+    "91247A633_MEDIUM-STRENGTH GRADE 5 STEEL HEX HEAD SCREW_91247A633": "Almacén",
+    "92865A621_MEDIUM-STRENGTH GRADE 5 STEEL HEX HEAD SCREW_92865A621": "Almacén",
+    "91247A637_MEDIUM-STRENGTH GRADE 5 STEEL HEX HEAD SCREW_91247A637": "Almacén",
+    "92865A638_MEDIUM-STRENGTH GRADE 5 STEEL HEX HEAD SCREW_92865A638": "Almacén",
+    "92865A254_MEDIUM-STRENGTH GRADE 5 STEEL HEX HEAD SCREW_92865A254": "Almacén",
+    "91247A632_MEDIUM-STRENGTH GRADE 5 STEEL HEX HEAD SCREW_91247A632": "Almacén",
+    "GENE-DF-10-127": "Doblado",
+    "GENE-DF-10-124": "Doblado",
+    "EXISCAN XPM 10X2.5": "Almacén",
+    "90126A029_ZINC-PLATED STEEL SAE WASHER_90126A029": "Almacén",
+    "91102A750_ZINC-PLATED STEEL SPLIT LOCK WASHER_91102A750": "Almacén",
+    "95462A029_MEDIUM-STRENGTH STEEL HEX NUT_95462A029": "Almacén",
+    "GENE-OP-1020-116": "Corte",
+    "GENE-OP-1010-311": "Doblado",
+    "GENE-OP-10-117": "Corte",
+    "GENE-SIVC-32-32-102": "Doblado",
+    "GENE-SIHC-32-32-102": "Doblado",
+    "91247A638_MEDIUM-STRENGTH GRADE 5 STEEL HEX HEAD SCREW_91247A638": "Almacén",
+    "GENE-FCU-5-102": "Corte",
+    "GENE-FCU-5-104": "Corte",
+    "GENE-SIVC-32-32-104": "Doblado",
+    "GENE-BKS-M-44-10-301": "Doblado",
+    "1SDH001252R0167_PART2": "Almacén",
+    "GENE-DF-10-165": "Doblado",
+    "GENE-DF-10-128": "Doblado",
+    "GENE-DF-10-129": "Doblado",
+    "ABB-42-BCK-703": "Corte",
+    "ABB-42-BCK-702": "Corte",
+    "ABB-42-BCK-701": "Corte",
+    "ABB-42-BCK-712": "Corte",
+    "ABB-42-BCK-706": "Corte",
+    "ABB-42-BCK-704": "Corte",
+    "ABB-42-BCK-705": "Corte",
+    "ABB-42-BCK-707": "Corte",
+    "ABB-42-BCK-709": "Corte",
+    "ABB-42-BCK-710": "Corte",
+    "ABB-42-BCK-711": "Corte",
+    "ABB-42-BCK-713": "Corte",
+    "ABB-42-BCK-723": "Corte",
+    "ABB-42-BCK-724": "Corte",
+    "ABB-42-BCK-725": "Corte",
+    "ABB-42-BCK-732": "Corte",
+    "ABB-42-BCK-733": "Corte",
+    "ABB-42-BCK-734": "Corte",
+    "ABB-42-BCK-729": "Corte",
+    "ABB-42-BCK-730": "Corte",
+    "ABB-42-BCK-731": "Corte",
+    "ABB-42-BCK-728": "Corte",
+    "ABB-42-BCK-727": "Corte",
+    "ABB-42-BCK-726": "Corte",
+    "HW-BLT-ZN-TF-M5-12MM_94209A326": "Almacén",
+    "92865A624_MEDIUM-STRENGTH GRADE 5 STEEL HEX HEAD SCREW_92865A624": "Almacén",
+    "91247A635_MEDIUM-STRENGTH GRADE 5 STEEL HEX HEAD SCREW_91247A635": "Almacén",
+    "91247A639_MEDIUM-STRENGTH GRADE 5 STEEL HEX HEAD SCREW_91247A639": "Almacén",
+    "GENE-SIHC-40-40-116": "Doblado",
+    "GENE-BKT-267": "Doblado",
+    "ABB-42-BCK-735": "Corte",
+    "GENE-SIVC-40-40-144": "Doblado",
+    "GENE-BKT-369": "Doblado",
+    "GENE-SIHC-40-40-118": "Doblado",
+    "GENE-BKT-269": "Doblado",
+    "GENE-SIHC-40-40-167": "Doblado",
+    "GENE-BKT-270": "Doblado",
+    "GENE-BKT-271": "Doblado",
+    "GENE-GS-1020-403": "Doblado",
+    "GENE-GS-0820-404": "Doblado",
+    "GENE-SIVC-32-32-114": "Doblado",
+    "93882A224_HEX HEAD THREAD-FORMING SCREWS FOR METAL_93882A224": "Almacén",
+    "93882A228_HEX HEAD THREAD-FORMING SCREWS FOR METAL_93882A228": "Almacén",
+    "GENE-BKT-198": "Doblado",
+    "GENE-BKT-199": "Doblado",
+    "GENE-BKT-297": "Doblado",
+    "GENE-BKT-299": "Doblado",
+    "92865A540_MEDIUM-STRENGTH GRADE 5 STEEL HEX HEAD SCREW_92865A540": "Almacén",
+    "CITEL MS-SERIES SPD": "Almacén",
+    "GENE-BKT-295": "Doblado",
+    "GENE-BKT-294": "Doblado",
+    "ECRAN.STP": "Almacén",
+    "CONNECTEURS.STP": "Almacén",
+    "CORPUS_3.STP": "Almacén",
+    "GENE-BKT-CT-103": "Doblado",
+    "GENE-SIHC-40-40-168": "Doblado",
+    "GENE-DF-10-166": "Doblado",
+    "92865A628_MEDIUM-STRENGTH GRADE 5 STEEL HEX HEAD SCREW_92865A628": "Almacén",
+    "GENE-DF-10-169": "Doblado",
+    "GEN1-OP-20-112": "Corte",
+    "GENE-OP-10-114": "Doblado",
+    "2-250T": "Almacén",
+    "GENE-FCU-6-105": "Corte",
+    "CT200": "Almacén",
+    "GENE-FCU-6-106": "Corte"
+  }
+}

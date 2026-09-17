@@ -1,0 +1,8 @@
+SEGM2 retry @ 2026-09-17 05:33:17
+Esperando fin de generador_caras_tanque...
+SEGM2 actual: 2 JPG
+INICIO: SEGM2 via A08
+FIN: SEGM2 via A08 exit=0 8.1min
+INICIO: Acomodar
+FIN: Acomodar exit=1 0.1min
+RESUMEN [0, 1]

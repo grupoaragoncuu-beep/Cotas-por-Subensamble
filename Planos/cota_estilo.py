@@ -349,13 +349,13 @@ def letra_typ_indice(indice):
     return letra_typ_indice(i // 26 - 1) + chr(ord("A") + (i % 26))
 
 
-# Cotas TYP con letras A/B/C: ON por defecto (caras / subensamble / etc.).
-# Flujo Abigail PIEZAS (COTAS_ILOGIC_ABIGAIL → generador_piezas) las apaga.
+# Cotas TYP con letras A/B/C: ON por defecto.
+# Solo cobre/busbar (ABB/GENE/RLG) las apaga en barrenos_xy_despliegue.
 _ENV_TYP_LETRAS = "COTAS_TYP_LETRAS"
 
 
 def typ_letras_habilitadas() -> bool:
-    """True → dibujar A/B/C en marcas TYP. False en Abigail/piezas."""
+    """True → dibujar A/B/C en marcas TYP. False en cobre/busbar."""
     v = str(os.environ.get(_ENV_TYP_LETRAS, "1") or "1").strip().lower()
     return v not in ("0", "false", "no", "off")
 

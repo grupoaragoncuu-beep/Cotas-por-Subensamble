@@ -837,6 +837,7 @@ def asegurar_tabla_cotas_dossier() -> bool:
                         nombre_archivo      TEXT NOT NULL DEFAULT '',
                         ruta                TEXT NOT NULL DEFAULT '',
                         clasificacion       TEXT NOT NULL DEFAULT '',
+                        seleccionadas       TEXT NOT NULL DEFAULT 'no',
                         created_at          TIMESTAMP NOT NULL DEFAULT NOW()
                     )
                     """
@@ -846,6 +847,14 @@ def asegurar_tabla_cotas_dossier() -> bool:
                     ALTER TABLE public.cotas_dossier
                         ADD COLUMN IF NOT EXISTS clasificacion
                             TEXT NOT NULL DEFAULT ''
+                    """
+                )
+                # Calidad cobre: primeras 2 XCENTRO + 2 YCENTRO desde (0,0).
+                cur.execute(
+                    """
+                    ALTER TABLE public.cotas_dossier
+                        ADD COLUMN IF NOT EXISTS seleccionadas
+                            TEXT NOT NULL DEFAULT 'no'
                     """
                 )
                 cur.execute(
@@ -891,6 +900,13 @@ def asegurar_tabla_cotas_dossier() -> bool:
         return False
 
 
+def _norm_seleccionadas(valor: str | None) -> str:
+    v = str(valor or "").strip().casefold()
+    if v in ("si", "sí", "yes", "true", "1", "s"):
+        return "si"
+    return "no"
+
+
 def insertar_evidencia(
     *,
     cliente: str,
@@ -901,6 +917,7 @@ def insertar_evidencia(
     nombre_archivo: str,
     ruta: str,
     clasificacion: str = "",
+    seleccionadas: str = "no",
 ) -> int | None:
     """INSERT o UPDATE (misma job+nombre) y devuelve id, o None si falla."""
     try:
@@ -910,6 +927,7 @@ def insertar_evidencia(
     clase = str(clasificacion or "").strip()
     if not clase:
         clase = proceso_desde_ruta(ruta) or ""
+    sel = _norm_seleccionadas(seleccionadas)
     try:
         with psycopg2.connect(**_db_nesting()) as conn:
             with conn.cursor() as cur:
@@ -933,7 +951,8 @@ def insertar_evidencia(
                             type = %s,
                             cantidad_spoteos = %s,
                             ruta = %s,
-                            clasificacion = %s
+                            clasificacion = %s,
+                            seleccionadas = %s
                         WHERE id = %s
                         """,
                         (
@@ -943,6 +962,7 @@ def insertar_evidencia(
                             max(0, int(cantidad_spoteos)),
                             str(ruta or ""),
                             clase,
+                            sel,
                             eid,
                         ),
                     )
@@ -952,8 +972,8 @@ def insertar_evidencia(
                     """
                     INSERT INTO public.cotas_dossier
                         (cliente, producto, job, type, cantidad_spoteos,
-                         nombre_archivo, ruta, clasificacion)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                         nombre_archivo, ruta, clasificacion, seleccionadas)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                     """,
                     (
@@ -965,6 +985,7 @@ def insertar_evidencia(
                         str(nombre_archivo or ""),
                         str(ruta or ""),
                         clase,
+                        sel,
                     ),
                 )
                 row = cur.fetchone()
@@ -973,6 +994,80 @@ def insertar_evidencia(
     except Exception as exc:
         print(f"AVISO dossier: INSERT/UPDATE falló ({exc})")
         return None
+
+
+def recalcular_seleccionadas_en_carpeta(
+    carpeta: str,
+    *,
+    job: str | None = None,
+) -> int:
+    """
+    Recorre JPG de ``carpeta`` y actualiza ``seleccionadas`` (sí/no) por pieza.
+
+    Pensado para el final de cada exportación GIGA: con el set completo de
+    capturas por item cobre se marcan las 2 primeras XCENTRO y 2 YCENTRO.
+    """
+    if not dossier_habilitado():
+        return 0
+    root = os.path.abspath(str(carpeta or ""))
+    if not os.path.isdir(root):
+        return 0
+    try:
+        from cotas_seleccionadas_cobre import mapa_seleccionadas
+    except Exception as exc:
+        print(f"AVISO dossier: seleccionadas module ({exc})")
+        return 0
+    try:
+        import psycopg2
+    except ImportError:
+        return 0
+
+    por_dir: dict[str, list[str]] = {}
+    try:
+        for dirpath, _dirs, files in os.walk(root):
+            for fn in files:
+                if not fn.lower().endswith((".jpg", ".jpeg", ".png")):
+                    continue
+                por_dir.setdefault(dirpath, []).append(fn)
+    except Exception as exc:
+        print(f"AVISO dossier: walk seleccionadas ({exc})")
+        return 0
+
+    ctx_job = str(job or cargar_contexto_dossier().get("job") or "").strip()
+    n = 0
+    try:
+        with psycopg2.connect(**_db_nesting()) as conn:
+            with conn.cursor() as cur:
+                for dirpath, names in por_dir.items():
+                    marks = mapa_seleccionadas(names)
+                    for fn, flag in marks.items():
+                        sel = _norm_seleccionadas(flag)
+                        if ctx_job:
+                            cur.execute(
+                                """
+                                UPDATE public.cotas_dossier
+                                SET seleccionadas = %s
+                                WHERE job = %s AND nombre_archivo = %s
+                                """,
+                                (sel, ctx_job, fn),
+                            )
+                        else:
+                            cur.execute(
+                                """
+                                UPDATE public.cotas_dossier
+                                SET seleccionadas = %s
+                                WHERE nombre_archivo = %s
+                                """,
+                                (sel, fn),
+                            )
+                        n += int(cur.rowcount or 0)
+            conn.commit()
+    except Exception as exc:
+        print(f"AVISO dossier: recalcular seleccionadas ({exc})")
+        return 0
+    if n:
+        print(f"[dossier] seleccionadas actualizadas: {n} filas")
+    return n
 
 
 def _ya_registrada(job: str, ruta: str, nombre: str) -> bool:
@@ -1179,7 +1274,13 @@ def publicar_y_sincronizar_dossier(
     try:
         dest_root, _n_pub = publicar_arbol_jpgs(carpeta_local)
         sync_root = dest_root if dest_root and _ruta_accesible(dest_root) else carpeta_local
-        return sincronizar_carpeta_jpgs(sync_root, job=job, solo_nuevos=True)
+        n = sincronizar_carpeta_jpgs(sync_root, job=job, solo_nuevos=True)
+        # Recalcular otra vez sobre destino final (set completo cobre).
+        try:
+            recalcular_seleccionadas_en_carpeta(sync_root, job=job)
+        except Exception:
+            pass
+        return n
     except Exception as exc:
         print(f"AVISO dossier: publicar_y_sincronizar ({exc})")
         try:
@@ -1241,6 +1342,23 @@ def registrar_jpg(
         if _ya_registrada(job_s, ruta_db, nombre):
             return False
 
+        sel_flag = "no"
+        try:
+            from cotas_seleccionadas_cobre import (
+                hermanos_en_carpeta,
+                seleccionada_para_captura,
+            )
+
+            hermanos = hermanos_en_carpeta(ruta_db)
+            # Completar con carpeta local si el share aún no tiene todos.
+            if os.path.normcase(ruta_db) != os.path.normcase(ruta_local):
+                hermanos = sorted(
+                    set(hermanos) | set(hermanos_en_carpeta(ruta_local))
+                )
+            sel_flag = seleccionada_para_captura(nombre, hermanos)
+        except Exception:
+            sel_flag = "no"
+
         asegurar_tabla_cotas_dossier()
         clase = proceso_desde_ruta(ruta_db) or proceso_desde_ruta(ruta_local)
         eid = insertar_evidencia(
@@ -1252,13 +1370,15 @@ def registrar_jpg(
             nombre_archivo=nombre,
             ruta=ruta_db,
             clasificacion=clase,
+            seleccionadas=sel_flag,
         )
         if eid:
             extra = f" proceso={clase} " if clase else ""
+            sel_txt = f" seleccionadas={sel_flag}" if sel_flag else ""
             donde = "dossier" if publicada else "local"
             print(
                 f"[dossier] id={eid}: {nombre} type={tipo} "
-                f"spoteos={n_spot} {extra}cliente={cli} ({donde})"
+                f"spoteos={n_spot} {extra}cliente={cli}{sel_txt} ({donde})"
             )
             return True
     except Exception as exc:
@@ -1301,6 +1421,11 @@ def sincronizar_carpeta_jpgs(
                     continue
     except Exception as exc:
         print(f"AVISO dossier: sincronizar_carpeta ({exc})")
+    # Con el set completo por carpeta: fijar Seleccionadas (cobre).
+    try:
+        recalcular_seleccionadas_en_carpeta(root, job=job)
+    except Exception as exc_sel:
+        print(f"AVISO dossier: post-sync seleccionadas ({exc_sel})")
     if n:
         print(f"[dossier] {n} evidencias registradas desde {root}")
     return n

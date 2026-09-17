@@ -1,0 +1,129 @@
+{
+  "stats": {
+    "fail": 15,
+    "saved": 15,
+    "ya_ok": 5
+  },
+  "filas": [
+    {
+      "pieza": "fb-10-10-a",
+      "espesor_cm": 0.905,
+      "regla": "3/8 0.375 M80 BD 721",
+      "ok": false,
+      "why": "sin_HasFlatPattern",
+      "how": "(-2147352567, 'Ocurrió una excepción.', (0, None, None, None, 0, -2147467259), None)"
+    },
+    {
+      "pieza": "gene-hfm-10-102",
+      "espesor_cm": 1.7,
+      "regla": "",
+      "ok": false,
+      "why": "fake bends=0 flat=[3.8750362467532105, 10.0, 88.0] thk=1.7000",
+      "how": "Unfold2_plane"
+    },
+    {
+      "pieza": "gene-vfm-20-101",
+      "espesor_cm": 0.905,
+      "regla": "3/8 0.375 M80 BD 721",
+      "ok": false,
+      "why": "fake bends=0 flat=[15.799999999999999, 15.800000000000011, 199.00000000000006] thk=0.9050",
+      "how": "Unfold2_plane"
+    },
+    {
+      "pieza": "gene-vfm-20-102",
+      "espesor_cm": 0.905,
+      "regla": "3/8 0.375 M80 BD 721",
+      "ok": false,
+      "why": "fake bends=0 flat=[11.869033027242203, 15.799999999999999, 199.00000000000009] thk=0.9050",
+      "how": "Unfold2_plane"
+    },
+    {
+      "pieza": "gene-df-08-202",
+      "espesor_cm": 0.905,
+      "regla": "3/8 0.375 M80 BD 721",
+      "ok": false,
+      "why": "fake bends=0 flat=[3.0, 8.684400010600028, 181.08800000000002] thk=0.9050",
+      "how": "Unfold2_plane"
+    },
+    {
+      "pieza": "gene-df-10-201",
+      "espesor_cm": 0.3,
+      "regla": "Cal. 11 0.1181 0.2",
+      "ok": false,
+      "why": "fake bends=0 flat=[1.600000000000003, 10.394949996400012, 84.77000000000001] thk=0.3000",
+      "how": "Unfold2_plane"
+    },
+    {
+      "pieza": "gene-op-1020-308",
+      "espesor_cm": 2.54,
+      "regla": "1 1 M150 BD 1.737",
+      "ok": false,
+      "why": "fake bends=0 flat=[6.875000000000001, 100.00000000000001, 199.0] thk=2.5400",
+      "how": "Unfold2_plane"
+    },
+    {
+      "pieza": "gene-sihc-32-32-102",
+      "espesor_cm": 1.106,
+      "regla": "7/16 0.4378 M80 BD 794",
+      "ok": false,
+      "why": "fake bends=0 flat=[2.540000000000001, 7.5, 89.71799998960002] thk=1.1060",
+      "how": "Unfold2_plane"
+    },
+    {
+      "pieza": "gene-bkt-304",
+      "espesor_cm": 0.6,
+      "regla": "1/4 0.25.469",
+      "ok": false,
+      "why": "fake bends=0 flat=[7.5850000000000515, 9.300000000000033, 12.471000000800005] thk=0.6000",
+      "how": "Unfold2_plane"
+    },
+    {
+      "pieza": "gene-bkt-306",
+      "espesor_cm": 0.6,
+      "regla": "1/4 0.25.469",
+      "ok": false,
+      "why": "fake bends=0 flat=[7.585000000000051, 9.300000000000033, 12.471000000800005] thk=0.6000",
+      "how": "Unfold2_plane"
+    },
+    {
+      "pieza": "gene-fcu-5-103",
+      "espesor_cm": 0.3048,
+      "regla": "Cal. 11 0.1181 0.2",
+      "ok": false,
+      "why": "fake bends=0 flat=[0.635, 5.080000000000001, 12.70000000000002] thk=0.3048",
+      "how": "Unfold2_plane"
+    },
+    {
+      "pieza": "gene-bkt-245",
+      "espesor_cm": 0.35,
+      "regla": "",
+      "ok": false,
+      "why": "fake bends=0 flat=[3.350000000000001, 5.040000002000008, 6.870000000000003] thk=0.3500",
+      "how": "Unfold2_plane"
+    },
+    {
+      "pieza": "gene-bkt-247",
+      "espesor_cm": 0.177,
+      "regla": "Cal. 16 0.059 0.127",
+      "ok": false,
+      "why": "fake bends=0 flat=[3.8500000066000006, 5.340900000000003, 7.940000005000013] thk=0.1770",
+      "how": "Unfold2_plane"
+    },
+    {
+      "pieza": "gene-bkt-248",
+      "espesor_cm": 2.82,
+      "regla": "",
+      "ok": false,
+      "why": "fake bends=0 flat=[3.8500000066000006, 5.340900000000003, 7.940000005000013] thk=2.8200",
+      "how": "Unfold2_plane"
+    },
+    {
+      "pieza": "gene-bkt-153",
+      "espesor_cm": 1.031,
+      "regla": "7/16 0.4378 M80 BD 794",
+      "ok": false,
+      "why": "fake bends=0 flat=[3.1798000000000006, 6.943800000000002, 11.8096] thk=1.0310",
+      "how": "Unfold2_plane"
+    }
+  ]
+}

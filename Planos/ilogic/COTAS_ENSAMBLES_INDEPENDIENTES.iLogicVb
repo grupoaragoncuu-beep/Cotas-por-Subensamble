@@ -1,20 +1,20 @@
 ' COTAS ABIGAIL - Instructivo de ensambles independientes
 ' Regla externa: COTAS_ENSAMBLES_INDEPENDIENTES
 '
-' 1) Seleccion FORZOSA Top Cover + SEGM1-4 + BASE
-'    (igual contrato JSON que Subensamble / Abigail).
-'    Esas caras se EXCLUYEN: solo se procesan kits .iam independientes
-'    colgados en el arbol (no la tapa / paredes / base).
-' 2) Por kit: 6 vistas ViewCube (FRONT/BACK/TOP/BOTTOM/RIGHT/LEFT).
-'    (0,0)=esquina SUP-IZQ escuadrable del ancla (pieza de frente).
-'    Cada instancia hija: cota X e Y. TYP + letras A/B/C
-'    ordenadas cerca→lejos del ancla/origen.
-' 3) Lanza generador_ensambles_instructivo.py (todos los kits filtrados)
+' OTC / Vantran (tanque *-1246-A01):
+'   Detecta SOLO IAM del root del tanque que NO son:
+'     - casco *-1248-A01 (ni caras A02..A06)
+'     - TOP cover familia *47*
+'   = root(tanque) − casco − TOP  → kits 1250/1251/…, SP-, A20…
+'   Los picks TOP+SEGM+BASE refuerzan exclusiones; no se baja al casco.
+'
+' 1) Seleccion FORZOSA Top Cover + SEGM1-4 + BASE (contrato JSON).
+' 2) Por kit: 6 vistas ViewCube; (0,0)=esquina SUP-IZQ del ancla.
+'    Cada instancia hija: cota X e Y. TYP + letras A/B/C.
+' 3) Lanza generador_ensambles_instructivo.py
 '
 ' Salida:
-'   Planos\JPG\<tanque>\ENSAMBLES_INDEPENDIENTES\<kit>\FRONT|BACK|TOP|BOTTOM|RIGHT|LEFT\
-'   JPG: JOB__ITEM__VISTA_S##_XMIN[_TYP_N]_VALOR.jpg
-'        (un solo ítem base; si TYP, solo la cantidad al final)
+'   Planos\JPG\<tanque>\ENSAMBLES_INDEPENDIENTES\<kit>\FRONT|…\
 '
 ' Rutas: COTAS_ABIGAIL_DIR / config_planos.txt / ExternalRuleDirectories.
 

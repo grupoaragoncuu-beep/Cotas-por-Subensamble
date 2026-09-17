@@ -179,8 +179,8 @@ def _es_kit_instructivo(nombre, n_hijos):
     Solo kits con sentido de armado.
 
     - Códigos OTC ``*-A##`` con ≥2 hijos útiles.
-    - SP / otros: ≥4 hijos (evita SP-792 de 3 mitades sin valor).
-    - Nunca placas Pxx sueltas ni wrappers de 2 piezas.
+    - SP / otros: ≥2 hijos (el aislamiento OTC root ya filtró ruido).
+    - Nunca placas Pxx sueltas.
     """
     from generador_caras_tanque import _parse_codigo_otc
 
@@ -190,10 +190,10 @@ def _es_kit_instructivo(nombre, n_hijos):
     if info and info["tipo"] == "A":
         return n_hijos >= 2
     if up.startswith("SP-"):
-        return n_hijos >= 4
+        return n_hijos >= 2
     if re.search(r"-P\d+", up):
         return False
-    return n_hijos >= 4
+    return n_hijos >= 2
 
 
 def _nombres_iam_hijos(asm_doc):

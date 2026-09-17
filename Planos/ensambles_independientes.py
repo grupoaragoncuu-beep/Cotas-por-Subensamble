@@ -1,13 +1,16 @@
 """
 Subproceso Abigail: ensambles independientes (kits OTC / armados de taller).
 
-Detecta ``.iam`` que NO son contenedores de cara (tanque/tapa/shell/SEGM/BASE),
-crea vistas ortogonales por bbox (LARGO/ANCHO/ALTO), acota la silueta y
-exporta a::
+OTC / Vantran (tanque ``*-1246-A01``):
+  Solo IAM en el **root del tanque** que NO son casco ``*-1248-A01``,
+  caras A02..A06 del 48, ni TOP familia ``*47*``.
+  Equivale a: ``root(tanque) − casco − TOP`` (kits 1250/1251/…, SP-, A20…).
+
+Otros productos: recorrido de árbol excluyendo contenedores de cara (legacy).
+
+Salida::
 
     Planos/JPG/<TANQUE>/ENSAMBLES_INDEPENDIENTES/<nombre_ensamble>/*.jpg
-
-Sin clasificación iProperty (las piezas hijas ya se clasifican en PIEZAS_ACOTADAS).
 """
 
 from __future__ import annotations
@@ -37,7 +40,10 @@ _SUFIJOS_VISTA = ("LARGO", "ANCHO", "ALTO")
 
 
 def _log(msg):
-    print(msg)
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        print(str(msg).encode("ascii", "replace").decode("ascii"))
 
 
 def _nombre_doc(doc_or_occ):
@@ -58,6 +64,11 @@ def _nombre_doc(doc_or_occ):
         return "ENSAMBLE"
 
 
+def _codigo_occ(nombre) -> str:
+    base = str(nombre or "").split(":")[0].strip()
+    return re.sub(r"_\d+$", "", base)
+
+
 def _es_ensamble_occ(occ):
     try:
         return int(occ.DefinitionDocumentType) == TIPO_DOCUMENTO_ENSAMBLE
@@ -75,17 +86,26 @@ def _contar_hijos(asm_doc):
         return 0
 
 
-def _es_excluido_candidato(nombre):
-    """
-    True = no acotar como kit (pero sí recorrer hijos).
+def _es_tanque_raiz_otc(nombre) -> bool:
+    from generador_caras_tanque import _familia_otc_rol, _parse_codigo_otc
 
-    Usa reglas OTC (46/47/48 caras) + heurística de nombre Vantran.
+    info = _parse_codigo_otc(nombre)
+    if not info or info["tipo"] != "A":
+        return False
+    return _familia_otc_rol(info["familia"]) == "46" and int(info["numero"]) == 1
+
+
+def _es_estructura_cara_otc(nombre) -> bool:
+    """
+    True = tanque / TOP / casco / paredes-base (NO kit independiente).
+
+    Familia 46 = tanque; 47* = TOP; 48 A01..A06 = casco y caras.
     """
     from generador_caras_tanque import (
         _es_contenedor_cara_otc,
         _es_shell_o_tanque_otc,
-        _parse_codigo_otc,
         _familia_otc_rol,
+        _parse_codigo_otc,
     )
 
     nom = str(nombre or "")
@@ -96,14 +116,27 @@ def _es_excluido_candidato(nombre):
     info = _parse_codigo_otc(nom)
     if info and info["tipo"] == "A":
         rol = _familia_otc_rol(info["familia"])
-        # 48-A01 ya cubierto; 47 cualquiera y 48 A02-A06 cubiertos.
-        if rol == "47":
+        anum = int(info["numero"])
+        if rol in ("46", "47"):
             return True
-        if rol == "48" and info["numero"] in (1, 2, 3, 4, 5, 6):
+        if rol == "48" and anum in (1, 2, 3, 4, 5, 6):
             return True
     if _EXCLUIR_NOMBRE_RE.search(nom):
         return True
     return False
+
+
+def _es_excluido_candidato(nombre):
+    """True = no acotar como kit (contenedor de cara / casco / TOP)."""
+    return _es_estructura_cara_otc(nombre)
+
+
+def _es_candidato_independiente_otc_root(nombre) -> bool:
+    """IAM de root del tanque que sí es kit (1250…, A20, SP-, …)."""
+    nom = str(nombre or "").strip()
+    if not nom:
+        return False
+    return not _es_estructura_cara_otc(nom)
 
 
 def _iter_subocurrencias(occ):
@@ -125,46 +158,144 @@ def _iter_subocurrencias(occ):
         return
 
 
+def _nombre_en_exclusiones(nombre, asm_doc, occ, excl) -> bool:
+    if not excl:
+        return False
+    candidatos = []
+    for raw in (
+        nombre,
+        getattr(occ, "Name", None) if occ is not None else None,
+    ):
+        if not raw:
+            continue
+        candidatos.append(str(raw).upper().split(":")[0].strip())
+        candidatos.append(_codigo_occ(raw).upper())
+    if asm_doc is not None:
+        try:
+            ff = str(asm_doc.FullFileName or "")
+            if ff:
+                candidatos.append(ff.upper())
+                candidatos.append(
+                    os.path.splitext(os.path.basename(ff))[0].upper()
+                )
+        except Exception:
+            pass
+    for c in candidatos:
+        if c and c in excl:
+            return True
+    return False
+
+
+def _recolectar_otc_root_tanque(ensamble_raiz, exclusiones_extra=None):
+    """
+    OTC: solo IAM de 1er nivel del tanque − casco − TOP − caras.
+
+    No baja al árbol del casco (evita A03..A06 / subarmados anidados).
+    """
+    resultados = {}
+    excl = {str(x).upper() for x in (exclusiones_extra or []) if x}
+    omitidos = []
+
+    try:
+        occs = ensamble_raiz.ComponentDefinition.Occurrences
+        total = int(occs.Count)
+    except Exception as exc:
+        _log(f"ERROR: no se pudieron leer ocurrencias raíz: {exc}")
+        return []
+
+    _log(
+        f"  OTC: aislamiento root(tanque) - casco - TOP "
+        f"({total} occs 1er nivel)"
+    )
+
+    for i in range(1, total + 1):
+        try:
+            occ = occs.Item(i)
+        except Exception as exc:
+            _log(f"AVISO: occ raíz #{i}: {exc}")
+            continue
+        try:
+            if occ.Suppressed:
+                continue
+        except Exception:
+            continue
+        if not _es_ensamble_occ(occ):
+            continue
+
+        try:
+            asm_doc = occ.Definition.Document
+        except Exception:
+            continue
+        try:
+            nombre = _nombre_doc(asm_doc)
+        except Exception:
+            nombre = str(getattr(occ, "Name", "ENSAMBLE")).split(":")[0]
+
+        if _nombre_en_exclusiones(nombre, asm_doc, occ, excl):
+            omitidos.append(f"{nombre} (pick/exclusión)")
+            continue
+        if not _es_candidato_independiente_otc_root(nombre):
+            omitidos.append(f"{nombre} (casco/TOP/cara)")
+            continue
+
+        try:
+            ruta = str(asm_doc.FullFileName or "")
+        except Exception:
+            ruta = ""
+        clave = ruta.upper() if ruta else nombre.upper()
+        if clave in resultados:
+            resultados[clave]["qty"] += 1
+            continue
+
+        n_hijos = _contar_hijos(asm_doc)
+        if n_hijos < MIN_HIJOS_ENSAMBLE:
+            omitidos.append(f"{nombre} (wrapper {n_hijos} hijos)")
+            continue
+        resultados[clave] = {
+            "doc": asm_doc,
+            "nombre": nombre,
+            "qty": 1,
+            "hijos": n_hijos,
+        }
+
+    if omitidos:
+        _log(f"  OTC omitidos en root: {len(omitidos)}")
+        for msg in omitidos[:24]:
+            _log(f"    · {msg}")
+        if len(omitidos) > 24:
+            _log(f"    · … +{len(omitidos) - 24} más")
+
+    lista = [
+        (v["doc"], v["nombre"], v["qty"], v["hijos"])
+        for v in resultados.values()
+    ]
+    lista.sort(key=lambda t: t[1].upper())
+    _log(
+        f"Ensambles independientes OTC (solo root): {len(lista)} "
+        f"(únicos; instancias en qty)"
+    )
+    for _doc, nom, qty, hijos in lista:
+        _log(f"  - {nom}  qty={qty}  hijos={hijos}")
+    return lista
+
+
 def recolectar_ensambles_independientes(ensamble_raiz, exclusiones_extra=None):
     """
     Lista única de ``(asm_doc, nombre_base, qty_instancias, hijos)``.
 
-    Recorre el árbol; los contenedores de cara se omiten como candidato
-    pero se exploran por dentro (kits colgados bajo SEGM).
-
-    ``exclusiones_extra``: nombres/rutas (upper) de TOP/SEGM/BASE resueltos
-    por selección manual — refuerzan el filtro OTC.
+    Tanque OTC (``*-1246-A01``): aislamiento ``root - casco - TOP``.
+    Otros: recorrido de árbol legacy (contenedores de cara se exploran).
     """
-    resultados = {}  # ruta -> {doc, nombre, qty, hijos}
-    excl = {str(x).upper() for x in (exclusiones_extra or []) if x}
+    try:
+        nombre_raiz = _nombre_doc(ensamble_raiz)
+    except Exception:
+        nombre_raiz = ""
+    if _es_tanque_raiz_otc(nombre_raiz):
+        _log(f"  Raiz OTC tanque detectada: {nombre_raiz}")
+        return _recolectar_otc_root_tanque(ensamble_raiz, exclusiones_extra)
 
-    def _nombre_excluido(nombre, asm_doc=None, occ=None):
-        candidatos = []
-        for raw in (
-            nombre,
-            getattr(occ, "Name", None) if occ is not None else None,
-        ):
-            if not raw:
-                continue
-            candidatos.append(str(raw).upper().split(":")[0].strip())
-        if asm_doc is not None:
-            try:
-                ff = str(asm_doc.FullFileName or "")
-                if ff:
-                    candidatos.append(ff.upper())
-                    candidatos.append(
-                        os.path.splitext(os.path.basename(ff))[0].upper()
-                    )
-            except Exception:
-                pass
-        for c in candidatos:
-            if not c:
-                continue
-            if _es_excluido_candidato(c):
-                return True
-            if c in excl:
-                return True
-        return False
+    resultados = {}
+    excl = {str(x).upper() for x in (exclusiones_extra or []) if x}
 
     def _visitar_occ(occ):
         try:
@@ -184,7 +315,9 @@ def recolectar_ensambles_independientes(ensamble_raiz, exclusiones_extra=None):
         except Exception:
             nombre = str(getattr(occ, "Name", "ENSAMBLE")).split(":")[0]
 
-        if _nombre_excluido(nombre, asm_doc=asm_doc, occ=occ):
+        if _es_excluido_candidato(nombre) or _nombre_en_exclusiones(
+            nombre, asm_doc, occ, excl
+        ):
             for hijo in _iter_subocurrencias(occ):
                 _visitar_occ(hijo)
             return
@@ -222,6 +355,7 @@ def recolectar_ensambles_independientes(ensamble_raiz, exclusiones_extra=None):
         _log(f"ERROR: no se pudieron leer ocurrencias raíz: {exc}")
         return []
 
+    _log(f"  Modo legacy (no tanque OTC 46-A01): recorrer árbol ({total} roots)")
     for i in range(1, total + 1):
         try:
             _visitar_occ(occs.Item(i))

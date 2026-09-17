@@ -1,13 +1,18 @@
 ' COTAS ABIGAIL - Solo piezas acotadas (PIEZAS_ACOTADAS)
 ' Regla externa: COTAS_ILOGIC_ABIGAIL
 '
-' Tanque: seleccion Top+SEGM+BASE y acota piezas por cara.
+' Tanque (OTC/Vantran): seleccion Top+SEGM+BASE; acota piezas por cara.
+'   Corte iProp: se OMITE flat/barrenos/cortes internos.
+'   Doblado: dims generales + alas/flanges; holes/cortes → DESPLIEGUE si hay.
 ' BOARD/GIGA: sin picks; acota TODAS las piezas.
 '
-' Barrenos (cualquier producto: tanque, board, etc.):
-'   Si la chapa tiene barrenos/cortes interiores → vistas DESPLIEGUE
-'   + XCENTRO/YCENTRO (+TYP) + HOLE + THK (misma logica flat GIGA).
-'   TYP de piezas: sin letras A/B/C (otros flujos iLogic si las usan).
+' Barrenos flat DESPLIEGUE:
+'   BOARD: Corte iProp o chapa con huecos → XCENTRO/YCENTRO/HOLE/THK.
+'   TANQUE: solo Doblado con huecos (Corte nunca flat).
+'   TYP: letras A/B/C en piezas normales; cobre/busbar (ABB/GENE/RLG)
+'   sin letras A/B/C (solo anillos / texto TYP).
+'   Cobre: DB marca Seleccionadas=si en las 2 primeras XCENTRO y 2 YCENTRO
+'   desde (0,0); el resto de cotas siguen exportandose igual.
 ' Cobre exclusivo GIGA (ABB/GENE/RLG): 2 JPG (cota + SIN_COTA) y
 '   vista ESTANIADO isometrica.
 '

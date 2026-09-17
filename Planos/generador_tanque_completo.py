@@ -120,6 +120,8 @@ _SUFIJOS_JPG_PIEZA = (
     "YMIN_TYP",
     "XMIN",
     "YMIN",
+    "CUT_LENGTH",
+    "CUT_WIDTH",
     "HOLE\\d{2}",
     "DIAMETRO_EXTERIOR",
     "DIAMETRO_INTERIOR",
@@ -427,6 +429,8 @@ def _extraer_pieza_de_jpg(nombre_archivo):
     except Exception:
         pass
     base = os.path.splitext(os.path.basename(nombre_archivo))[0]
+    # Colisiones de aplanar: ``...__dup1`` no debe crear carpeta basura.
+    base = re.sub(r"__(?:dup|v)\d+$", "", base, flags=re.IGNORECASE)
     match = _RE_SUFIJO_PIEZA_JOB.match(base)
     if match:
         return match.group("pieza")
@@ -441,6 +445,41 @@ def _nombre_carpeta_pieza(nombre_pieza):
     limpio = re.sub(r'[<>:"/\\|?*]+', "_", str(nombre_pieza).strip())
     limpio = limpio.rstrip(". ")
     return limpio or "PIEZA"
+
+
+def _nombre_jpg_destino(nombre_archivo):
+    """
+    Nombre de archivo limpio para el árbol final: quita ``__dupN`` / ``__vN``
+    de colisiones para no crear carpetas/archivos basura.
+    """
+    base, ext = os.path.splitext(os.path.basename(nombre_archivo))
+    base = re.sub(r"__(?:dup|v)\d+$", "", base, flags=re.IGNORECASE)
+    return f"{base}{ext or '.jpg'}"
+
+
+def _mover_jpg_a_destino(ruta, destino_dir, nombre_archivo):
+    """
+    Mueve JPG a destino_dir con nombre sin sufijos de colisión.
+    Si ya existe el destino: mismo tamaño → borra origen; distinto → reemplaza.
+    """
+    os.makedirs(destino_dir, exist_ok=True)
+    nombre_limpio = _nombre_jpg_destino(nombre_archivo)
+    destino = os.path.join(destino_dir, nombre_limpio)
+    if os.path.abspath(ruta) == os.path.abspath(destino):
+        return True
+    if os.path.exists(destino):
+        try:
+            if os.path.getsize(ruta) == os.path.getsize(destino):
+                os.remove(ruta)
+                return True
+        except OSError:
+            pass
+        try:
+            os.remove(destino)
+        except OSError:
+            pass
+    shutil.move(ruta, destino)
+    return True
 
 
 def _carpetas_cara_activas(mapa_por_cara=None):
@@ -490,6 +529,34 @@ def _limpiar_carpetas_cara_vacias_y_legacy(carpeta_piezas):
                 )
         except OSError as err:
             print(f"  AVISO: no se pudo limpiar {nombre}/: {err}")
+    _podar_directorios_sin_jpg(carpeta_piezas)
+
+
+def _podar_directorios_sin_jpg(carpeta_piezas):
+    """
+    Elimina subcarpetas sin ningún JPG (p. ej. ``SEGM1/P71`` vacío tras
+    mover a ``SEGM1/Doblado/Metal/P71``, o residuos ``__dup`` / ``__v2``).
+    """
+    if not os.path.isdir(carpeta_piezas):
+        return
+    borradas = 0
+    # Bottom-up: deepest paths first.
+    for dirpath, dirnames, _files in os.walk(carpeta_piezas, topdown=False):
+        if os.path.abspath(dirpath) == os.path.abspath(carpeta_piezas):
+            continue
+        try:
+            tiene_jpg = False
+            for _r, _d, fs in os.walk(dirpath):
+                if any(f.lower().endswith(".jpg") for f in fs):
+                    tiene_jpg = True
+                    break
+            if not tiene_jpg:
+                shutil.rmtree(dirpath, ignore_errors=True)
+                borradas += 1
+        except OSError:
+            pass
+    if borradas:
+        print(f"  Carpetas vacías podadas: {borradas}")
 
 
 def _reorganizar_piezas_por_cara(carpeta_piezas, mapa_por_cara):
@@ -822,19 +889,13 @@ def _reorganizar_piezas_por_clasificacion(carpeta_piezas, mapa_por_clasificacion
         )
         pieza_folder = _nombre_carpeta_pieza(_extraer_pieza_de_jpg(nombre))
         try:
-            os.makedirs(destino_dir, exist_ok=True)
-            destino = os.path.join(destino_dir, nombre)
-            if os.path.abspath(ruta) == os.path.abspath(destino):
-                continue
-            if os.path.exists(destino):
-                os.remove(destino)
-            shutil.move(ruta, destino)
-            conteo[clave_conteo] = conteo.get(clave_conteo, 0) + 1
-            if clave_conteo.startswith("Corte/"):
-                conteo["Corte"] = conteo.get("Corte", 0) + 1
-            piezas_por_clase.setdefault(clave_conteo, set()).add(pieza_folder)
-            if clave_conteo.startswith("Corte/"):
-                piezas_por_clase.setdefault("Corte", set()).add(pieza_folder)
+            if _mover_jpg_a_destino(ruta, destino_dir, nombre):
+                conteo[clave_conteo] = conteo.get(clave_conteo, 0) + 1
+                if clave_conteo.startswith("Corte/"):
+                    conteo["Corte"] = conteo.get("Corte", 0) + 1
+                piezas_por_clase.setdefault(clave_conteo, set()).add(pieza_folder)
+                if clave_conteo.startswith("Corte/"):
+                    piezas_por_clase.setdefault("Corte", set()).add(pieza_folder)
         except OSError as err:
             print(
                 f"AVISO: no se pudo mover '{nombre}' a "

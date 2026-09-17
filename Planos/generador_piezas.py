@@ -89,6 +89,7 @@ def _reorganizar_clasificacion_dentro_caras(carpeta_piezas, mapa_clasificacion):
         _clasificacion_para_pieza,
         _destino_dirs_clasificacion,
         _limpiar_carpetas_cara_vacias_y_legacy,
+        _mover_jpg_a_destino,
         STAGING_DESPLIEGUE,
         STAGING_ESTANIADO,
     )
@@ -133,13 +134,7 @@ def _reorganizar_clasificacion_dentro_caras(carpeta_piezas, mapa_clasificacion):
                 cara_dir, destino_clase, nombre, staging
             )
             try:
-                os.makedirs(destino_dir, exist_ok=True)
-                destino = os.path.join(destino_dir, nombre)
-                if os.path.abspath(ruta) == os.path.abspath(destino):
-                    continue
-                if os.path.exists(destino):
-                    os.remove(destino)
-                shutil.move(ruta, destino)
+                _mover_jpg_a_destino(ruta, destino_dir, nombre)
             except OSError as err:
                 print(
                     f"AVISO: no se pudo mover '{nombre}' en {cara}/: {err}"
@@ -161,12 +156,15 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
     print(" COTAS ABIGAIL - SOLO PIEZAS (PIEZAS_ACOTADAS)")
     print("=" * 62)
 
-    # TYP de piezas Abigail: sin letras A/B/C (otros flujos las conservan).
+    # TYP A/B/C: ON en Abigail/piezas. Solo cobre/busbar las apaga al acotar.
     try:
         from cota_estilo import set_typ_letras_habilitadas
 
-        set_typ_letras_habilitadas(False)
-        print("  TYP piezas: sin nomenclatura A/B/C (solo anillos / texto TYP).")
+        set_typ_letras_habilitadas(True)
+        print(
+            "  TYP piezas: letras A/B/C activas "
+            "(cobre/busbar ABB/GENE/RLG → sin letras)."
+        )
     except Exception:
         pass
 
@@ -185,6 +183,7 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
         # Cobre ABB/GENE/RLG: además 1× captura SIN_COTA desde FRENTE.
         # El desvío a kits ViewCube es solo para reglas de caras.
         es_board = False
+        tipo_producto = "TANQUE"
         try:
             from producto_tipo import clasificar_producto, aplicar_unidad_producto
 
@@ -194,14 +193,24 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
                 f"— {info.get('motivo')}"
             )
             aplicar_unidad_producto(ensamble=ensamble, info=info)
+            tipo_producto = str(info.get("tipo") or "TANQUE").strip().upper() or "TANQUE"
             if info.get("tipo") == "BOARD":
                 es_board = True
+                tipo_producto = "BOARD"
                 print(
                     "  BOARD: flujo PIEZAS completo; "
                     "ABB/GENE/RLG → cota + SIN_COTA."
                 )
         except Exception as exc_cls:
             print(f"  AVISO clasificar producto: {exc_cls}")
+
+        try:
+            import creador_vistas as _cv_prod
+
+            _cv_prod.configurar_producto_flujo(tipo_producto)
+            print(f"  Regla DESPLIEGUE según producto: {tipo_producto}")
+        except Exception as exc_pf:
+            print(f"  AVISO configurar producto flujo: {exc_pf}")
 
         carpeta_tanque = _carpeta_salida_tanque(plano, ensamble)
         carpeta_piezas = os.path.join(carpeta_tanque, CARPETA_PIEZAS_ACOTADAS)
@@ -278,13 +287,18 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
 
         # BOARD: acota TODAS las piezas únicas. Cobre (ABB/GENE/RLG) = solo
         # doble captura SIN_COTA al exportar; no limita qué se procesa.
-        # Barrenos: cualquier chapa con huecos → DESPLIEGUE + X/Y/HOLE/THK
-        # (también en tanques vía creador_vistas._debe_crear_despliegue).
+        # Barrenos flat: BOARD = Corte o chapa con huecos.
+        # TANQUE = Corte omitido; Doblado + huecos → DESPLIEGUE.
         if es_board and catalogo_filtro is None:
             print(
                 "  BOARD: alcance completo (todas las piezas únicas). "
                 "Barrenos en chapa → DESPLIEGUE X/Y/HOLE/THK. "
                 "Cobre ABB/GENE/RLG → JPG + SIN_COTA + ESTANIADO."
+            )
+        elif not es_board:
+            print(
+                "  TANQUE: Corte → flat solo si hay hueco (XMIN/YMIN/CUT_*, sin HOLE); "
+                "Doblado → dims generales + holes/cortes (flat si hay huecos)."
             )
 
         print(
@@ -303,18 +317,30 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
                 import creador_vistas as _cv_corte
 
                 nombres_corte = set()
+                nombres_doblado = set()
                 for clase, piezas_c in (mapa_clasificacion or {}).items():
-                    if str(clase).casefold() == "corte":
+                    cl = str(clase).casefold()
+                    if cl == "corte":
                         nombres_corte.update(piezas_c or [])
+                    elif cl == "doblado":
+                        nombres_doblado.update(piezas_c or [])
                 _cv_corte.configurar_piezas_corte(nombres_corte)
-                if nombres_corte:
+                _cv_corte.configurar_piezas_doblado(nombres_doblado)
+                if tipo_producto == "TANQUE":
+                    print(
+                        f"  TANQUE Corte iProp: {len(nombres_corte)} → "
+                        "flat solo si hay hueco (XMIN/YMIN/CUT_*, sin HOLE). "
+                        f"Doblado: {len(nombres_doblado)} → "
+                        "flat solo si hay barrenos/cortes."
+                    )
+                elif nombres_corte:
                     print(
                         f"  Corte iProp: {len(nombres_corte)} piezas → "
                         "DESPLIEGUE forzado. "
                         "Otras chapas con barrenos también van a flat."
                     )
             except Exception as exc_corte:
-                print(f"  AVISO configurar piezas Corte: {exc_corte}")
+                print(f"  AVISO configurar piezas Corte/Doblado: {exc_corte}")
         else:
             print(
                 "  AVISO: la detección de clasificación devolvió mapa vacío. "
@@ -328,11 +354,35 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
                     "  AVISO: no hay mapa previo tampoco; todas las piezas "
                     "caerán en SIN CLASIFICACION/."
                 )
+            else:
+                try:
+                    import creador_vistas as _cv_corte
+
+                    nombres_corte = set()
+                    nombres_doblado = set()
+                    for clase, piezas_c in (mapa_clasificacion or {}).items():
+                        cl = str(clase).casefold()
+                        if cl == "corte":
+                            nombres_corte.update(piezas_c or [])
+                        elif cl == "doblado":
+                            nombres_doblado.update(piezas_c or [])
+                    _cv_corte.configurar_piezas_corte(nombres_corte)
+                    _cv_corte.configurar_piezas_doblado(nombres_doblado)
+                except Exception:
+                    pass
 
         if solo:
             _limpiar_solo_cara_piezas(carpeta_piezas, solo)
         else:
-            _limpiar_exportacion_piezas(carpeta_piezas, incremental=incremental)
+            # PIEZAS_FILTRO = reintento parcial: NUNCA vaciar toda la carpeta.
+            filtro_activo = bool(os.environ.get("PIEZAS_FILTRO", "").strip())
+            incr_limpieza = incremental or filtro_activo
+            if filtro_activo and not incremental:
+                print(
+                    "  PIEZAS_FILTRO activo: se conserva PIEZAS_ACOTADAS "
+                    "(no se vacía el job)."
+                )
+            _limpiar_exportacion_piezas(carpeta_piezas, incremental=incr_limpieza)
         _recuperar_antes_de_piezas(inv_app, plano)
 
         print("Ejecutando cotas por pieza...")
@@ -354,21 +404,35 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
         )
         if ok:
             try:
+                mapa_cls = dict(
+                    generador_caras_tanque.LAST_PIEZAS_POR_CLASIFICACION
+                    or mapa_clasificacion
+                    or {}
+                )
+                # Staging raíz (_STAGING_DESPLIEGUE) → clasificación antes
+                # de anidar por cara (evita perder flats al limpiar staging).
+                if mapa_cls:
+                    from generador_tanque_completo import (
+                        STAGING_DESPLIEGUE,
+                        STAGING_ESTANIADO,
+                    )
+
+                    for st in (STAGING_DESPLIEGUE, STAGING_ESTANIADO):
+                        if os.path.isdir(os.path.join(carpeta_piezas, st)):
+                            _reorganizar_piezas_por_clasificacion(
+                                carpeta_piezas, mapa_cls
+                            )
+                            break
                 if mapa_reorg:
                     _reorganizar_piezas_por_cara(carpeta_piezas, mapa_reorg)
                     _reorganizar_clasificacion_dentro_caras(
                         carpeta_piezas,
-                        dict(
-                            generador_caras_tanque.LAST_PIEZAS_POR_CLASIFICACION
-                            or mapa_clasificacion
-                        ),
+                        mapa_cls,
                     )
                 else:
                     _reorganizar_piezas_por_clasificacion(
                         carpeta_piezas,
-                        dict(
-                            generador_caras_tanque.LAST_PIEZAS_POR_CLASIFICACION
-                        ),
+                        mapa_cls,
                     )
             except Exception as err:
                 print(f"AVISO: fallo en reorganización de PIEZAS_ACOTADAS: {err}")
@@ -381,8 +445,13 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
                 print(f"AVISO dossier sync post-reorg: {err_dos}")
 
         # Kits OTC: solo en tanque completo. En BOARD no aplica.
-        # Re-activar A/B/C TYP: ensambles independientes las siguen usando.
-        if not solo and not es_board:
+        # A/B/C TYP siguen ON para ensambles independientes.
+        skip_ens = os.environ.get("SKIP_ENSAMBLES_IND", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        if not solo and not es_board and not skip_ens:
             try:
                 from cota_estilo import set_typ_letras_habilitadas
 
@@ -419,9 +488,17 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
         except Exception:
             pass
         try:
-            from creador_vistas import set_nombre_pieza_completo
+            from creador_vistas import (
+                set_nombre_pieza_completo,
+                configurar_producto_flujo,
+                configurar_piezas_corte,
+                configurar_piezas_doblado,
+            )
 
             set_nombre_pieza_completo(False)
+            configurar_producto_flujo("")
+            configurar_piezas_corte([])
+            configurar_piezas_doblado([])
         except Exception:
             pass
         if inv_app is not None:

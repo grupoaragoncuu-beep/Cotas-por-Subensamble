@@ -42,11 +42,15 @@ def _dbg(msg):
 # de sobrescribir, para que el flujo por lotes pueda consolidar el total al
 # final. Usar ``reset_pendientes_thk()`` al inicio de un flujo.
 LAST_PENDIENTES_THK: list = []
+# Hojas ``_LADO`` donde se acotó Ø de barra/pin sólido (no espesor).
+# El renombrado las convierte a ``_DIAMETRO_EXTERIOR`` en vez de ``_THK``.
+LAST_OD_SOLID_LADO: list = []
 
 
 def reset_pendientes_thk():
     """Vacía el registro global de pendientes THK. Llamar al inicio del flujo."""
     LAST_PENDIENTES_THK.clear()
+    LAST_OD_SOLID_LADO.clear()
 
 
 def _base_hoja(nombre):
@@ -4437,6 +4441,11 @@ def acotar_thk(nombres_permitidos=None):
                 ok, meta = _resolver_circular_solid(
                     hoja, vista, tg, outer, nombre_hoja
                 )
+                if ok:
+                    try:
+                        LAST_OD_SOLID_LADO.append(str(nombre_hoja))
+                    except Exception:
+                        pass
 
         elif tipo == "circular_hollow":
             if _nombre_parece_tierra(nombre_hoja):

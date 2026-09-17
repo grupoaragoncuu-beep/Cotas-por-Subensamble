@@ -1,0 +1,9 @@
+Relanzar completo @ 2026-09-17 00:20:36
+seleccion=seleccion_caras.json
+job=
+Plano: MACHOTE PLANOS.dwg
+Ensamble: 62223-1246-A01.iam
+
+================================================================
+ INICIO: Abigail (PIEZAS_ACOTADAS)
+================================================================

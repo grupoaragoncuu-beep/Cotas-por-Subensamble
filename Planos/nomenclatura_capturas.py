@@ -38,6 +38,8 @@ _TIPOS_HOJA_A_EXPORT = (
     ("DESPLIEGUE_YMIN_TYP", "YMIN_TYP"),
     ("DESPLIEGUE_XMIN", "XMIN"),
     ("DESPLIEGUE_YMIN", "YMIN"),
+    ("DESPLIEGUE_CUT_LENGTH", "CUT_LENGTH"),
+    ("DESPLIEGUE_CUT_WIDTH", "CUT_WIDTH"),
     ("XCENTRO_TYP", "XCENTRO_TYP"),
     ("YCENTRO_TYP", "YCENTRO_TYP"),
     ("XCENTRO", "XCENTRO"),
@@ -46,6 +48,8 @@ _TIPOS_HOJA_A_EXPORT = (
     ("YMIN_TYP", "YMIN_TYP"),
     ("XMIN", "XMIN"),
     ("YMIN", "YMIN"),
+    ("CUT_LENGTH", "CUT_LENGTH"),
+    ("CUT_WIDTH", "CUT_WIDTH"),
     ("DESPLIEGUE_ANCHO", "WIDTH"),
     ("DESPLIEGUE_LARGO", "LENGTH"),
     ("DESPLIEGUE_THK", "THK"),
@@ -85,6 +89,8 @@ _TIPOS_PIEZA_CORE = (
     "YMIN_TYP",
     "XMIN",
     "YMIN",
+    "CUT_LENGTH",
+    "CUT_WIDTH",
     "DIAMETRO_EXTERIOR",
     "DIAMETRO_INTERIOR",
     "LARGO_PATA",
@@ -269,9 +275,19 @@ def armar_nombre_captura_referencia(job, item, etiqueta, valor_cota, typ=False) 
     return f"{j}{SEP}{i}{SEP}{et}_{n_txt}"
 
 
+# Sufijo que agrega aplanar/reorg ante colisión de nombres en la misma carpeta.
+_RE_SUFIJO_DUP = re.compile(r"__(?:dup|v)\d+$", re.IGNORECASE)
+
+
+def _base_sin_dup(nombre_archivo: str) -> str:
+    """Basename sin extensión y sin ``__dupN`` (colisiones de aplanar)."""
+    base = os.path.splitext(os.path.basename(nombre_archivo))[0]
+    return _RE_SUFIJO_DUP.sub("", base)
+
+
 def extraer_item_de_captura_pieza(nombre_archivo: str) -> str:
     """ITEM desde JPG Abigail (formato nuevo o legacy)."""
-    base = os.path.splitext(os.path.basename(nombre_archivo))[0]
+    base = _base_sin_dup(nombre_archivo)
     m = _RE_CAPTURA_PIEZA_NUEVA.match(base)
     if m:
         return m.group("item")
@@ -283,7 +299,7 @@ def extraer_item_de_captura_pieza(nombre_archivo: str) -> str:
 
 def extraer_item_de_captura_referencia(nombre_archivo: str) -> str:
     """ITEM desde JPG Subensamble (formato nuevo o legacy)."""
-    base = os.path.splitext(os.path.basename(nombre_archivo))[0]
+    base = _base_sin_dup(nombre_archivo)
     m = _RE_CAPTURA_REF_NUEVA.match(base)
     if m:
         return m.group("item")

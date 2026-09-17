@@ -7,7 +7,13 @@ import time
 import importlib
 import win32com.client
 
-from inventor_com import conectar_inventor, obtener_ilogic_automation
+from inventor_com import (
+    com_vivo,
+    conectar_inventor,
+    localizar_documento,
+    obtener_ilogic_automation,
+    reconectar_inventor,
+)
 
 try:
     from PIL import Image
@@ -73,6 +79,125 @@ def _actualizar_inventor(inv_app):
         inv_app.UserInterfaceManager.DoEvents()
     except:
         pass
+
+
+def _identidad_doc(doc):
+    """(DisplayName, FullFileName) tolerante a proxies COM muertos."""
+    nombre = ""
+    ruta = ""
+    try:
+        nombre = str(doc.DisplayName or "")
+    except Exception:
+        pass
+    try:
+        ruta = str(doc.FullFileName or "")
+    except Exception:
+        pass
+    return nombre, ruta
+
+
+def _refrescar_pieza_doc(inv_app, part_doc, part_name):
+    """Reubica un PartDocument tras reconexión COM."""
+    try:
+        _ = part_doc.SubType
+        return part_doc
+    except Exception:
+        pass
+    nombre, ruta = _identidad_doc(part_doc)
+    if not nombre:
+        nombre = str(part_name or "")
+    hallado = localizar_documento(
+        inv_app, display_name=nombre, full_file_name=ruta or None
+    )
+    return hallado if hallado is not None else part_doc
+
+
+def _recuperar_com_entre_lotes(
+    inv_app, ensamble_doc, doc, lote=None, log_fn=None, espera_s=2.5
+):
+    """
+    Tras un lote (o fallo RPC): reatacha Inventor y reubica plano/ensamble.
+
+    Evita que lotes 2..N mueran en ``inv_app.TransientGeometry`` con
+    RPC_E_SYS_CALL_FAILED (-2147417856).
+    """
+    def _log(msg):
+        if log_fn:
+            log_fn(msg)
+
+    ens_name, ens_path = _identidad_doc(ensamble_doc)
+    doc_name, doc_path = _identidad_doc(doc)
+
+    vivo = com_vivo(inv_app)
+    if vivo:
+        # Respiro preventivo aunque el proxy aún responda.
+        try:
+            inv_app.SilentOperation = False
+            inv_app.ScreenUpdating = True
+        except Exception:
+            pass
+        _actualizar_inventor(inv_app)
+        try:
+            import pythoncom
+
+            for _ in range(12):
+                pythoncom.PumpWaitingMessages()
+                time.sleep(0.1)
+        except Exception:
+            time.sleep(1.0)
+        if com_vivo(inv_app):
+            lote_ok = None
+            if lote:
+                lote_ok = [
+                    (_refrescar_pieza_doc(inv_app, pd, pn), pn)
+                    for pd, pn in lote
+                ]
+            return inv_app, ensamble_doc, doc, lote_ok or lote
+
+    _log(
+        f"  COM recovery: reatachando Inventor "
+        f"(espera={espera_s:.1f}s; plano={doc_name or '?'})..."
+    )
+    try:
+        nuevo = reconectar_inventor(espera_s=espera_s)
+    except Exception as exc:
+        _log(f"  COM recovery FALLÓ al reconectar: {exc}")
+        return inv_app, ensamble_doc, doc, lote
+
+    ens_nuevo = localizar_documento(
+        nuevo, display_name=ens_name, full_file_name=ens_path or None
+    )
+    doc_nuevo = localizar_documento(
+        nuevo, display_name=doc_name, full_file_name=doc_path or None
+    )
+    if ens_nuevo is None or doc_nuevo is None:
+        _log(
+            "  COM recovery: no se reubicó plano/ensamble; "
+            f"ens={ens_nuevo is not None} plano={doc_nuevo is not None}"
+        )
+        return nuevo, ensamble_doc, doc, lote
+
+    try:
+        doc_nuevo.Activate()
+    except Exception:
+        pass
+    try:
+        nuevo.SilentOperation = True
+        nuevo.ScreenUpdating = True
+    except Exception:
+        pass
+
+    lote_nuevo = lote
+    if lote:
+        lote_nuevo = [
+            (_refrescar_pieza_doc(nuevo, pd, pn), pn) for pd, pn in lote
+        ]
+
+    if not com_vivo(nuevo):
+        _log("  COM recovery: TransientGeometry sigue muerto tras reatachar.")
+    else:
+        _log("  COM recovery OK.")
+    return nuevo, ens_nuevo, doc_nuevo, lote_nuevo
 
 
 def _obtener_ilogic_automation(inv_app):
@@ -193,6 +318,7 @@ def _convertir_nombre_tecnico_hoja(
     hojas_diametro_visibles=None,
     hojas_diametro_bases=None,
     hojas_lado_sin_thk_bases=None,
+    hojas_od_solid_bases=None,
 ) -> str:
     """
     Convierte nombres finales de hoja.
@@ -208,6 +334,7 @@ def _convertir_nombre_tecnico_hoja(
       en ``hojas_lado_sin_thk_bases`` (lista de pendientes de THK), su nombre
       se conserva como ``_LADO`` para que el JPG resultante no mienta al
       llamarse ``_THK`` sin cota real.
+    - LADO con Ø sólido (barra/pin) -> DIAMETRO_EXTERIOR (no THK).
     - ALTO se mantiene (4ª captura de perfiles U/L)
     """
     if hojas_diametro_visibles is None:
@@ -219,14 +346,43 @@ def _convertir_nombre_tecnico_hoja(
     if hojas_lado_sin_thk_bases is None:
         hojas_lado_sin_thk_bases = set()
 
+    if hojas_od_solid_bases is None:
+        hojas_od_solid_bases = set()
+
     base, sufijo = _separar_nombre_hoja(nombre)
 
     base_up = base.upper()
     visible_up = nombre.upper()
 
+    # Piezas con Ø sólido ya cotado en LADO: no forzar FRENTE→DIAMETRO
+    # (suele ser vista de largo sin círculo; el OD real está en LADO).
+    od_piezas = set()
+    for b in hojas_od_solid_bases:
+        bu = str(b).upper()
+        if bu.endswith("_LADO"):
+            od_piezas.add(bu[: -len("_LADO")])
+        elif bu.endswith("_DESPLIEGUE_LADO"):
+            od_piezas.add(bu[: -len("_DESPLIEGUE_LADO")])
+        else:
+            od_piezas.add(re.sub(r"_(?:DESPLIEGUE_)?LADO$", "", bu))
+
+    pieza_base = base_up
+    for suf in (
+        "_DESPLIEGUE_FRENTE_1",
+        "_DESPLIEGUE_FRENTE_2",
+        "_DESPLIEGUE_LADO",
+        "_FRENTE_1",
+        "_FRENTE_2",
+        "_LADO",
+    ):
+        if pieza_base.endswith(suf):
+            pieza_base = pieza_base[: -len(suf)]
+            break
+    tiene_od_lado = pieza_base in od_piezas
+
     es_diametro = (
-        visible_up in hojas_diametro_visibles
-        or base_up in hojas_diametro_bases
+        (visible_up in hojas_diametro_visibles or base_up in hojas_diametro_bases)
+        and not tiene_od_lado
     )
 
     if "_ALTO" in base_up:
@@ -243,11 +399,15 @@ def _convertir_nombre_tecnico_hoja(
         or "_YCENTRO" in base_up
         or "_XMIN" in base_up
         or "_YMIN" in base_up
+        or "_CUT_LENGTH" in base_up
+        or "_CUT_WIDTH" in base_up
     ):
-        pass  # barrenos/cortes flat X/Y (+ TYP) desde esquina IL
+        pass  # barrenos/cortes flat X/Y (+ TYP) / tamaño de hueco
 
     elif "_DESPLIEGUE_LADO" in base:
-        if base_up in hojas_lado_sin_thk_bases:
+        if base_up in hojas_od_solid_bases or tiene_od_lado:
+            base = base.replace("_DESPLIEGUE_LADO", "_DESPLIEGUE_DIAMETRO_EXTERIOR")
+        elif base_up in hojas_lado_sin_thk_bases:
             pass
         else:
             base = base.replace("_DESPLIEGUE_LADO", "_DESPLIEGUE_THK")
@@ -285,8 +445,9 @@ def _convertir_nombre_tecnico_hoja(
         pass  # captura SIN_COTA isométrica; no renombrar
 
     elif "_LADO" in base:
-        # No renombramos a _THK cuando el resolver de THK falló para esta hoja.
-        if base_up in hojas_lado_sin_thk_bases:
+        if base_up in hojas_od_solid_bases or tiene_od_lado:
+            base = base.replace("_LADO", "_DIAMETRO_EXTERIOR")
+        elif base_up in hojas_lado_sin_thk_bases:
             pass
         else:
             base = base.replace("_LADO", "_THK")
@@ -306,7 +467,9 @@ def _convertir_nombre_tecnico_hoja(
     return base + sufijo
 
 
-def renombrar_hojas_finales(doc, nombres_permitidos=None, hojas_lado_sin_thk=None):
+def renombrar_hojas_finales(
+    doc, nombres_permitidos=None, hojas_lado_sin_thk=None, hojas_od_solid=None
+):
     """
     Renombra hojas al final del flujo:
     - Circulares:
@@ -318,6 +481,7 @@ def renombrar_hojas_finales(doc, nombres_permitidos=None, hojas_lado_sin_thk=Non
     - LADO -> THK (**solo si THK cotó la hoja**; si está en
       ``hojas_lado_sin_thk`` mantenemos ``_LADO`` para no engañar con un
       nombre ``_THK`` cuando en realidad no hay cota).
+    - LADO con Ø sólido (``hojas_od_solid``) -> DIAMETRO_EXTERIOR.
 
     Devuelve un dict `{nombre_original_upper: nombre_nuevo_str}` con los
     renombrados aplicados (útil para tracking en flujos por lotes).
@@ -334,6 +498,21 @@ def renombrar_hojas_finales(doc, nombres_permitidos=None, hojas_lado_sin_thk=Non
         for nombre in hojas_lado_sin_thk:
             base, _ = _separar_nombre_hoja(str(nombre))
             hojas_lado_sin_thk_bases.add(base.upper())
+
+    hojas_od_solid_bases = set()
+    if hojas_od_solid:
+        for nombre in hojas_od_solid:
+            base, _ = _separar_nombre_hoja(str(nombre))
+            hojas_od_solid_bases.add(base.upper())
+    else:
+        try:
+            import THK as _thk_mod
+
+            for nombre in getattr(_thk_mod, "LAST_OD_SOLID_LADO", []) or []:
+                base, _ = _separar_nombre_hoja(str(nombre))
+                hojas_od_solid_bases.add(base.upper())
+        except Exception:
+            pass
 
     cambios = 0
     mapeo = {}
@@ -363,6 +542,7 @@ def renombrar_hojas_finales(doc, nombres_permitidos=None, hojas_lado_sin_thk=Non
                 hojas_diametro_visibles,
                 hojas_diametro_bases,
                 hojas_lado_sin_thk_bases,
+                hojas_od_solid_bases,
             )
 
             nombre_nuevo_base, _ = _separar_nombre_hoja(nombre_nuevo_visible)
@@ -411,6 +591,8 @@ _SUFIJOS_JPG_PIEZA_EXPORTADA = (
     "YMIN_TYP",
     "XMIN",
     "YMIN",
+    "CUT_LENGTH",
+    "CUT_WIDTH",
     r"HOLE\d{2}",
     "DIAMETRO_EXTERIOR",
     "DIAMETRO_INTERIOR",
@@ -1138,6 +1320,10 @@ def _leer_valor_cota_hoja(hoja):
                 out = _fmt(txt.split("=", 1)[-1])
                 if out and out != "0":
                     return out
+            if up.startswith("CUT=") and any(ch.isdigit() for ch in txt):
+                out = _fmt(txt.split("=", 1)[-1])
+                if out and out != "0":
+                    return out
     except Exception:
         pass
 
@@ -1268,6 +1454,13 @@ def _hoja_exportable(hoja, nombre_hoja):
             "_LARGO_PATA",
             "_DIAMETRO",
             "_FRENTE",
+            "_XMIN",
+            "_YMIN",
+            "_XCENTRO",
+            "_YCENTRO",
+            "_CUT_LENGTH",
+            "_CUT_WIDTH",
+            "_HOLE",
         )
     )
     if es_cota and not _hoja_tiene_cota_asociativa(hoja):
@@ -1281,6 +1474,27 @@ def _hoja_exportable(hoja, nombre_hoja):
             if v is not None and v >= 0.5:
                 return False, "nota THK sospechosa (>=0.5 in sin cota asociativa)"
             return True, ""
+        # Ø sólido / varilla: a veces solo queda nota Ø / DIAMETRO=…
+        if "_DIAMETRO" in nombre_up:
+            valor = _leer_valor_cota_hoja(hoja)
+            try:
+                v = float(str(valor).replace(",", "."))
+            except Exception:
+                v = None
+            if v is not None and v > 0:
+                return True, ""
+        # XMIN/YMIN/CUT_* dibujados por sketch + nota XY=/CUT_=
+        if any(
+            t in nombre_up
+            for t in ("_XMIN", "_YMIN", "_XCENTRO", "_YCENTRO", "_CUT_LENGTH", "_CUT_WIDTH")
+        ):
+            valor = _leer_valor_cota_hoja(hoja)
+            try:
+                v = float(str(valor).replace(",", "."))
+            except Exception:
+                v = None
+            if v is not None and v > 0:
+                return True, ""
         return False, "sin GeneralDimension (posible solo-nota)"
     return True, ""
 
@@ -1351,6 +1565,7 @@ def exportar_hojas_jpg(
     carpeta_salida=None,
     nombres_permitidos=None,
     hojas_lado_sin_thk=None,
+    hojas_od_solid=None,
     nombre_job=None,
 ):
     """
@@ -1364,6 +1579,9 @@ def exportar_hojas_jpg(
     `hojas_lado_sin_thk` (opcional): lista de hojas ``_LADO`` cuyo THK no se
     pudo cotar. Se usa para NO renombrar el archivo a ``_THK``; conserva el
     sufijo ``_LADO`` para evitar dar la falsa impresión de que la cota existe.
+
+    `hojas_od_solid` (opcional): hojas ``_LADO`` con Ø sólido → se tratan
+    como ``DIAMETRO_EXTERIOR`` al convertir el nombre.
 
     `nombre_job` (opcional): nombre del ensamble (JOB) para nomenclatura
     ``{JOB}__{ITEM}__{LENGTH|WIDTH|THK|…}_{N}.jpg``.
@@ -1449,6 +1667,21 @@ def exportar_hojas_jpg(
             base, _ = _separar_nombre_hoja(str(nombre))
             hojas_lado_sin_thk_bases.add(base.upper())
 
+    hojas_od_solid_bases = set()
+    if hojas_od_solid:
+        for nombre in hojas_od_solid:
+            base, _ = _separar_nombre_hoja(str(nombre))
+            hojas_od_solid_bases.add(base.upper())
+    else:
+        try:
+            import THK as _thk_mod
+
+            for nombre in getattr(_thk_mod, "LAST_OD_SOLID_LADO", []) or []:
+                base, _ = _separar_nombre_hoja(str(nombre))
+                hojas_od_solid_bases.add(base.upper())
+        except Exception:
+            pass
+
     permitidos_up = None
     if nombres_permitidos is not None:
         permitidos_up = {str(x).upper() for x in nombres_permitidos}
@@ -1532,6 +1765,7 @@ def exportar_hojas_jpg(
                 hojas_diametro_visibles,
                 hojas_diametro_bases,
                 hojas_lado_sin_thk_bases,
+                hojas_od_solid_bases,
             )
         except:
             nombre_hoja = f"Hoja_{i}"
@@ -2152,28 +2386,60 @@ def ejecutar_flujo_desde_app(
         for idx_lote, lote in enumerate(_chunks(piezas_pendientes, tam_lote), start=1):
             log(f"\n===== LOTE {idx_lote} — {len(lote)} piezas ({contador_global + 1}..{contador_global + len(lote)} de {total_pendientes}) =====")
 
+            # Respiro / reatachado COM entre lotes (evita RPC tras lote 1).
+            if not primer_lote or not com_vivo(inv_app):
+                inv_app, ensamble_doc, doc, lote = _recuperar_com_entre_lotes(
+                    inv_app,
+                    ensamble_doc,
+                    doc,
+                    lote=lote,
+                    log_fn=log,
+                    espera_s=2.5 if primer_lote else 3.0,
+                )
+                nombre_machote = _nombre_hoja_machote(doc) or nombre_machote
+
             try:
                 inv_app.ScreenUpdating = True
             except Exception:
                 pass
 
-            # 1) Crear vistas del lote
+            # 1) Crear vistas del lote (1 reintento si TransientGeometry RPC)
             log(f"  [chk] LOTE {idx_lote}: creando vistas...")
-            try:
-                ok_lote, nombres_hojas = creador_vistas.crear_vistas_lote(
-                    inv_app,
-                    ensamble_doc,
-                    doc,
-                    lote,
-                    contador_inicio=contador_global,
-                )
-                contador_global += len(lote)
-                if not ok_lote or not nombres_hojas:
-                    log(f"  AVISO lote {idx_lote}: sin hojas creadas, se salta.")
-                    continue
-            except Exception as e:
-                log(f"❌ Error creando vistas del lote {idx_lote}: {e}")
-                log(traceback.format_exc())
+            ok_lote = False
+            nombres_hojas = []
+            for intento in (1, 2):
+                try:
+                    ok_lote, nombres_hojas = creador_vistas.crear_vistas_lote(
+                        inv_app,
+                        ensamble_doc,
+                        doc,
+                        lote,
+                        contador_inicio=contador_global,
+                    )
+                    break
+                except Exception as e:
+                    log(
+                        f"❌ Error creando vistas del lote {idx_lote} "
+                        f"(intento {intento}): {e}"
+                    )
+                    log(traceback.format_exc())
+                    if intento >= 2:
+                        break
+                    log(f"  Reintento COM del lote {idx_lote}...")
+                    inv_app, ensamble_doc, doc, lote = _recuperar_com_entre_lotes(
+                        inv_app,
+                        ensamble_doc,
+                        doc,
+                        lote=lote,
+                        log_fn=log,
+                        espera_s=4.0,
+                    )
+                    nombre_machote = _nombre_hoja_machote(doc) or nombre_machote
+
+            contador_global += len(lote)
+            if not ok_lote or not nombres_hojas:
+                log(f"  AVISO lote {idx_lote}: sin hojas creadas, se salta.")
+                primer_lote = False
                 continue
 
             # Mantener ScreenUpdating=True mientras se aplican cotas / THK.
@@ -2239,6 +2505,12 @@ def ejecutar_flujo_desde_app(
                 )
             except Exception:
                 pendientes_snapshot = []
+            try:
+                od_solid_snapshot = list(
+                    getattr(THK, "LAST_OD_SOLID_LADO", []) or []
+                )
+            except Exception:
+                od_solid_snapshot = []
 
             # 4) Renombrar hojas del lote (obtenemos nombres finales para export/borrar).
             log(f"  [chk] LOTE {idx_lote}: renombrando hojas...")
@@ -2248,6 +2520,7 @@ def ejecutar_flujo_desde_app(
                     doc,
                     nombres_permitidos=nombres_para_rename,
                     hojas_lado_sin_thk=pendientes_snapshot,
+                    hojas_od_solid=od_solid_snapshot,
                 ) or {}
             except Exception as e:
                 log(f"AVISO renombrando hojas del lote {idx_lote}: {e}")
@@ -2273,6 +2546,7 @@ def ejecutar_flujo_desde_app(
                     carpeta_salida=carpeta_salida,
                     nombres_permitidos=nombres_finales,
                     hojas_lado_sin_thk=pendientes_snapshot,
+                    hojas_od_solid=od_solid_snapshot,
                     nombre_job=getattr(ensamble_doc, "DisplayName", None),
                 )
             except Exception as e:

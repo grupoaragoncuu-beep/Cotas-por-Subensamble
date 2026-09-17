@@ -817,6 +817,26 @@ def acotar_barrenos_placas(nombres_frente_ok=None):
         base_cmp = nombre_up.rsplit(":", 1)[0]
         if objetivo is not None and base_cmp not in objetivo:
             continue
+        # TANQUE + iProp Corte: omitir barrenos (flat y doblado).
+        # Pizarrón: "En Tanks se omite CORTE → No Flat / No Barrenos / No cortes internos".
+        try:
+            from creador_vistas import producto_flujo_actual, _es_pieza_corte
+
+            if producto_flujo_actual() == "TANQUE":
+                pieza_hoja = re.sub(
+                    r"_(?:DESPLIEGUE_)?FRENTE_[12]$",
+                    "",
+                    base_cmp,
+                    flags=re.IGNORECASE,
+                )
+                if _es_pieza_corte(pieza_hoja):
+                    print(
+                        f"  {base_cmp}: TANQUE/Corte → omitido HOLE "
+                        f"(cortes rectangulares van por barrenos_xy)"
+                    )
+                    continue
+        except Exception:
+            pass
         if hoja.DrawingViews.Count < 1:
             continue
         vista = hoja.DrawingViews.Item(1)
@@ -1106,7 +1126,10 @@ def acotar_diametros(hojas_pendientes=None):
             anillo_objetivo = None
             etiqueta = ""
 
-            anillos_validos = [a for a in anillos if a['tamaño'] > 0.3]
+            anillos_validos = [a for a in anillos if a['tamaño'] > 0.08]
+            if not anillos_validos and anillos:
+                # Ø chicos en hoja (barra Ø0.375 @ escala baja)
+                anillos_validos = list(anillos)
 
             if "_FRENTE_1" in nombre_hoja:
                 if anillos_validos:

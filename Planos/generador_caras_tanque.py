@@ -620,6 +620,10 @@ def _es_excluir_contenedor_global(nombre):
     )
     if any(t in u for t in tags):
         return True
+    # Kits independientes OTC (1250/1251/…, 1248-A20, SP-…): van al
+    # instructivo, NO a cotas por cara/subensamble.
+    if _es_kit_independiente_otc_nombre(nombre):
+        return True
     # "TAPA" / "COVER" como palabra completa del nombre.
     tokens = re.split(r"[\s_\-:]+", u)
     return "TAPA" in tokens or "COVER" in tokens
@@ -4941,7 +4945,7 @@ def _marcas_typ_en_accesorios(
         """centros_radio: lista (x, y, radio_exterior) YA ordenada cerca→lejos."""
         if not etiquetar_letras or inv_app is None:
             return
-        # Abigail/piezas apaga A/B/C; caras/subensamble las mantienen.
+        # Cobre/busbar apaga A/B/C; resto de Abigail y caras las mantienen.
         if not typ_letras_habilitadas():
             return
         if len(centros_radio) < 2:
@@ -7215,14 +7219,197 @@ def _es_contenedor_cara_otc(nombre, etiqueta=""):
     if etiqueta_u == "BASE":
         return rol == "48" and anum == 2
     if etiqueta_u.startswith("SEGM"):
-        return rol == "48" and anum in (3, 4, 5, 6)
+        # OTC clásico A03..A06; en 62223 la 4ª pared es A08 (P09 debajo).
+        return rol == "48" and anum in (3, 4, 5, 6, 8)
 
     # Sin etiqueta: cualquier cara válida OTC.
     if rol == "47":
         return True
-    if rol == "48" and anum in (2, 3, 4, 5, 6):
+    if rol == "48" and anum in (2, 3, 4, 5, 6, 8):
         return True
     return False
+
+
+def _es_kit_independiente_otc_nombre(nombre) -> bool:
+    """
+    True = kit de armado OTC (root tanque − casco − TOP).
+
+    Incluye ``*-1250-A*``, ``*-1248-A20``, ``SP-792``, etc.
+    Excluye tanque/tapa/casco/paredes A02..A06.
+    """
+    nom = str(nombre or "").split(":")[0].strip()
+    if not nom:
+        return False
+    info = _parse_codigo_otc(nom)
+    if info and info["tipo"] == "A":
+        rol = _familia_otc_rol(info["familia"])
+        anum = int(info["numero"])
+        if rol in ("46", "47"):
+            return False
+        # Casco/paredes OTC (A01..A06 + A08 como 4ª pared en algunos tanques).
+        if rol == "48" and anum in (1, 2, 3, 4, 5, 6, 8):
+            return False
+        return True
+    if nom.upper().startswith("SP-"):
+        return True
+    return False
+
+
+def _buscar_segm_iam_que_contiene(ensamble, occ):
+    """
+    Si el pick cayó en una placa suelta, localiza el IAM SEGM (A03..A06)
+    que la contiene bajo el tanque o bajo el casco.
+    """
+    if ensamble is None or occ is None:
+        return None
+    ruta_hoja = _ruta_occurrence(occ)
+    if not ruta_hoja:
+        return None
+    for cand in _listar_segm_iams_otc(ensamble):
+        ruta_c = _ruta_occurrence(cand)
+        if _ruta_es_descendiente(ruta_hoja, ruta_c):
+            return cand
+    return None
+
+
+def _listar_segm_iams_otc(ensamble):
+    """IAMs de pared OTC ``*-1248-A03..A06`` o ``A08`` (raíz o bajo casco)."""
+    out = []
+    if ensamble is None:
+        return out
+    vistos = set()
+
+    def _agregar_si_segm(o):
+        try:
+            if not _es_ensamble_occurrence(o):
+                return
+            if not _es_contenedor_cara_otc(str(o.Name), "SEGM1"):
+                return
+            clave = _ruta_occurrence(o) or _nombre_occ_corto(o)
+            if clave in vistos:
+                return
+            vistos.add(clave)
+            out.append(o)
+        except Exception:
+            return
+
+    def _walk(o, depth=0):
+        if o is None or depth > 8:
+            return
+        _agregar_si_segm(o)
+        try:
+            for j in range(1, o.SubOccurrences.Count + 1):
+                _walk(o.SubOccurrences.Item(j), depth + 1)
+        except Exception:
+            return
+
+    try:
+        for i in range(1, ensamble.ComponentDefinition.Occurrences.Count + 1):
+            _walk(ensamble.ComponentDefinition.Occurrences.Item(i), 0)
+    except Exception:
+        return out
+    return out
+
+
+def _nombre_occ_corto(occ) -> str:
+    try:
+        return str(occ.Name).split(":")[0].strip().upper()
+    except Exception:
+        return ""
+
+
+def _mejor_segm_iam_libre(ensamble, normal, usados, pivot=None):
+    """
+    Entre A03..A06 libres, elige el IAM cuya dirección centro←pivot
+    mejor alinea con la normal del pick (SEGM2 placa suelta → A06 típico).
+    """
+    libres = []
+    usados_u = {str(x).upper() for x in (usados or set())}
+    for cand in _listar_segm_iams_otc(ensamble):
+        nom = _nombre_occ_corto(cand)
+        if not nom or nom in usados_u:
+            continue
+        libres.append(cand)
+    if not libres:
+        return None
+    if normal is None:
+        return libres[0]
+    nrm = _norm(tuple(float(x) for x in normal))
+    mejor = None
+    mejor_score = -2.0
+    for cand in libres:
+        cen = _centroide_occurrence(cand)
+        if cen is None:
+            continue
+        if pivot is not None:
+            vec = (
+                cen[0] - pivot[0],
+                cen[1] - pivot[1],
+                cen[2] - pivot[2],
+            )
+        else:
+            vec = cen
+        score = _dot(_norm(vec), nrm)
+        if score > mejor_score:
+            mejor_score = score
+            mejor = cand
+    return mejor if mejor is not None else libres[0]
+
+
+def _reparar_segms_contenedor_otc(ensamble, mapa, pivot=None):
+    """
+    Si un SEGM no resolvió a ``*-A03..A06`` (p.ej. pick en P09 suelta),
+    reasigna el IAM de pared libre mejor alineado con la normal del pick.
+    """
+    if not mapa:
+        return mapa
+    usados = set()
+    for et, seg in mapa.items():
+        if not str(et).upper().startswith("SEGM"):
+            continue
+        occ = (seg or {}).get("occurrence")
+        if occ is None:
+            continue
+        nom = _nombre_occ_corto(occ)
+        if _es_contenedor_cara_otc(nom, str(et)):
+            usados.add(nom)
+
+    for et, seg in list(mapa.items()):
+        et_u = str(et).upper()
+        if not et_u.startswith("SEGM") or not seg:
+            continue
+        occ = seg.get("occurrence")
+        nom = _nombre_occ_corto(occ) if occ is not None else ""
+        if occ is not None and _es_contenedor_cara_otc(nom, et_u):
+            continue
+        cand = _mejor_segm_iam_libre(
+            ensamble, seg.get("normal"), usados, pivot=pivot
+        )
+        if cand is None:
+            log(
+                f"  AVISO: {et_u} sin IAM A03..A06 libre para reparar "
+                f"(pick={nom or '?'})"
+            )
+            continue
+        nom_c = _nombre_occ_corto(cand)
+        usados.add(nom_c)
+        piezas = _piezas_desde_occurrence(cand)
+        ensamble_seg = ensamble
+        try:
+            if _es_ensamble_occurrence(cand):
+                ensamble_seg = _como_ensamble(cand.Definition.Document)
+        except Exception:
+            ensamble_seg = ensamble
+        seg["occurrence"] = cand
+        seg["piezas"] = piezas
+        seg["ensamble_segmento"] = ensamble_seg
+        seg["centroide"] = _centroide_occurrence(cand)
+        seg["nombre"] = et_u
+        log(
+            f"  {et_u} reparado OTC -> {nom_c} "
+            f"(pick no bajo A03..A06; piezas={len(piezas)})"
+        )
+    return mapa
 
 
 def _es_shell_o_tanque_otc(nombre):
@@ -7301,7 +7488,7 @@ def _listar_paredes_nesting_bajo(occ, profundidad_max=4, profundidad=0):
     return halladas
 
 
-def _contenedor_desde_occurrence(occ, etiqueta=""):
+def _contenedor_desde_occurrence(occ, etiqueta="", ensamble=None):
     """
     Contenedor del pick para catálogo/visibilidad.
 
@@ -7335,6 +7522,20 @@ def _contenedor_desde_occurrence(occ, etiqueta=""):
         if padre is None:
             break
         actual = padre
+
+    # 1b) SEGM: pick en placa suelta → buscar A03..A06 que la contenga.
+    if etiqueta_u.startswith("SEGM") and ensamble is not None:
+        hallado = _buscar_segm_iam_que_contiene(ensamble, occ)
+        if hallado is not None:
+            try:
+                log(
+                    f"  SEGM contenedor OTC por contención: "
+                    f"{str(hallado.Name).split(':')[0]} "
+                    f"(pick={str(occ.Name).split(':')[0]})"
+                )
+            except Exception:
+                pass
+            return hallado
 
     # 2) TOP genérico (familias sin código OTC estricto).
     if etiqueta_u == "TOP":
@@ -7386,7 +7587,9 @@ def _segmento_desde_pick(ensamble, pick, etiqueta_fallback=""):
     etiqueta = str(pick.get("etiqueta") or etiqueta_fallback or "").upper()
     occ = _buscar_occurrence_por_nombre(ensamble, pick.get("occ_name"))
     contenedor = (
-        _contenedor_desde_occurrence(occ, etiqueta) if occ is not None else None
+        _contenedor_desde_occurrence(occ, etiqueta, ensamble=ensamble)
+        if occ is not None
+        else None
     )
     pared_nesting = (
         _pared_nesting_desde_occurrence(occ) if occ is not None else None
@@ -7564,6 +7767,16 @@ def _crear_caras_desde_seleccion(inv_app, plano, ensamble, seleccion):
             f"piezas={len(mapa[etiqueta]['piezas'])}, "
             f"pared={mapa[etiqueta].get('pared_base') or '-'})"
         )
+
+    # SEGM2 (u otros) con pick en placa P suelta → forzar A03..A06 libre.
+    pivot = None
+    try:
+        pivot = tuple(float(x) for x in (seleccion.get("pivot_cm") or ()))
+        if len(pivot) != 3:
+            pivot = None
+    except Exception:
+        pivot = None
+    _reparar_segms_contenedor_otc(ensamble, mapa, pivot=pivot)
 
     mapa["TOP"] = top_seg
     log(
