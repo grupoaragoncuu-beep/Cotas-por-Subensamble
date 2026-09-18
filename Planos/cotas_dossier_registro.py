@@ -681,6 +681,24 @@ def clasificar_type_y_spoteos(
     return "TYP", n
 
 
+def es_clasificacion_almacen(clasificacion: str = "", ruta: str = "") -> bool:
+    """True si la cota es Almacén (no se publica ni registra)."""
+    c = str(clasificacion or "").strip().casefold()
+    if c in ("almacén", "almacen") or c.startswith("almacén/") or c.startswith(
+        "almacen/"
+    ):
+        return True
+    try:
+        parts = [
+            p.casefold()
+            for p in os.path.normpath(str(ruta or "")).replace("/", "\\").split("\\")
+            if p
+        ]
+        return "almacén" in parts or "almacen" in parts
+    except Exception:
+        return False
+
+
 def proceso_desde_ruta(ruta: str) -> str:
     """
     Extrae clasificación desde JPGS/<proceso>/[anidados]/...
@@ -734,47 +752,78 @@ def proceso_desde_ruta(ruta: str) -> str:
             else:
                 canon[key] = proc
 
+        # Tras JPGS pueden venir las 3 raíces del tanque; no cortar ahí.
+        _raices_flujo = {
+            "piezas_acotadas",
+            "cotas_por_referencia",
+            "ensambles_independientes",
+            "board",
+        }
+        _caras = {
+            "segm1",
+            "segm2",
+            "segm3",
+            "segm4",
+            "top",
+            "base",
+            "otros",
+            "front",
+            "back",
+            "left",
+            "right",
+            "bottom",
+        }
+
         if "jpgs" in low:
             i = low.index("jpgs")
-            if i + 1 < len(parts):
-                cand = parts[i + 1]
+            j = i + 1
+            # Saltar PIEZAS_ACOTADAS / COTAS_… / ENSAMBLES_… y cara SEGM/TOP.
+            while j < len(parts) and not _es_archivo(parts[j]):
+                key = parts[j].casefold()
+                if key in _raices_flujo or key in _caras:
+                    j += 1
+                    continue
+                break
+            if j < len(parts):
+                cand = parts[j]
                 if _es_archivo(cand):
-                    return ""
-                hit = canon.get(cand.casefold())
-                if hit == "Corte" and i + 2 < len(parts):
-                    nest = parts[i + 2]
-                    if not _es_archivo(nest):
-                        # Plasma y Laser / Maquinado (árbol nuevo)
-                        if nest.casefold() == "plasma y laser" and i + 3 < len(
-                            parts
-                        ):
-                            leaf = parts[i + 3]
-                            if leaf.casefold() in (
-                                "corte metal",
-                                "corte busbar",
+                    # JPG directo bajo raíz de flujo (p.ej. referencia sin proceso).
+                    pass
+                else:
+                    hit = canon.get(cand.casefold())
+                    if hit == "Corte" and j + 1 < len(parts):
+                        nest = parts[j + 1]
+                        if not _es_archivo(nest):
+                            if nest.casefold() == "plasma y laser" and j + 2 < len(
+                                parts
                             ):
-                                return f"Corte/Plasma y Laser/{leaf}"
-                        if nest.casefold() == "maquinado" and i + 3 < len(
-                            parts
+                                leaf = parts[j + 2]
+                                if leaf.casefold() in (
+                                    "corte metal",
+                                    "corte busbar",
+                                ):
+                                    return f"Corte/Plasma y Laser/{leaf}"
+                            if nest.casefold() == "maquinado" and j + 2 < len(parts):
+                                leaf = parts[j + 2]
+                                if leaf.casefold() in (
+                                    "maquinados metal",
+                                    "corte busbar",
+                                ):
+                                    return f"Corte/Maquinado/{leaf}"
+                            nest_hit = _CORTE_ANIDADOS.get(nest.casefold())
+                            if nest_hit:
+                                return f"Corte/{nest_hit}"
+                    if hit == "Doblado" and j + 1 < len(parts):
+                        nest = parts[j + 1]
+                        if nest.casefold() in ("metal", "busbar") and not _es_archivo(
+                            nest
                         ):
-                            leaf = parts[i + 3]
-                            if leaf.casefold() in (
-                                "maquinados metal",
-                                "corte busbar",
-                            ):
-                                return f"Corte/Maquinado/{leaf}"
-                        nest_hit = _CORTE_ANIDADOS.get(nest.casefold())
-                        if nest_hit:
-                            return f"Corte/{nest_hit}"
-                if hit == "Doblado" and i + 2 < len(parts):
-                    nest = parts[i + 2]
-                    if nest.casefold() in ("metal", "busbar") and not _es_archivo(
-                        nest
-                    ):
-                        return f"Doblado/{nest}"
-                if hit:
-                    return hit
-                return ""
+                            return f"Doblado/{nest}"
+                    if hit:
+                        return hit
+                    # Raíz de flujo sin proceso (COTAS_POR_REFERENCIA / ENSAMBLES).
+                    if parts[i + 1].casefold() in _raices_flujo:
+                        return parts[i + 1]
         # Fallback: primer proceso conocido en la ruta.
         for idx, part in enumerate(parts):
             hit = canon.get(part.casefold())
@@ -1125,13 +1174,28 @@ def _relativo_bajo_jpgs_local(ruta_jpg: str) -> str:
     """
     Relativo a conservar bajo ``JPGS\\``.
 
-    Busca anclas ``PIEZAS_ACOTADAS``, ``BOARD``, ``JPGS`` o carpetas de proceso.
+    TANQUE: conserva las 3 carpetas principales del proceso
+    (``PIEZAS_ACOTADAS``, ``COTAS_POR_REFERENCIA``, ``ENSAMBLES_INDEPENDIENTES``)
+    y todo lo anidado debajo.
+
+    BOARD / legacy: ancla ``BOARD`` o ``JPGS`` (sin incluir la ancla).
     """
     try:
         ruta = os.path.abspath(str(ruta_jpg or ""))
         parts = [p for p in ruta.replace("/", "\\").split("\\") if p]
         low = [p.casefold() for p in parts]
-        for ancla in ("piezas_acotadas", "board", "jpgs"):
+        # 3 raíces del flujo tanque: INCLUIR el nombre de carpeta en el destino.
+        for ancla in (
+            "piezas_acotadas",
+            "cotas_por_referencia",
+            "ensambles_independientes",
+        ):
+            if ancla in low:
+                i = low.index(ancla)
+                rel_parts = parts[i:]
+                if rel_parts:
+                    return "\\".join(rel_parts)
+        for ancla in ("board", "jpgs"):
             if ancla in low:
                 i = low.index(ancla)
                 rel_parts = parts[i + 1 :]
@@ -1173,6 +1237,8 @@ def publicar_jpg_a_dossier(
     try:
         src = os.path.abspath(str(ruta_jpg or ""))
         if not src or not os.path.isfile(src):
+            return ""
+        if es_clasificacion_almacen(ruta=src):
             return ""
         ctx = cargar_contexto_dossier()
         dest_root = (
@@ -1361,6 +1427,10 @@ def registrar_jpg(
 
         asegurar_tabla_cotas_dossier()
         clase = proceso_desde_ruta(ruta_db) or proceso_desde_ruta(ruta_local)
+        if es_clasificacion_almacen(clase, ruta_db) or es_clasificacion_almacen(
+            clase, ruta_local
+        ):
+            return False
         eid = insertar_evidencia(
             cliente=cli,
             producto=prod,

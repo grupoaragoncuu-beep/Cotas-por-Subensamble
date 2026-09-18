@@ -34,6 +34,12 @@ Planos/.runtime/
 Planos/error_log.txt
 Planos/error_log_caras.txt
 Planos/error_log_creador.txt
+Planos/_*.log
+Planos/_tmp_*.py
+Planos/_supervisar_*.log
+Planos/_cotas_*_overnight.log
+Planos/_run_generativo_*_log.json
+Planos/_audit_sm_board5.json
 
 # Duplicate archive of Planos/ (folder already versioned)
 Planos.zip

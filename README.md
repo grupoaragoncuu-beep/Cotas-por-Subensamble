@@ -16,11 +16,12 @@ Repositorio de respaldo y versionado para trabajo en PC Windows y clonado en **N
 
 Estado consolidado del corte actual: [`ESTADO_ACTUAL.md`](ESTADO_ACTUAL.md).
 
-Documento de verdad del flujo de caras (reglas de cotas, origen, salida):
+Documentos de verdad (deber ser):
 
-- [`DEBER_SER_COTAS_CARAS.md`](DEBER_SER_COTAS_CARAS.md)
+- [`DEBER_SER_COTAS_FLUJOS.md`](DEBER_SER_COTAS_FLUJOS.md) — **principal**: las 2 reglas (`COTAS_POR_SUBENSAMBLE` + `COTAS_ILOGIC_ABIGAIL`), TANQUE vs BOARD/GIGA/OTC, árbol JPGS y `cotas_dossier`
+- [`DEBER_SER_COTAS_CARAS.md`](DEBER_SER_COTAS_CARAS.md) — detalle fino del flujo de caras (0,0, TYP, anti-regresiones UI)
 
-Si el código y una conversación contradicen ese archivo, **gana el DEBER_SER**.
+Si el código y una conversación contradicen el deber ser, **gana** `DEBER_SER_COTAS_FLUJOS.md` (y el de caras en lo que solo aplique a caras).
 ---
 
 ## Requisitos
@@ -41,7 +42,8 @@ Si el código y una conversación contradicen ese archivo, **gana el DEBER_SER**
 
 ```text
 .
-├── DEBER_SER_COTAS_CARAS.md     # Reglas del flujo (fuente de verdad)
+├── DEBER_SER_COTAS_FLUJOS.md     # Deber ser: 2 reglas + DB por producto
+├── DEBER_SER_COTAS_CARAS.md     # Detalle caras (0,0 / TYP)
 ├── README.md                    # Este archivo
 ├── Planos/
 │   ├── generador_caras_tanque.py
@@ -104,7 +106,7 @@ python generador_caras_tanque.py
 python generador_tanque_completo.py
 ```
 
-Consulta siempre [`DEBER_SER_COTAS_CARAS.md`](DEBER_SER_COTAS_CARAS.md) para reglas de (0,0), `TYP`, circulares vs rectangulares y carpetas de salida.
+Consulta siempre [`DEBER_SER_COTAS_FLUJOS.md`](DEBER_SER_COTAS_FLUJOS.md) para las dos reglas principales y el acomodo DB; y [`DEBER_SER_COTAS_CARAS.md`](DEBER_SER_COTAS_CARAS.md) para reglas finas de (0,0), `TYP` y caras.
 
 ---
 

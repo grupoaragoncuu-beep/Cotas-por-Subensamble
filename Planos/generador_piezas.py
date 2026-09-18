@@ -17,6 +17,9 @@ Sin selección, conserva solo ``<CLASIFICACIÓN>/<PIEZA>/``.
 
 Se ejecuta desde la regla iLogic ``COTAS_ILOGIC_ABIGAIL`` o
 ``COTAS_POR_SEG_PIEZAS``.
+
+``Almacén`` (tornillería / comprados) **no se acota**: se omite del
+catálogo antes de ``ejecutar_flujo_desde_app``.
 """
 
 from __future__ import annotations
@@ -52,6 +55,61 @@ from generador_tanque_completo import (
 )
 from generador_vistas import ejecutar_flujo_desde_app
 from inventor_com import conectar_inventor
+
+
+def _es_clase_almacen(clase) -> bool:
+    c = str(clase or "").strip().casefold()
+    return c in ("almacén", "almacen") or c.startswith("almacén/") or c.startswith(
+        "almacen/"
+    )
+
+
+def _nombres_almacen(mapa_clasificacion) -> set[str]:
+    """Nombres base (upper) con iProperty Clasificación = Almacén."""
+    out: set[str] = set()
+    for clase, piezas in (mapa_clasificacion or {}).items():
+        if not _es_clase_almacen(clase):
+            continue
+        for p in piezas or []:
+            n = str(p or "").strip().upper()
+            if n:
+                out.add(n)
+    return out
+
+
+def _catalogo_sin_almacen(mapa_clasificacion, catalogo_filtro=None):
+    """
+    Devuelve un set de nombres a acotar excluyendo Almacén.
+
+    - Si no hay piezas Almacén: deja ``catalogo_filtro`` igual (None = todas).
+    - Si hay ``catalogo_filtro`` (cara / PIEZAS_FILTRO): quita Almacén de él.
+    - Si no hay filtro y sí hay Almacén: une todas las clases del mapa
+      excepto Almacén (BOARD / sin picks).
+    """
+    almacen = _nombres_almacen(mapa_clasificacion)
+    if not almacen:
+        return catalogo_filtro, almacen
+
+    if catalogo_filtro is not None:
+        filtrado = {
+            n
+            for n in catalogo_filtro
+            if str(n or "").strip().upper() not in almacen
+        }
+        return filtrado, almacen
+
+    if not mapa_clasificacion:
+        return catalogo_filtro, almacen
+
+    catalogo: set[str] = set()
+    for clase, piezas in mapa_clasificacion.items():
+        if _es_clase_almacen(clase):
+            continue
+        for p in piezas or []:
+            n = str(p or "").strip()
+            if n:
+                catalogo.add(n)
+    return catalogo, almacen
 
 
 def _reactivar_machote(inv_app):
@@ -179,7 +237,8 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
             print("ERROR: no se pudo recuperar el plano o ensamble activo.")
             return False
 
-        # BOARD: Abigail acota TODAS las piezas (cara mayor → L/A; SM → THK).
+        # BOARD: Abigail acota piezas (cara mayor → L/A; SM → THK),
+        # excepto Almacén (tornillería / comprados).
         # Cobre ABB/GENE/RLG: además 1× captura SIN_COTA desde FRENTE.
         # El desvío a kits ViewCube es solo para reglas de caras.
         es_board = False
@@ -285,20 +344,21 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
                 print(f"ERROR: catálogo vacío para {solo}.")
                 return False
 
-        # BOARD: acota TODAS las piezas únicas. Cobre (ABB/GENE/RLG) = solo
-        # doble captura SIN_COTA al exportar; no limita qué se procesa.
+        # BOARD: acota piezas únicas excepto Almacén (tornillería/comprados).
+        # Cobre ABB/GENE/RLG = doble captura SIN_COTA al exportar.
         # Barrenos flat: BOARD = Corte o chapa con huecos.
         # TANQUE = Corte omitido; Doblado + huecos → DESPLIEGUE.
         if es_board and catalogo_filtro is None:
             print(
-                "  BOARD: alcance completo (todas las piezas únicas). "
+                "  BOARD: alcance completo (todas las piezas únicas, "
+                "excepto Almacén). "
                 "Barrenos en chapa → DESPLIEGUE X/Y/HOLE/THK. "
                 "Cobre ABB/GENE/RLG → JPG + SIN_COTA + ESTANIADO."
             )
         elif not es_board:
             print(
-                "  TANQUE: Corte → flat solo si hay hueco (XMIN/YMIN/CUT_*, sin HOLE); "
-                "Doblado → dims generales + holes/cortes (flat si hay huecos)."
+                "  TANQUE: Corte → sin flat/barrenos/cortes internos; "
+                "Doblado → dims generales + holes/cortes pasantes (flat si hay huecos)."
             )
 
         print(
@@ -329,9 +389,9 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
                 if tipo_producto == "TANQUE":
                     print(
                         f"  TANQUE Corte iProp: {len(nombres_corte)} → "
-                        "flat solo si hay hueco (XMIN/YMIN/CUT_*, sin HOLE). "
+                        "sin DESPLIEGUE / barrenos / cortes. "
                         f"Doblado: {len(nombres_doblado)} → "
-                        "flat solo si hay barrenos/cortes."
+                        "flat solo si hay barrenos/cortes pasantes."
                     )
                 elif nombres_corte:
                     print(
@@ -370,6 +430,20 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
                     _cv_corte.configurar_piezas_doblado(nombres_doblado)
                 except Exception:
                     pass
+
+        # Abigail: no acotar Almacén (tornillos / comprados / McMaster).
+        catalogo_filtro, nombres_alm = _catalogo_sin_almacen(
+            mapa_clasificacion, catalogo_filtro
+        )
+        if nombres_alm:
+            print(
+                f"  Omitiendo Almacén: {len(nombres_alm)} piezas "
+                "(no se acotan ni publican)."
+            )
+            if catalogo_filtro is not None:
+                print(
+                    f"  Catálogo tras excluir Almacén: {len(catalogo_filtro)} piezas."
+                )
 
         if solo:
             _limpiar_solo_cara_piezas(carpeta_piezas, solo)

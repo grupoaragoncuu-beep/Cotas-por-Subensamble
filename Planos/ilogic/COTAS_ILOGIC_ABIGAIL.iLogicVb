@@ -4,7 +4,7 @@
 ' Tanque (OTC/Vantran): seleccion Top+SEGM+BASE; acota piezas por cara.
 '   Corte iProp: se OMITE flat/barrenos/cortes internos.
 '   Doblado: dims generales + alas/flanges; holes/cortes → DESPLIEGUE si hay.
-' BOARD/GIGA: sin picks; acota TODAS las piezas.
+' BOARD/GIGA: sin picks; acota piezas excepto Almacén (tornillería/comprados).
 '
 ' Barrenos flat DESPLIEGUE:
 '   BOARD: Corte iProp o chapa con huecos → XCENTRO/YCENTRO/HOLE/THK.
@@ -715,6 +715,7 @@ Sub LanzarFlujoPiezasBoard( _
 
     System.Windows.Forms.MessageBox.Show( _
         "BOARD detectado: se acotaran piezas sin picks de tanque." & vbCrLf & _
+        "Almacén (tornillos/comprados): NO se acota." & vbCrLf & _
         "Barrenos en chapa: DESPLIEGUE + X/Y + HOLE + THK." & vbCrLf & _
         "Cobre (ABB/GENE/RLG): 2 capturas por cota" & vbCrLf & _
         "(con dimension + SIN_COTA) y ESTANIADO.", _
