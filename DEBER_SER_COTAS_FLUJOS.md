@@ -152,7 +152,7 @@ Implementación: `creador_vistas._debe_crear_despliegue`.
 
 | Producto | iProp **Corte** | iProp **Doblado** | Otra chapa con huecos |
 |----------|-----------------|-------------------|------------------------|
-| **TANQUE** | **Nunca** flat / barrenos / cortes. Solo **LENGTH / WIDTH / THK** no-flat bajo `Corte/…`. | Dims generales + flat de **barrenos Ø** y **cortes pasantes** (bucle interior que atraviesa la chapa). **No** marcaje / doblez / huellas. Nomenclatura **fuera** de la silueta. | No |
+| **TANQUE** | **Nunca** flat. Solo L/W/THK no-flat. | Dims generales + flat **solo barrenos Ø** de bucle interior (atraviesan). **Sin** `CUT_*` / `XMIN`/`YMIN` rectangular (marcaje/accesorios → caras). | No |
 | **BOARD / GIGA** | **Sí** DESPLIEGUE (flat + barrenos; cobre → Maquinado/Busbar) | Sí si aplica | **Sí** DESPLIEGUE |
 
 Staging temporal: `_STAGING_DESPLIEGUE/` → luego árbol Corte/…  

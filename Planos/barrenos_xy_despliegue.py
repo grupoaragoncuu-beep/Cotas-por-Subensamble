@@ -629,11 +629,32 @@ def _centros_barrenos(vista, tg) -> list[dict]:
     for m in modelo:
         m.setdefault("ejes", ("X", "Y"))
 
+    try:
+        from creador_vistas import producto_flujo_actual
+
+        es_board = producto_flujo_actual() == "BOARD"
+    except Exception:
+        es_board = False
+
     solo_flat = os.environ.get("SOLO_FLAT_CORTE", "").strip().lower() in (
         "1",
         "true",
         "yes",
     )
+    # TANQUE: SOLO círculos/óvalos del FlatPattern (bucles interiores).
+    # Sin HLR ni cortes rectangulares → evita marcaje / huellas de accesorio.
+    if not es_board:
+        fused = [
+            b
+            for b in modelo
+            if str(b.get("tipo") or "") in ("circulo", "oval")
+        ]
+        print(
+            f"    TANQUE flat: {len(fused)} barrenos Ø pasantes (modelo); "
+            f"sin CUT/XMIN ni HLR/marcaje"
+        )
+        return fused
+
     hlr_circ = _centros_barrenos_hlr(vista)
     ovals = _referencias_oval_xy(vista)
     if solo_flat and modelo:
@@ -654,15 +675,13 @@ def _centros_barrenos(vista, tg) -> list[dict]:
     else:
         fused = _fusionar_centros(modelo, hlr_circ, ovals)
 
-    # Cortes pasantes no circulares (solo bucles interiores del cuerpo).
-    # Marcaje / doblez / huellas sin atravesar → no entran.
+    # BOARD: cortes rectangulares pasantes (bucles interiores).
     cortes = []
     try:
         cortes = _cortes_internos_inicio(vista, tg, sil)
     except Exception:
         cortes = []
     if cortes:
-        # No duplicar un corte cuyo bbox cubre un círculo ya detectado
         circ_pts = [
             (float(b["cx"]), float(b["cy"]))
             for b in fused
