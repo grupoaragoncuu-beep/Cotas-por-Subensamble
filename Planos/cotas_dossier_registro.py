@@ -1000,7 +1000,15 @@ def insertar_evidencia(
     clasificacion: str = "",
     seleccionadas: str = "no",
 ) -> int | None:
-    """INSERT o UPDATE (misma job+nombre) y devuelve id, o None si falla."""
+    """
+    INSERT o UPDATE y devuelve id, o None si falla.
+
+    Clave lógica:
+    1. ``job`` + ``ruta`` (misma evidencia en disco/share).
+    2. Si no hay ruta: ``job`` + ``nombre_archivo`` + ``clasificacion``.
+    3. Mismo nombre en otra ruta/clasificación → **INSERT** (p. ej. Corte y
+       Doblado, o la misma cota en SEGM2 y SEGM3 de referencia).
+    """
     try:
         import psycopg2
     except ImportError:
@@ -1009,19 +1017,44 @@ def insertar_evidencia(
     if not clase:
         clase = proceso_desde_ruta(ruta) or ""
     sel = _norm_seleccionadas(seleccionadas)
+    job_s = str(job or "")
+    nombre_s = str(nombre_archivo or "")
+    ruta_s = str(ruta or "")
     try:
         with psycopg2.connect(**_db_nesting()) as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT id, ruta FROM public.cotas_dossier
-                    WHERE job = %s AND nombre_archivo = %s
-                    ORDER BY id DESC
-                    LIMIT 1
-                    """,
-                    (str(job or ""), str(nombre_archivo or "")),
-                )
-                prev = cur.fetchone()
+                prev = None
+                if ruta_s:
+                    cur.execute(
+                        """
+                        SELECT id FROM public.cotas_dossier
+                        WHERE job = %s AND ruta = %s
+                        ORDER BY id DESC
+                        LIMIT 1
+                        """,
+                        (job_s, ruta_s),
+                    )
+                    prev = cur.fetchone()
+                if not prev:
+                    cur.execute(
+                        """
+                        SELECT id, ruta FROM public.cotas_dossier
+                        WHERE job = %s
+                          AND nombre_archivo = %s
+                          AND COALESCE(clasificacion, '') = %s
+                        ORDER BY id DESC
+                        LIMIT 1
+                        """,
+                        (job_s, nombre_s, clase),
+                    )
+                    cand = cur.fetchone()
+                    # Solo reusar si la ruta previa está vacía o es la misma.
+                    if cand and (
+                        not str(cand[1] or "").strip()
+                        or os.path.normcase(str(cand[1]))
+                        == os.path.normcase(ruta_s)
+                    ):
+                        prev = (cand[0],)
                 if prev:
                     eid = int(prev[0])
                     cur.execute(
@@ -1041,7 +1074,7 @@ def insertar_evidencia(
                             str(producto or ""),
                             str(type_ or "TYP"),
                             max(0, int(cantidad_spoteos)),
-                            str(ruta or ""),
+                            ruta_s,
                             clase,
                             sel,
                             eid,
@@ -1060,11 +1093,11 @@ def insertar_evidencia(
                     (
                         str(cliente or "SIN_CLIENTE"),
                         str(producto or ""),
-                        str(job or ""),
+                        job_s,
                         str(type_ or "TYP"),
                         max(0, int(cantidad_spoteos)),
-                        str(nombre_archivo or ""),
-                        str(ruta or ""),
+                        nombre_s,
+                        ruta_s,
                         clase,
                         sel,
                     ),

@@ -296,7 +296,8 @@ Credenciales vía env `NESTING_DB_*` / `VSM_DB_*` (defaults en `cotas_dossier_re
 | `seleccionadas` | `si` / `no` (cobre XY; ver §5.3) | `si` |
 | `created_at` | Timestamp alta | |
 
-Upsert lógico: `(job, nombre_archivo)`.
+Upsert lógico: ``(job, ruta)``; si no hay ruta, ``(job, nombre_archivo, clasificacion)``.
+Mismo nombre en otra ruta (Corte vs Doblado, o SEGM2 vs SEGM3) → fila nueva.
 
 ### 5.3 `seleccionadas` (cobre)
 
