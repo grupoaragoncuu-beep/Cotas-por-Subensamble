@@ -152,8 +152,8 @@ Implementación: `creador_vistas._debe_crear_despliegue`.
 
 | Producto | iProp **Corte** | iProp **Doblado** | Otra chapa con huecos |
 |----------|-----------------|-------------------|------------------------|
-| **TANQUE** | **Nunca** bajo `Corte/`: ni flat, ni barrenos, ni cortes internos (`CUT_*`, `XMIN`/`YMIN`, `HOLE`, `XCENTRO`/`YCENTRO`). Esas cotas van a **`Doblado/Metal`** (o Busbar). | Flat **sí** si hay barrenos o cortes pasantes → `Doblado/…` | No (salvo Doblado) |
-| **BOARD** | **Sí** DESPLIEGUE | Sí si aplica | **Sí** DESPLIEGUE |
+| **TANQUE** | **Nunca** se crea flat ni se acotan barrenos/cortes internos. Solo **LENGTH / WIDTH / THK** (vistas no-flat) bajo `Corte/…`. | Flat **sí** si hay barrenos o cortes → `Doblado/…` (`CUT_*`, XY, HOLE). | No |
+| **BOARD / GIGA** | **Sí** DESPLIEGUE (flat + barrenos; cobre → Maquinado/Busbar) | Sí si aplica | **Sí** DESPLIEGUE |
 
 Staging temporal: `_STAGING_DESPLIEGUE/` → luego árbol Corte/…  
 Capturas flat: XCENTRO, YCENTRO, HOLE##, THK.

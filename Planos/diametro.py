@@ -829,7 +829,7 @@ def acotar_barrenos_placas(nombres_frente_ok=None):
         try:
             from creador_vistas import producto_flujo_actual, _es_pieza_corte
 
-            if producto_flujo_actual() == "TANQUE":
+            if producto_flujo_actual() != "BOARD":
                 pieza_hoja = re.sub(
                     r"_(?:DESPLIEGUE_)?FRENTE_[12]$",
                     "",

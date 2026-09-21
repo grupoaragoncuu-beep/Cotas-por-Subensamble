@@ -122,24 +122,27 @@ def _debe_crear_despliegue(part_name, part_doc, is_sm) -> bool:
     """
     ¿Crear vistas DESPLIEGUE (flat + X/Y/HOLE/THK/CUT_*)?
 
-    - BOARD/GIGA: Corte iProp **o** chapa con barrenos/cortes.
-    - TANQUE: **Corte → nunca** (ni flat, ni barrenos, ni cortes internos).
-      Doblado con huecos → flat (holes / cortes). Otras clases → no flat.
+    - **BOARD/GIGA** (solo si ``producto_flujo == BOARD``): Corte iProp **o**
+      chapa con barrenos/cortes → flat (lógica cobre/GIGA).
+    - **TANQUE** (y cualquier no-BOARD): **Corte → nunca** flat / barrenos /
+      cortes internos; solo dims generales L/W/THK en vistas no-flat.
+      Doblado con huecos → flat (holes / cortes).
     """
     if not is_sm:
         return False
     tipo = producto_flujo_actual()
-    if tipo == "TANQUE":
+    # Solo BOARD usa la matriz GIGA (Corte → flat). TANQUE y vacío = no Corte flat.
+    if tipo == "BOARD":
         if _es_pieza_corte(part_name):
-            return False
-        if _es_pieza_doblado(part_name):
-            return _sm_tiene_barrenos_o_cortes(part_doc)
+            return True
+        if _sm_tiene_barrenos_o_cortes(part_doc):
+            return True
         return False
-    # BOARD / desconocido: comportamiento GIGA histórico
+    # TANQUE / DESCONOCIDO: misma regla de planta (nunca flat en Corte).
     if _es_pieza_corte(part_name):
-        return True
-    if _sm_tiene_barrenos_o_cortes(part_doc):
-        return True
+        return False
+    if _es_pieza_doblado(part_name):
+        return _sm_tiene_barrenos_o_cortes(part_doc)
     return False
 
 def _log(msg):

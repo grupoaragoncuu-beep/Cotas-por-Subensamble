@@ -821,38 +821,39 @@ def _destino_dirs_clasificacion(
 
     # Flat (despliegue):
     #   BOARD/GIGA → Corte/Plasma (metal) o Corte/Maquinado/Corte Busbar (cobre)
-    #   TANQUE     → Doblado/Metal|Busbar (NUNCA bajo Corte; DEBER_SER §3.1)
+    #   TANQUE / no-BOARD → Doblado/Metal|Busbar (NUNCA bajo Corte)
     if _es_jpg_despliegue(nombre_archivo, staging_marker) or dest in (
         "plasma",
         "plasma doblado",
     ):
-        if _producto_flujo_reorg() == "TANQUE":
+        if _producto_flujo_reorg() == "BOARD":
             if cobre:
                 destino_dir = os.path.join(
-                    carpeta_piezas, "Doblado", "Busbar", pieza_folder
+                    carpeta_piezas,
+                    "Corte",
+                    "Maquinado",
+                    "Corte Busbar",
+                    pieza_folder,
                 )
-                return destino_dir, "Doblado/Busbar", True
-            destino_dir = os.path.join(
-                carpeta_piezas, "Doblado", "Metal", pieza_folder
-            )
-            return destino_dir, "Doblado/Metal", True
-        if cobre:
+                return destino_dir, "Corte/Maquinado/Corte Busbar", True
             destino_dir = os.path.join(
                 carpeta_piezas,
                 "Corte",
-                "Maquinado",
-                "Corte Busbar",
+                "Plasma y Laser",
+                "Corte metal",
                 pieza_folder,
             )
-            return destino_dir, "Corte/Maquinado/Corte Busbar", True
+            return destino_dir, "Corte/Plasma y Laser/Corte metal", True
+        # TANQUE (o sin marca): flat solo tiene sentido en Doblado.
+        if cobre:
+            destino_dir = os.path.join(
+                carpeta_piezas, "Doblado", "Busbar", pieza_folder
+            )
+            return destino_dir, "Doblado/Busbar", True
         destino_dir = os.path.join(
-            carpeta_piezas,
-            "Corte",
-            "Plasma y Laser",
-            "Corte metal",
-            pieza_folder,
+            carpeta_piezas, "Doblado", "Metal", pieza_folder
         )
-        return destino_dir, "Corte/Plasma y Laser/Corte metal", True
+        return destino_dir, "Doblado/Metal", True
 
     if dest == "maquinado":
         if cobre:

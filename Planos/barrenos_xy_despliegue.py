@@ -1464,7 +1464,7 @@ def acotar_barrenos_xy_despliegue(nombres_frente_ok=None):
             from creador_vistas import producto_flujo_actual, _es_pieza_corte
 
             pieza = _pieza_desde_hoja_despliegue(nombre)
-            if producto_flujo_actual() == "TANQUE" and _es_pieza_corte(pieza):
+            if producto_flujo_actual() != "BOARD" and _es_pieza_corte(pieza):
                 print(
                     f"  {nombre.rsplit(':',1)[0]}: TANQUE/Corte → omitido "
                     f"XY/CUT/HOLE (sin flat ni cortes internos)"
