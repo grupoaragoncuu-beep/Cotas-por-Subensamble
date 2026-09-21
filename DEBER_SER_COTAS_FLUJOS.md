@@ -152,7 +152,7 @@ Implementación: `creador_vistas._debe_crear_despliegue`.
 
 | Producto | iProp **Corte** | iProp **Doblado** | Otra chapa con huecos |
 |----------|-----------------|-------------------|------------------------|
-| **TANQUE** | **Nunca** se crea flat ni se acotan barrenos/cortes internos. Solo **LENGTH / WIDTH / THK** (vistas no-flat) bajo `Corte/…`. | Flat **sí** si hay barrenos o cortes → `Doblado/…` (`CUT_*`, XY, HOLE). | No |
+| **TANQUE** | **Nunca** flat / barrenos / cortes. Solo **LENGTH / WIDTH / THK** no-flat bajo `Corte/…`. | Dims generales + flat de **barrenos Ø** y **cortes pasantes** (bucle interior que atraviesa la chapa). **No** marcaje / doblez / huellas. Nomenclatura **fuera** de la silueta. | No |
 | **BOARD / GIGA** | **Sí** DESPLIEGUE (flat + barrenos; cobre → Maquinado/Busbar) | Sí si aplica | **Sí** DESPLIEGUE |
 
 Staging temporal: `_STAGING_DESPLIEGUE/` → luego árbol Corte/…  
@@ -446,6 +446,7 @@ Medidas frecuentes:
 11. **No** truncar nombres con decimal vía `splitext` (`PIPE FLANGE 0.250` ≠ `PIPE FLANGE 0`).
 12. **No** filtrar OD solo a barrenos interiores cuando la pieza es silueta redonda (boss/nipple/tierra).
 13. **No** rutear flat/DESPLIEGUE de TANQUE a `Corte/Plasma…` (árbol GIGA): en tanque flat → `Doblado/Metal|Busbar`.
+14. **No** acotar marcaje / líneas de doblez / huellas como `CUT_*`: solo huecos que **atraviesan** la chapa (bucle interior). Nomenclatura fuera de la pieza.
 
 ---
 

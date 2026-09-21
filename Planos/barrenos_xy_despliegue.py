@@ -156,10 +156,12 @@ def _cuerpos_para_barrenos(doc) -> list:
 
 def _cortes_internos_inicio(vista, tg, sil=None) -> list[dict]:
     """
-    Cortes internos NO circulares (cuadrado/rectángulo/poligonal).
+    Cortes internos NO circulares que **atraviesan** la chapa.
 
-    Como subensamble: se acotan por INICIO → Xmin (izq) e Ymin (inf)
-    del bbox del hueco, no por centro.
+    Solo edges de bucles INTERIORES del cuerpo (``IsOuterEdgeLoop=False``).
+    Eso excluye marcaje / líneas de doblez / huellas que no abren la pieza.
+
+    Acotado por INICIO → Xmin/Ymin del bbox del hueco pasante.
     """
     if sil is None:
         sil = _silueta_vista(vista) or _silueta_placa_vista(vista)
@@ -172,91 +174,6 @@ def _cortes_internos_inicio(vista, tg, sil=None) -> list[dict]:
     if doc is None or tg is None:
         return []
 
-    segs = []
-    for body in _cuerpos_para_barrenos(doc):
-        try:
-            n_edges = int(body.Edges.Count)
-        except Exception:
-            continue
-        for j in range(1, n_edges + 1):
-            try:
-                geom = body.Edges.Item(j).Geometry
-                if geom is None:
-                    continue
-                tipo_g = str(type(geom)).upper()
-                if "LINE" not in tipo_g:
-                    continue
-                p1 = geom.StartPoint
-                p2 = geom.EndPoint
-                s1 = vista.ModelToSheetSpace(
-                    tg.CreatePoint(float(p1.X), float(p1.Y), float(p1.Z))
-                )
-                s2 = vista.ModelToSheetSpace(
-                    tg.CreatePoint(float(p2.X), float(p2.Y), float(p2.Z))
-                )
-                segs.append(
-                    (float(s1.X), float(s1.Y), float(s2.X), float(s2.Y))
-                )
-            except Exception:
-                continue
-    if len(segs) < 4:
-        return []
-
-    # Solo segmentos cuyo punto medio cae claramente DENTRO de la placa
-    # (huecos internos; no contorno exterior).
-    margen = max(0.04, 0.025 * span)
-    interior = []
-    for x1, y1, x2, y2 in segs:
-        cx = 0.5 * (x1 + x2)
-        cy = 0.5 * (y1 + y2)
-        if (minx + margen) < cx < (maxx - margen) and (
-            miny + margen
-        ) < cy < (maxy - margen):
-            interior.append((x1, y1, x2, y2))
-    if len(interior) < 4:
-        return []
-
-    # Componentes conexas por proximidad de extremos
-    tol = max(0.04, 0.008 * span)
-    used = [False] * len(interior)
-    clusters: list[tuple[float, float, float, float, int]] = []
-    for a in range(len(interior)):
-        if used[a]:
-            continue
-        stack = [a]
-        used[a] = True
-        comp = [interior[a]]
-        while stack:
-            i = stack.pop()
-            x1, y1, x2, y2 = interior[i]
-            ends = ((x1, y1), (x2, y2))
-            for b in range(len(interior)):
-                if used[b]:
-                    continue
-                bx1, by1, bx2, by2 = interior[b]
-                bends = ((bx1, by1), (bx2, by2))
-                hit = False
-                for p in ends:
-                    for q in bends:
-                        if abs(p[0] - q[0]) <= tol and abs(p[1] - q[1]) <= tol:
-                            hit = True
-                            break
-                    if hit:
-                        break
-                if hit:
-                    used[b] = True
-                    stack.append(b)
-                    comp.append(interior[b])
-        if len(comp) < 4:
-            continue
-        xs: list[float] = []
-        ys: list[float] = []
-        for x1, y1, x2, y2 in comp:
-            xs.extend((x1, x2))
-            ys.extend((y1, y2))
-        clusters.append((min(xs), max(xs), min(ys), max(ys), len(comp)))
-
-    # Tamaño mínimo de hueco en hoja (flat: aceptar ~8–9 mm modelo)
     esc = _escala_vista(vista)
     solo_flat = os.environ.get("SOLO_FLAT_CORTE", "").strip().lower() in (
         "1",
@@ -265,42 +182,122 @@ def _cortes_internos_inicio(vista, tg, sil=None) -> list[dict]:
         "si",
         "on",
     )
-    min_lado = max(0.03, 0.5 * esc) if solo_flat else max(0.08, 1.0 * esc)
+    min_lado = max(0.05, 0.6 * esc) if solo_flat else max(0.10, 1.2 * esc)
     plate_dx = maxx - minx
     plate_dy = maxy - miny
     out: list[dict] = []
     vistos = set()
-    for x0, x1, y0, y1, nseg in clusters:
-        dx = x1 - x0
-        dy = y1 - y0
-        if dx < min_lado or dy < min_lado:
+
+    for body in _cuerpos_para_barrenos(doc):
+        # Un cluster por cada EdgeLoop INTERIOR (hueco pasante real).
+        try:
+            n_faces = int(body.Faces.Count)
+        except Exception:
             continue
-        # Contorno mal clasificado como "interior"
-        if dx > 0.80 * plate_dx and dy > 0.80 * plate_dy:
-            continue
-        clave = (round(x0, 2), round(y0, 2), round(dx, 2), round(dy, 2))
-        if clave in vistos:
-            continue
-        vistos.add(clave)
-        # Punto de acotado = esquina inicio (izq-inf) del hueco
-        out.append(
-            {
-                "cx": float(x0),  # Xmin del corte
-                "cy": float(y0),  # Ymin del corte
-                "xmin": float(x0),
-                "ymin": float(y0),
-                "xmax": float(x1),
-                "ymax": float(y1),
-                "dx": float(dx),  # ancho del hueco (hoja)
-                "dy": float(dy),  # largo del hueco (hoja)
-                "tamaño": float(min(dx, dy)),
-                "fuente": "corte_interno",
-                "tipo": "corte",
-                "medida": "inicio",
-                "ejes": ("X", "Y"),
-                "nseg": int(nseg),
-            }
-        )
+        for fi in range(1, n_faces + 1):
+            try:
+                face = body.Faces.Item(fi)
+                n_loops = int(face.EdgeLoops.Count)
+            except Exception:
+                continue
+            for li in range(1, n_loops + 1):
+                try:
+                    loop = face.EdgeLoops.Item(li)
+                    if bool(getattr(loop, "IsOuterEdgeLoop", True)):
+                        continue
+                    n_e = int(loop.Edges.Count)
+                except Exception:
+                    continue
+                if n_e < 3:
+                    continue
+                # Proyectar edges del loop; si es casi todo círculo → barreno Ø
+                # (ya lo cubre _centros_barrenos_modelo), no CUT rectangular.
+                segs = []
+                n_circ = 0
+                n_line = 0
+                xs: list[float] = []
+                ys: list[float] = []
+                for ei in range(1, n_e + 1):
+                    try:
+                        edge = loop.Edges.Item(ei)
+                        geom = edge.Geometry
+                        if geom is None:
+                            continue
+                        tipo_g = str(type(geom)).upper()
+                        if "CIRCLE" in tipo_g or "ELLIPSE" in tipo_g:
+                            n_circ += 1
+                            continue
+                        if "LINE" not in tipo_g:
+                            continue
+                        n_line += 1
+                        p1 = geom.StartPoint
+                        p2 = geom.EndPoint
+                        s1 = vista.ModelToSheetSpace(
+                            tg.CreatePoint(
+                                float(p1.X), float(p1.Y), float(p1.Z)
+                            )
+                        )
+                        s2 = vista.ModelToSheetSpace(
+                            tg.CreatePoint(
+                                float(p2.X), float(p2.Y), float(p2.Z)
+                            )
+                        )
+                        x1, y1 = float(s1.X), float(s1.Y)
+                        x2, y2 = float(s2.X), float(s2.Y)
+                        segs.append((x1, y1, x2, y2))
+                        xs.extend((x1, x2))
+                        ys.extend((y1, y2))
+                    except Exception:
+                        continue
+                # Loop circular / casi circular → no es CUT rectangular
+                if n_circ > 0 and n_line < 3:
+                    continue
+                if len(segs) < 3 or len(xs) < 4:
+                    continue
+                x0, x1 = min(xs), max(xs)
+                y0, y1 = min(ys), max(ys)
+                dx, dy = x1 - x0, y1 - y0
+                if dx < min_lado or dy < min_lado:
+                    continue
+                # Contorno mal etiquetado
+                if dx > 0.80 * plate_dx and dy > 0.80 * plate_dy:
+                    continue
+                # Marcaje alargadísimo (línea de doblez / etch): un lado
+                # despreciable frente al otro y frente a la placa.
+                aspect = max(dx, dy) / max(min(dx, dy), _EPS)
+                if aspect > 12.0 and min(dx, dy) < 0.08 * max(plate_dx, plate_dy):
+                    continue
+                # Centro del hueco debe caer dentro de la placa (pasante)
+                cx = 0.5 * (x0 + x1)
+                cy = 0.5 * (y0 + y1)
+                margen = max(0.04, 0.02 * span)
+                if not (
+                    (minx + margen) < cx < (maxx - margen)
+                    and (miny + margen) < cy < (maxy - margen)
+                ):
+                    continue
+                clave = (round(x0, 2), round(y0, 2), round(dx, 2), round(dy, 2))
+                if clave in vistos:
+                    continue
+                vistos.add(clave)
+                out.append(
+                    {
+                        "cx": float(x0),
+                        "cy": float(y0),
+                        "xmin": float(x0),
+                        "ymin": float(y0),
+                        "xmax": float(x1),
+                        "ymax": float(y1),
+                        "dx": float(dx),
+                        "dy": float(dy),
+                        "tamaño": float(min(dx, dy)),
+                        "fuente": "corte_pasante",
+                        "tipo": "corte",
+                        "medida": "inicio",
+                        "ejes": ("X", "Y"),
+                        "nseg": int(len(segs)),
+                    }
+                )
     return out
 
 
@@ -657,8 +654,8 @@ def _centros_barrenos(vista, tg) -> list[dict]:
     else:
         fused = _fusionar_centros(modelo, hlr_circ, ovals)
 
-    # Cortes internos no circulares (solo flat / cuando no hay círculos
-    # suficientes, o siempre como complemento).
+    # Cortes pasantes no circulares (solo bucles interiores del cuerpo).
+    # Marcaje / doblez / huellas sin atravesar → no entran.
     cortes = []
     try:
         cortes = _cortes_internos_inicio(vista, tg, sil)
@@ -683,7 +680,7 @@ def _centros_barrenos(vista, tg) -> list[dict]:
                 fused.append(c)
         if any(str(b.get("tipo") or "") == "corte" for b in fused):
             n_c = sum(1 for b in fused if str(b.get("tipo") or "") == "corte")
-            print(f"    refs XY cortes internos (inicio Xmin/Ymin): {n_c}")
+            print(f"    refs XY cortes pasantes (inicio Xmin/Ymin): {n_c}")
 
     # Descartar centros que no caen cerca del contorno/interior de placa
     limpios = []
@@ -1190,26 +1187,44 @@ def _dibujar_cota_tramo_sketch(
     except Exception:
         left, right, top, bot = min(x1, x2) - 1, max(x1, x2) + 1, max(y1, y2) + 1, min(y1, y2) - 1
 
-    offset = 1.8
+    offset = max(2.4, 0.06 * max(float(vista.Width or 10), float(vista.Height or 10)))
     ok = False
+    # Empujar cota FUERA de la silueta de la vista (evitar texto sobre la pieza).
+    try:
+        sil = _silueta_placa_vista(vista) or _silueta_vista(vista)
+    except Exception:
+        sil = None
     try:
         if eje.upper() == "X":  # ancho horizontal
             y_dim = min(y1, y2) - offset
-            if y_dim < bot + 0.3:
+            if sil:
+                _sx0, _sx1, sy0, sy1, _sp = sil
+                # Preferir debajo de la placa; si no cabe, arriba.
+                if y_dim > sy0 - 0.2:
+                    y_dim = sy0 - offset
+                if y_dim < bot + 0.3:
+                    y_dim = sy1 + offset
+            elif y_dim < bot + 0.3:
                 y_dim = max(y1, y2) + offset
             ok = bool(_linea(sketch, tg, x1, y_dim, x2, y_dim, color))
             ok = _linea(sketch, tg, x1, y1, x1, y_dim, color) or ok
             ok = _linea(sketch, tg, x2, y2, x2, y_dim, color) or ok
-            _texto(sketch, tg, (x1 + x2) * 0.5, y_dim - 0.3, texto, inv_app)
+            _texto(sketch, tg, (x1 + x2) * 0.5, y_dim - 0.45, texto, inv_app)
         else:  # largo vertical
             x_dim = min(x1, x2) - offset
-            if x_dim < left + 0.3:
+            if sil:
+                sx0, sx1, _sy0, _sy1, _sp = sil
+                if x_dim > sx0 - 0.2:
+                    x_dim = sx0 - offset
+                if x_dim < left + 0.3:
+                    x_dim = sx1 + offset
+            elif x_dim < left + 0.3:
                 x_dim = max(x1, x2) + offset
             ok = bool(_linea(sketch, tg, x_dim, y1, x_dim, y2, color))
             ok = _linea(sketch, tg, x1, y1, x_dim, y1, color) or ok
             ok = _linea(sketch, tg, x2, y2, x_dim, y2, color) or ok
             _texto(
-                sketch, tg, x_dim - 0.3, (y1 + y2) * 0.5, texto, inv_app, vertical=True
+                sketch, tg, x_dim - 0.45, (y1 + y2) * 0.5, texto, inv_app, vertical=True
             )
     except Exception as exc:
         print(f"    cut-tramo sketch fallo: {exc}")
