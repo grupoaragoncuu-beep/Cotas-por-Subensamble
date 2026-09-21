@@ -261,9 +261,13 @@ def _obtener_o_activar_plano(inv_app):
 def _limpiar_nombre_archivo(nombre: str) -> str:
     """
     Limpia caracteres inválidos para nombre de archivo en Windows.
+    No usa ``rstrip('.')`` a ciegas ni ``splitext`` sobre el nombre de pieza
+    (``PIPE FLANGE 0.250`` no debe perder el decimal).
     """
-    nombre = re.sub(r'[<>:"/\\\\|?*]', "_", nombre)
-    nombre = nombre.strip().rstrip(".")
+    nombre = re.sub(r'[<>:"/\\\\|?*]', "_", str(nombre or ""))
+    nombre = nombre.strip().rstrip(" ")
+    if nombre.endswith(".") and (len(nombre) < 2 or not nombre[-2].isdigit()):
+        nombre = nombre[:-1].rstrip(" ")
     return nombre
 
 
@@ -519,7 +523,22 @@ def renombrar_hojas_finales(
 
     permitidos_up = None
     if nombres_permitidos is not None:
-        permitidos_up = {str(x).upper() for x in nombres_permitidos}
+        permitidos_up = set()
+        for x in nombres_permitidos:
+            raw = str(x or "").upper()
+            if not raw:
+                continue
+            permitidos_up.add(raw)
+            base, _ = _separar_nombre_hoja(raw)
+            if base:
+                permitidos_up.add(base.upper())
+            # «Copia de X» (CopyTo ES) ≡ X
+            limpio = re.sub(r"^(COPIA DE |COPY OF )", "", base or raw).strip()
+            if limpio:
+                permitidos_up.add(limpio.upper())
+                b2, _ = _separar_nombre_hoja(limpio)
+                if b2:
+                    permitidos_up.add(b2.upper())
 
     try:
         total_hojas = draw_doc.Sheets.Count
@@ -532,6 +551,21 @@ def renombrar_hojas_finales(
             hoja = draw_doc.Sheets.Item(i)
 
             nombre_actual_visible = str(hoja.Name)
+            # Inventor ES: CopyTo deja «Copia de …» — normalizar antes de mapear.
+            try:
+                base_vis, suf_vis = _separar_nombre_hoja(nombre_actual_visible)
+                limpio_vis = re.sub(
+                    r"^(Copia de |Copy of )", "", base_vis, flags=re.IGNORECASE
+                ).strip()
+                if limpio_vis and limpio_vis.casefold() != base_vis.casefold():
+                    try:
+                        hoja.Name = limpio_vis
+                        nombre_actual_visible = str(hoja.Name)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
             nombre_actual_base, _ = _separar_nombre_hoja(nombre_actual_visible)
 
             if permitidos_up is not None and nombre_actual_base.upper() not in permitidos_up:
@@ -1414,7 +1448,17 @@ def _hoja_exportable(hoja, nombre_hoja):
         min_bh = 0.012 if (
             solo_flat and any(t in nombre_up for t in ("_THK", "_LADO"))
         ) else 0.05
-        if bw < 0.05 or bh < min_bh:
+        min_bw = 0.05
+        # Canto de chapa grande (Placa Base THK 0.313"): el bbox 2D del
+        # espesor en hoja puede ser < 0.05 cm en AMBOS ejes a escala baja;
+        # si ya hay cota asociativa o nota THK, no tumbar el JPG.
+        if "_THK" in nombre_up or (
+            "_LADO" in nombre_up and "_DESPLIEGUE_" not in nombre_up
+        ):
+            if _hoja_tiene_cota_asociativa(hoja) or _hoja_tiene_nota_thk(hoja):
+                min_bw = min(min_bw, 0.008)
+                min_bh = min(min_bh, 0.008)
+        if bw < min_bw or bh < min_bh:
             return False, "bbox 2D degenerado"
     except Exception:
         return False, "bbox inválido"
@@ -1427,7 +1471,7 @@ def _hoja_exportable(hoja, nombre_hoja):
             sh = float(hoja.Height)
             if sw > 0 and sh > 0:
                 cob = (bw * bh) / (sw * sh)
-                if cob < 0.03:
+                if cob < 0.02:
                     return False, f"pieza demasiado pequeña en sheet ({cob:.4f})"
         except Exception:
             pass
@@ -1684,7 +1728,22 @@ def exportar_hojas_jpg(
 
     permitidos_up = None
     if nombres_permitidos is not None:
-        permitidos_up = {str(x).upper() for x in nombres_permitidos}
+        permitidos_up = set()
+        for x in nombres_permitidos:
+            raw = str(x or "").upper()
+            if not raw:
+                continue
+            permitidos_up.add(raw)
+            base, _ = _separar_nombre_hoja(raw)
+            if base:
+                permitidos_up.add(base.upper())
+            # «Copia de X» (CopyTo ES) ≡ X
+            limpio = re.sub(r"^(COPIA DE |COPY OF )", "", base or raw).strip()
+            if limpio:
+                permitidos_up.add(limpio.upper())
+                b2, _ = _separar_nombre_hoja(limpio)
+                if b2:
+                    permitidos_up.add(b2.upper())
 
     # Una SIN_COTA por item cobre en esta corrida de exportación.
     exportar_hojas_jpg._sin_cota_hechos = set()

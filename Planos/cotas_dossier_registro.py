@@ -293,12 +293,32 @@ def resolver_destino_dossier(
                 )
             )
         ctx = cargar_contexto_dossier()
-        if ctx.get("job_root"):
-            candidatos.append((str(ctx.get("job_root")), "contexto"))
-        if ctx.get("dossier_files"):
-            candidatos.append((str(ctx.get("dossier_files")), "contexto_dossier"))
-        if ctx.get("dossier_jpgs"):
-            candidatos.append((str(ctx.get("dossier_jpgs")), "contexto_jpgs"))
+        # No reutilizar JOB root de otra corrida (ej. Board 11 + contexto OTC/62223).
+        ctx_job = str(ctx.get("job") or "").strip().casefold()
+        job_cf = job.casefold()
+        ctx_root_base = os.path.basename(
+            str(ctx.get("job_root") or "").rstrip("\\/")
+        ).casefold()
+        contexto_ok = bool(job_cf) and (
+            (ctx_job and ctx_job == job_cf)
+            or (ctx_root_base and ctx_root_base == job_cf)
+        )
+        if contexto_ok:
+            if ctx.get("job_root"):
+                candidatos.append((str(ctx.get("job_root")), "contexto"))
+            if ctx.get("dossier_files"):
+                candidatos.append(
+                    (str(ctx.get("dossier_files")), "contexto_dossier")
+                )
+            if ctx.get("dossier_jpgs"):
+                candidatos.append(
+                    (str(ctx.get("dossier_jpgs")), "contexto_jpgs")
+                )
+        elif ctx.get("job_root") or ctx.get("dossier_jpgs"):
+            print(
+                f"[dossier] Contexto previo ignorado "
+                f"(guardado job={ctx.get('job')!r}, actual={job!r})."
+            )
 
         elegido = ""
         fuente = "ninguna"
@@ -317,7 +337,11 @@ def resolver_destino_dossier(
                 fuente = fu
                 break
             # Root traducido (X:\) inexistente: seguir buscando.
-        if not elegido and pedir_si_falta:
+        if (
+            not elegido
+            and pedir_si_falta
+            and dossier_picker_habilitado()
+        ):
             print(
                 f"[dossier] No se encontró carpeta del job {job!r}. "
                 "Abriendo explorador de archivos…"
@@ -645,6 +669,10 @@ _CLASIF_RUTAS = (
     "Corte/Plasma y Laser/Corte Busbar",
     "Corte/Maquinado/Maquinados metal",
     "Corte/Maquinado/Corte Busbar",
+    "Corte/Maquinado/Piezas Soldadas",
+    "Corte/Maquinado/Accesorios Sueltos por pieza",
+    "Corte/Maquinado/Accesorios Sueltos",
+    "Corte/Maquinado/Inspeccion Visual",
     "Doblado/Metal",
     "Doblado/Busbar",
     "Estañado Busbar",
@@ -838,6 +866,10 @@ def proceso_desde_ruta(ruta: str) -> str:
                     if leaf.casefold() in (
                         "maquinados metal",
                         "corte busbar",
+                        "piezas soldadas",
+                        "accesorios sueltos",
+                        "inspeccion visual",
+                        "accesorios sueltos por pieza",
                     ):
                         return f"Corte/Maquinado/{leaf}"
                 nest_hit = _CORTE_ANIDADOS.get(nest.casefold())
@@ -1170,38 +1202,49 @@ def _copy_retry(src: str, dst: str, intentos: int = 3) -> bool:
     return False
 
 
+def _es_ruta_staging(ruta: str) -> bool:
+    """``_STAGING_*`` es temporal de Abigail. No entra al dossier final."""
+    partes = str(ruta or "").replace("/", "\\").split("\\")
+    return any(p.casefold().startswith("_staging") for p in partes if p)
+
+
 def _relativo_bajo_jpgs_local(ruta_jpg: str) -> str:
     """
     Relativo a conservar bajo ``JPGS\\``.
 
-    TANQUE: conserva las 3 carpetas principales del proceso
-    (``PIEZAS_ACOTADAS``, ``COTAS_POR_REFERENCIA``, ``ENSAMBLES_INDEPENDIENTES``)
-    y todo lo anidado debajo.
+    Preferir ancla ``JPGS``: conserva debajo ``PIEZAS_ACOTADAS``,
+    ``COTAS_POR_REFERENCIA``, ``ENSAMBLES_INDEPENDIENTES``, ``BOARD``.
 
-    BOARD / legacy: ancla ``BOARD`` o ``JPGS`` (sin incluir la ancla).
+    Si no hay ``JPGS``, anclar en esas raíces (incluidas en el relativo):
+    el destino debe quedar ``JPGS\\PIEZAS_ACOTADAS\\…``, nunca proceso suelto
+    en la raíz de ``JPGS``.
+
+    Bajo ``PIEZAS_ACOTADAS`` se eliminan carpetas de cara de tanque
+    (``SEGM1..4`` / ``TOP`` / ``BASE`` / ``OTROS``): en el dossier final
+    Abigail va por proceso (Corte/Doblado/…), no por cara.
     """
     try:
         ruta = os.path.abspath(str(ruta_jpg or ""))
         parts = [p for p in ruta.replace("/", "\\").split("\\") if p]
         low = [p.casefold() for p in parts]
-        # 3 raíces del flujo tanque: INCLUIR el nombre de carpeta en el destino.
+        # Preferir JPGS: conserva las raíces de flujo debajo.
+        if "jpgs" in low:
+            i = low.index("jpgs")
+            rel_parts = parts[i + 1 :]
+            if rel_parts:
+                return "\\".join(_sanear_rel_piezas_acotadas(rel_parts))
         for ancla in (
             "piezas_acotadas",
             "cotas_por_referencia",
             "ensambles_independientes",
+            "board",
         ):
             if ancla in low:
                 i = low.index(ancla)
                 rel_parts = parts[i:]
                 if rel_parts:
-                    return "\\".join(rel_parts)
-        for ancla in ("board", "jpgs"):
-            if ancla in low:
-                i = low.index(ancla)
-                rel_parts = parts[i + 1 :]
-                if rel_parts:
-                    return "\\".join(rel_parts)
-        # Fallback: proceso conocido hacia el final.
+                    return "\\".join(_sanear_rel_piezas_acotadas(rel_parts))
+        # Fallback: proceso conocido → bajo PIEZAS_ACOTADAS.
         procesos = {
             "almacén",
             "almacen",
@@ -1216,10 +1259,78 @@ def _relativo_bajo_jpgs_local(ruta_jpg: str) -> str:
         }
         for idx, p in enumerate(low):
             if p in procesos:
-                return "\\".join(parts[idx:])
+                return "\\".join(
+                    _sanear_rel_piezas_acotadas(["PIEZAS_ACOTADAS"] + parts[idx:])
+                )
         return os.path.basename(ruta)
     except Exception:
         return os.path.basename(str(ruta_jpg or "captura.jpg"))
+
+
+_CARAS_TANQUE = frozenset(
+    {"segm1", "segm2", "segm3", "segm4", "top", "base", "otros"}
+)
+_PROCESOS_PIEZA = frozenset(
+    {
+        "almacén",
+        "almacen",
+        "corte",
+        "doblado",
+        "maquinado",
+        "sin clasificacion",
+        "estañado busbar",
+        "estanado busbar",
+        "estañado",
+        "estanado",
+    }
+)
+
+
+def _sanear_rel_piezas_acotadas(rel_parts: list[str]) -> list[str]:
+    """
+    ``PIEZAS_ACOTADAS\\SEGM2\\Almacén\\pieza\\x.jpg``
+    → ``PIEZAS_ACOTADAS\\Almacén\\pieza\\x.jpg``.
+    """
+    if not rel_parts:
+        return rel_parts
+    out = list(rel_parts)
+    # Solo sanear bajo PIEZAS_ACOTADAS (no tocar COTAS_POR_REFERENCIA).
+    try:
+        i = next(j for j, p in enumerate(out) if p.casefold() == "piezas_acotadas")
+    except StopIteration:
+        return out
+    head, tail = out[: i + 1], out[i + 1 :]
+    tail = [p for p in tail if p.casefold() not in _CARAS_TANQUE]
+    return head + tail
+
+
+def _piezas_acotadas_listo_para_publicar(rel: str) -> bool:
+    """
+    True si el relativo bajo JPGS ya está clasificado por proceso.
+
+    JPG suelto ``PIEZAS_ACOTADAS\\file.jpg`` o bajo SEGM sin proceso → diferir
+    (evita basura en la raíz del dossier).
+    """
+    parts = [p for p in str(rel or "").replace("/", "\\").split("\\") if p]
+    if not parts:
+        return False
+    low = [p.casefold() for p in parts]
+    if "cotas_por_referencia" in low or "ensambles_independientes" in low:
+        return True
+    if "piezas_acotadas" not in low:
+        # proceso suelto se reescribe a PIEZAS_ACOTADAS\\…
+        return any(p in _PROCESOS_PIEZA for p in low)
+    i = low.index("piezas_acotadas")
+    rest = low[i + 1 :]
+    if not rest:
+        return False
+    # Primer segmento tras PIEZAS_ACOTADAS debe ser proceso, no el .jpg ni una cara.
+    primero = rest[0]
+    if primero.endswith(".jpg") or primero.endswith(".jpeg"):
+        return False
+    if primero in _CARAS_TANQUE:
+        return False
+    return primero in _PROCESOS_PIEZA or primero.startswith("almac")
 
 
 def publicar_jpg_a_dossier(
@@ -1238,7 +1349,7 @@ def publicar_jpg_a_dossier(
         src = os.path.abspath(str(ruta_jpg or ""))
         if not src or not os.path.isfile(src):
             return ""
-        if es_clasificacion_almacen(ruta=src):
+        if _es_ruta_staging(src) or es_clasificacion_almacen(ruta=src):
             return ""
         ctx = cargar_contexto_dossier()
         dest_root = (
@@ -1255,8 +1366,10 @@ def publicar_jpg_a_dossier(
         if not dest_root:
             return ""
         rel = _relativo_bajo_jpgs_local(src)
-        # Sin subcarpeta de proceso aún (JPG suelto pre-reorg): diferir publicación.
+        # Sin subcarpeta de proceso aún (JPG suelto pre-reorg): diferir.
         if "\\" not in rel and "/" not in rel:
+            return ""
+        if not _piezas_acotadas_listo_para_publicar(rel):
             return ""
         dst = os.path.join(dest_root, rel)
         if os.path.normcase(src) == os.path.normcase(os.path.abspath(dst)):
@@ -1380,6 +1493,8 @@ def registrar_jpg(
         ruta_local = os.path.abspath(str(ruta_jpg or ""))
         if not ruta_local or not os.path.isfile(ruta_local):
             return False
+        if _es_ruta_staging(ruta_local):
+            return False
         nombre = os.path.basename(ruta_local)
         ctx = cargar_contexto_dossier()
         job_s = str(job or ctx.get("job") or "").strip()
@@ -1479,6 +1594,8 @@ def sincronizar_carpeta_jpgs(
                 if not fn.lower().endswith((".jpg", ".jpeg", ".png")):
                     continue
                 ruta = os.path.join(dirpath, fn)
+                if _es_ruta_staging(ruta):
+                    continue
                 try:
                     if solo_nuevos and ctx_job and _ya_registrada(
                         str(ctx_job), os.path.abspath(ruta), fn
@@ -1532,6 +1649,30 @@ def _smoke_self() -> int:
         proceso_desde_ruta(r"X:\JPGS\Corte\Maquinado\Corte Busbar\P\a.jpg")
         == "Corte/Maquinado/Corte Busbar"
     )
+    assert (
+        proceso_desde_ruta(
+            r"X:\JPGS\Corte\Maquinado\Piezas Soldadas\P\a.jpg"
+        )
+        == "Corte/Maquinado/Piezas Soldadas"
+    )
+    assert (
+        proceso_desde_ruta(
+            r"X:\JPGS\Corte\Maquinado\Accesorios Sueltos\KIT1\FRONT\a.jpg"
+        )
+        == "Corte/Maquinado/Accesorios Sueltos"
+    )
+    assert (
+        proceso_desde_ruta(
+            r"X:\JPGS\Corte\Maquinado\Inspeccion Visual\KIT1\a.jpg"
+        )
+        == "Corte/Maquinado/Inspeccion Visual"
+    )
+    assert (
+        proceso_desde_ruta(
+            r"X:\JPGS\Corte\Maquinado\Accesorios Sueltos por pieza\P\a.jpg"
+        )
+        == "Corte/Maquinado/Accesorios Sueltos por pieza"
+    )
     assert proceso_desde_ruta(r"X:\JPGS\Doblado\Metal\P\a.jpg") == "Doblado/Metal"
     assert (
         proceso_desde_ruta(r"X:\JPGS\Estañado Busbar\a.jpg") == "Estañado Busbar"
@@ -1559,6 +1700,17 @@ def _smoke_self() -> int:
         r"X:\...\GIGA\9919-BOARD2_2\DOSSIER FILES\JPGS\Almacén"
     )
     assert c2 == "GIGA", (p2, c2)
+    # Publish: strip cara bajo PIEZAS; diferir JPG suelto / staging.
+    assert _sanear_rel_piezas_acotadas(
+        ["PIEZAS_ACOTADAS", "SEGM2", "Corte", "pieza", "a.jpg"]
+    ) == ["PIEZAS_ACOTADAS", "Corte", "pieza", "a.jpg"]
+    assert _piezas_acotadas_listo_para_publicar(
+        r"PIEZAS_ACOTADAS\Corte\Plasma y Laser\Corte metal\p\a.jpg"
+    )
+    assert not _piezas_acotadas_listo_para_publicar(r"PIEZAS_ACOTADAS\a.jpg")
+    assert not _piezas_acotadas_listo_para_publicar(r"PIEZAS_ACOTADAS\SEGM1\a.jpg")
+    assert _es_ruta_staging(r"X:\JPG\job\_STAGING_DESPLIEGUE\a.jpg")
+    assert not _es_ruta_staging(r"X:\JPG\job\PIEZAS_ACOTADAS\Corte\a.jpg")
     print("SMOKE cotas_dossier_registro OK")
     return 0
 

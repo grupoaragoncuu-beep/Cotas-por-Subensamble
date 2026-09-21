@@ -1,8 +1,10 @@
 # DEBER SER — Cotas por caras del tanque (COTAS ABIGAIL)
 
-Documento de verdad del flujo. Si el código o una conversación contradicen esto, gana este archivo.
+Documento de verdad del flujo **de caras** (ubicación vs 0,0). Si el código o una conversación contradicen esto, gana este archivo en UI/origen/agrupación de caras.
 
-Última actualización: 2026-09-01
+Contrato de **árbol JPGS / dossier / Abigail piezas / BOARD**: [`DEBER_SER_COTAS_FLUJOS.md`](DEBER_SER_COTAS_FLUJOS.md) (manda sobre publish y `cotas_dossier`).
+
+Última actualización: 2026-09-21
 
 ---
 
@@ -36,13 +38,14 @@ Tras lanzar `COTAS_POR_SUBENSAMBLE` **o** `COTAS_ILOGIC_ABIGAIL`, el operador se
 3. Cara expuesta del **SEGMENTO 2**.
 4. Cara expuesta del **SEGMENTO 3**.
 5. Cara expuesta del **SEGMENTO 4**.
+6. **BASE** (piso / fondo) — obligatoria en tanque.
 
 iLogic escribe `Planos/seleccion_caras.json` y lanza Python con `--seleccion`.
 
 | Regla | Uso del Top Cover |
 |-------|-------------------|
 | `COTAS_POR_SUBENSAMBLE` | Vista `TOP/` con cotas H/V de accesorios sobre la tapa |
-| `COTAS_ILOGIC_ABIGAIL` | Piezas de la tapa en `PIEZAS_ACOTADAS/TOP/...` (largo/ancho/thk) |
+| `COTAS_ILOGIC_ABIGAIL` | Piezas (L/A/THK/Ø); local puede agrupar por cara; **dossier final** solo por proceso — ver FLUJOS |
 
 ### Compat automático (`COTAS_CARAS_TANQUE` / import sin JSON)
 
@@ -52,14 +55,14 @@ Si Python se llama **sin** `--seleccion`, caras usa mapeo geométrico FRONT/BACK
 
 ## 3. Salida
 
-- Carpeta raíz: `Planos/JPG/<nombre_ensamble>/`.
-- `COTAS_POR_REFERENCIA/`:
-  - Con selección: subcarpetas `SEGM1/`, `SEGM2/`, `SEGM3/`, `SEGM4/`, `TOP/`.
+- Carpeta raíz local: `Planos/JPG/<nombre_ensamble>/`.
+- `COTAS_POR_REFERENCIA/` (regla caras — **sí** por cara):
+  - Con selección: `SEGM1/`…`SEGM4/`, `TOP/`, `BASE/`.
   - Automático: `FRONT/`, `BACK/`, `LEFT/`, `RIGHT/`, `TOP/`.
   - Dentro de cada cara: **un JPG por tipo de pieza**, nombre `NNN_QTYK_<tipo>.jpg`.
-- `PIEZAS_ACOTADAS/`:
-  - Con selección: `<SEGM*|TOP|OTROS>/<CLASIFICACIÓN>/<PIEZA>/*.jpg` (Top Cover incluido).
-  - Sin selección: `<CLASIFICACIÓN>/<PIEZA>/*.jpg`.
+- `PIEZAS_ACOTADAS/` (regla Abigail):
+  - **Local (durante/tras corrida):** puede llevar `<SEGM*|TOP|BASE|OTROS>/<proceso>/<PIEZA>/` o solo `<proceso>/`.
+  - **Dossier `DOSSIER FILES\JPGS\`:** solo `<proceso>/<…>/<PIEZA>/` (Corte / Doblado / …). El publicador **quita** `SEGM*`/`TOP`/`BASE`/`OTROS` bajo `PIEZAS_ACOTADAS`, **no copia** `_STAGING_*`, y **diferisce** JPG sueltos sin carpeta de proceso.
 - Log: `Planos/error_log_caras.txt` / `error_log.txt` según flujo.
 - Al terminar: borrar hojas temporales `TANQUE_DATUM_*` y dejar visible la hoja plantilla del machote (**nunca** quedarse en `Model (AutoCAD)`).
 
@@ -181,6 +184,8 @@ Log obligatorio, por ejemplo:
 5. No mutar `dim.Style` compartido del machote.
 6. No reintroducir 1 JPG por referencia individual; las cotas coincidentes sí llevan `TYP`.
 7. Con selección, no renombrar carpetas a FRONT/BACK “por costumbre” de Inventor.
+8. En el **dossier** de piezas: no publicar `SEGM*`/`BASE`/`TOP` bajo `PIEZAS_ACOTADAS`, ni `_STAGING_*`, ni JPG sueltos en la raíz de PIEZAS (detalle en FLUJOS).
+9. Nombres de pieza con decimal (`PIPE FLANGE 0.250`): no usar `splitext` a ciegas (no crear `PIPE FLANGE 0`).
 
 ---
 
@@ -188,9 +193,9 @@ Log obligatorio, por ejemplo:
 
 | Check | OK |
 |-------|----|
-| Preparación | Machote + tanque + 5 picks (Top+SEGM) en subensamble **y** en piezas |
-| Caras | 4 segmentos + TOP |
-| Piezas | Incluyen carpeta `TOP/` cuando hay selección |
+| Preparación | Machote + tanque + picks Top+SEGM1..4+**BASE** en subensamble **y** en piezas |
+| Caras | 4 segmentos + TOP + BASE |
+| Piezas | Local puede llevar cara; dossier JPGS solo por proceso (ver FLUJOS) |
 | Cotas caras | Líneas H/V desde (0,0), 1 JPG por tipo |
 | Agrupación | Piezas iguales en un solo JPG; nombre `QTY*` |
 | TYP | Texto `TYP` + dona pequeña en los otros extremos del mismo valor (no en el centro de la pieza) |

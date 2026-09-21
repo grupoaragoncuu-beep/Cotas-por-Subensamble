@@ -446,13 +446,17 @@ def _es_barreno_circular_interior(cx, cy, radio_hoja, sil) -> bool:
     return True
 
 
-def _anillos_en_vista(vista, min_tam=None, max_frac=0.55):
+def _anillos_en_vista(vista, min_tam=None, max_frac=0.55, solo_interiores=True):
     """
     Círculos/elipses cerradas (barrenos redondos).
 
     Incluye CurveType 5122 (circle) y 5124 (ellipse full) — típicos en HLR GIGA.
     Excluye radios de doblez (arcos abiertos / centros en esquina) y muescas
     de borde cuyo arco parece círculo pero no es un corte interior.
+
+    ``solo_interiores=False``: también el Ø EXTERIOR de la silueta (nipples,
+    bosses, tierra redonda). Sin esto ``acotar_diametros`` dejaba 0 cotas
+    porque el anillo exterior falla el filtro de barreno interior.
     """
     anillos = []
     sil = _silueta_vista(vista)
@@ -496,8 +500,11 @@ def _anillos_en_vista(vista, min_tam=None, max_frac=0.55):
                 pass  # elipse/círculo full: OK
             elif ct is None and not _arco_casi_cerrado(curva, tam):
                 continue
-            # Solo barrenos/cortes CIRCULARES interiores (no muescas de canto).
-            if not _es_barreno_circular_interior(cx, cy, tam * 0.5, sil):
+            # Solo barrenos/cortes CIRCULARES interiores (no muescas de canto),
+            # salvo escaneo de Ø exterior de pieza.
+            if solo_interiores and not _es_barreno_circular_interior(
+                cx, cy, tam * 0.5, sil
+            ):
                 continue
             anillos.append(
                 {
@@ -1116,10 +1123,23 @@ def acotar_diametros(hojas_pendientes=None):
         if hoja.DrawingViews.Count == 0:
             continue
 
+        try:
+            hoja.Activate()
+        except Exception:
+            pass
+        try:
+            inv_app.ActiveView.Update()
+        except Exception:
+            pass
+
         vista = hoja.DrawingViews.Item(1)
-        anillos = _anillos_en_vista(vista, min_tam=0.1, max_frac=0.98)
+        # Ø exterior de pieza (nipple/boss/tierra): incluir anillo silueta.
+        anillos = _anillos_en_vista(
+            vista, min_tam=0.05, max_frac=0.99, solo_interiores=False
+        )
 
         if not anillos:
+            print(f"⚠️ {nombre_hoja}: sin anillos circulares en la vista")
             continue
 
         try:

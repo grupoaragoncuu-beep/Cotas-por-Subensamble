@@ -1,5 +1,5 @@
 """
-Instructivo de armado para ensambles independientes (kits OTC).
+Instructivo de armado para ensambles independientes (kits OTC + Colorimetría).
 
 (0,0) = esquina SUPERIOR-IZQUIERDA escuadrable del ANCLA (pieza de frente /
 más cercana a la cámara, con dos rectas). Sin tangentes de arco.
@@ -7,11 +7,14 @@ más cercana a la cámara, con dos rectas). Sin tangentes de arco.
 Cada hijo útil (instancia) recibe cota X e Y respecto a ese origen.
 HW solo posición. TYP misma familia. 6 vistas ViewCube. ``--limpiar``.
 
-Salida::
+Salida (bajo PIEZAS_ACOTADAS)::
 
-    Planos/JPG/<TANQUE>/ENSAMBLES_INDEPENDIENTES/<kit>/<VISTA>/*.jpg
+    Corte/Maquinado/Accesorios Sueltos/<kit>/<VISTA>/*.jpg
+    Corte/Maquinado/Inspeccion Visual/<kit>/*.jpg
+    Corte/Maquinado/Accesorios Sueltos por pieza/<pieza>/*.jpg
 
 Regla iLogic: ``COTAS_ENSAMBLES_INDEPENDIENTES``.
+Colorimetría: ``Clasificación = Ensambles Individuales`` en .iam.
 """
 
 from __future__ import annotations
@@ -28,7 +31,9 @@ import pythoncom
 
 from inventor_com import conectar_inventor
 
-CARPETA_ENSAMBLES = "ENSAMBLES_INDEPENDIENTES"
+# Legacy (migración / --limpiar de corridas viejas).
+CARPETA_ENSAMBLES_LEGACY = "ENSAMBLES_INDEPENDIENTES"
+CARPETA_PIEZAS = "PIEZAS_ACOTADAS"
 # ViewCube completo (6 caras). Ya no se limita a FRONT/TOP/RIGHT.
 VISTAS = ("FRONT", "BACK", "TOP", "BOTTOM", "RIGHT", "LEFT")
 # Distancia mínima en hoja (cm) para ni siquiera considerar el extremo.
@@ -86,7 +91,7 @@ def _parse_args(argv=None):
     p.add_argument(
         "--limpiar",
         action="store_true",
-        help="Vaciar ENSAMBLES_INDEPENDIENTES antes de exportar",
+        help="Vaciar Accesorios Sueltos / Inspeccion Visual / por pieza antes de exportar",
     )
     return p.parse_args(argv)
 
@@ -1289,6 +1294,279 @@ def _cotas_de_vista(vista, tg, hijos, ancla_preferida=None):
     return None
 
 
+def _rutas_corte_maquinado(carpeta_tanque):
+    """Raíz PIEZAS_ACOTADAS/Corte/Maquinado y subcarpetas del proceso."""
+    from generador_tanque_completo import (
+        SUBCARPETA_ACCESORIOS_POR_PIEZA,
+        SUBCARPETA_ACCESORIOS_SUELTOS,
+        SUBCARPETA_INSPECCION_VISUAL,
+    )
+
+    piezas = os.path.join(carpeta_tanque, CARPETA_PIEZAS)
+    corte_maq = os.path.join(piezas, "Corte", "Maquinado")
+    return {
+        "piezas": piezas,
+        "corte_maq": corte_maq,
+        "accesorios": os.path.join(corte_maq, SUBCARPETA_ACCESORIOS_SUELTOS),
+        "inspeccion": os.path.join(corte_maq, SUBCARPETA_INSPECCION_VISUAL),
+        "por_pieza": os.path.join(corte_maq, SUBCARPETA_ACCESORIOS_POR_PIEZA),
+    }
+
+
+def _limpiar_carpetas_ensambles(rutas, carpeta_tanque):
+    """Vacía Accesorios/Inspeccion/por pieza y legacy ENSAMBLES_INDEPENDIENTES."""
+    for key in ("accesorios", "inspeccion", "por_pieza"):
+        ruta = rutas.get(key)
+        if ruta and os.path.isdir(ruta):
+            shutil.rmtree(ruta, ignore_errors=True)
+    legacy = os.path.join(carpeta_tanque, CARPETA_ENSAMBLES_LEGACY)
+    if os.path.isdir(legacy):
+        shutil.rmtree(legacy, ignore_errors=True)
+
+
+def _camara_isometrica_kit(asm_doc, tg, to):
+    """Isométrica del kit (mismo criterio que ESTANIADO cobre, sobre .iam)."""
+    import creador_vistas
+
+    cx, cy, cz = _centro_bbox_kit(asm_doc)
+    v_frente = tg.CreateVector(0.0, 0.0, 1.0)
+    up_hint = tg.CreateVector(0.0, 1.0, 0.0)
+    return creador_vistas.crear_camara_isometrica_desde_frente(
+        asm_doc, tg, to, cx, cy, cz, v_frente, up_hint
+    )
+
+
+def _exportar_jpg_hoja(inv_app, plano, hoja, ruta_jpg):
+    """Exporta la hoja activa a JPG (sin cotas / Inspección Visual)."""
+    from generador_vistas import ANCHO_EXPORTACION, ALTO_EXPORTACION
+
+    os.makedirs(os.path.dirname(ruta_jpg) or ".", exist_ok=True)
+    try:
+        hoja.Activate()
+    except Exception:
+        pass
+    try:
+        inv_app.ActiveView.Update()
+    except Exception:
+        pass
+    time.sleep(0.35)
+    white = None
+    try:
+        white = inv_app.TransientObjects.CreateColor(255, 255, 255)
+    except Exception:
+        pass
+    try:
+        plano.SaveAsBitmap(
+            ruta_jpg,
+            ANCHO_EXPORTACION,
+            ALTO_EXPORTACION,
+            white,
+            white,
+        )
+        return os.path.isfile(ruta_jpg)
+    except Exception as exc:
+        _log(f"  AVISO export JPG Inspeccion Visual: {exc}")
+        return False
+
+
+def _procesar_inspeccion_visual(
+    inv_app, plano, base_sheet, asm_doc, nombre_kit, carpeta_insp, nombre_job
+):
+    """Una captura isométrica sin cotas del ensamble completo."""
+    from generador_vistas import borrar_hojas_por_nombres, _nombre_hoja_machote
+    import creador_vistas
+    from generador_tanque_completo import _nombre_carpeta_pieza
+
+    tg = inv_app.TransientGeometry
+    to = inv_app.TransientObjects
+    try:
+        cam = _camara_isometrica_kit(asm_doc, tg, to)
+    except Exception as exc:
+        _log(f"  {nombre_kit}: cámara isométrica falló ({exc})")
+        return 0
+
+    nombre_hoja = creador_vistas.construir_nombre_hoja(
+        plano, nombre_kit, "ISO_INSP"
+    )
+    hoja, vista = _crear_hoja_vista(
+        plano, base_sheet, asm_doc, nombre_hoja, cam, inv_app, tg, to
+    )
+    if hoja is None:
+        return 0
+
+    carpeta_kit = os.path.join(carpeta_insp, _nombre_carpeta_pieza(nombre_kit))
+    if os.path.isdir(carpeta_kit):
+        shutil.rmtree(carpeta_kit, ignore_errors=True)
+    os.makedirs(carpeta_kit, exist_ok=True)
+    nombre_jpg = f"{nombre_job}__{nombre_kit}__ISO_INSP_1.jpg"
+    ruta_jpg = os.path.join(carpeta_kit, nombre_jpg)
+    ok = _exportar_jpg_hoja(inv_app, plano, hoja, ruta_jpg)
+
+    nombre_machote = _nombre_hoja_machote(plano)
+    try:
+        borrar_hojas_por_nombres(
+            plano,
+            {str(hoja.Name).split(":")[0]},
+            nombre_machote_protegido=nombre_machote,
+        )
+    except Exception:
+        try:
+            hoja.Delete()
+        except Exception:
+            pass
+
+    if ok:
+        _log(f"  {nombre_kit}: Inspeccion Visual → {ruta_jpg}")
+        return 1
+    return 0
+
+
+def _nombres_piezas_de_kits(lista_kits):
+    """Nombres base únicos de .ipt leaf dentro de los kits."""
+    nombres = set()
+    for asm_doc, _nombre, _qty, _hijos in lista_kits:
+        try:
+            leaf = asm_doc.ComponentDefinition.Occurrences.AllLeafOccurrences
+            n = int(leaf.Count)
+        except Exception:
+            continue
+        for i in range(1, n + 1):
+            try:
+                occ = leaf.Item(i)
+                if occ.Suppressed:
+                    continue
+                doc = occ.Definition.Document
+                if int(doc.DocumentType) != TIPO_DOCUMENTO_PIEZA:
+                    continue
+                base = os.path.splitext(
+                    os.path.basename(str(doc.FullFileName or ""))
+                )[0]
+                if base:
+                    nombres.add(base)
+            except Exception:
+                continue
+    return nombres
+
+
+def _procesar_accesorios_por_pieza(
+    inv_app, plano, ensamble, carpeta_piezas, nombres_piezas
+):
+    """
+    Flujo Abigail (vistas+cotas+JPG) solo para piezas de los kits,
+    reorganizado a Corte/Maquinado/Accesorios Sueltos por pieza/<PIEZA>/.
+    """
+    if not nombres_piezas:
+        _log("  Accesorios Sueltos por pieza: sin .ipt en kits.")
+        return 0
+
+    from generador_vistas import ejecutar_flujo_desde_app
+    from generador_tanque_completo import (
+        SUBCARPETA_ACCESORIOS_POR_PIEZA,
+        _reorganizar_piezas_por_clasificacion,
+    )
+
+    _log(
+        f"  Accesorios Sueltos por pieza: {len(nombres_piezas)} pieza(s) "
+        f"vía flujo Abigail"
+    )
+    staging = os.path.join(
+        carpeta_piezas, "_STAGING_ACCESORIOS_POR_PIEZA"
+    )
+    if os.path.isdir(staging):
+        shutil.rmtree(staging, ignore_errors=True)
+    os.makedirs(staging, exist_ok=True)
+
+    try:
+        ok = ejecutar_flujo_desde_app(
+            inv_app,
+            ensamble,
+            plano,
+            carpeta_salida=staging,
+            incremental=False,
+            catalogo_piezas=set(nombres_piezas),
+        )
+    except Exception as exc:
+        _log(f"  ERROR Accesorios Sueltos por pieza (flujo): {exc}")
+        _log(traceback.format_exc())
+        return 0
+
+    mapa = {SUBCARPETA_ACCESORIOS_POR_PIEZA: set(nombres_piezas)}
+    try:
+        _reorganizar_piezas_por_clasificacion(staging, mapa)
+    except Exception as exc:
+        _log(f"  AVISO reorg por pieza: {exc}")
+
+    # Mover árbol resultante a PIEZAS_ACOTADAS/Corte/Maquinado/...
+    dest_root = os.path.join(
+        carpeta_piezas,
+        "Corte",
+        "Maquinado",
+        SUBCARPETA_ACCESORIOS_POR_PIEZA,
+    )
+    src_root = os.path.join(
+        staging,
+        "Corte",
+        "Maquinado",
+        SUBCARPETA_ACCESORIOS_POR_PIEZA,
+    )
+    # Si reorg dejó piezas en la raíz del staging con la clave sintética:
+    if not os.path.isdir(src_root):
+        alt = os.path.join(staging, SUBCARPETA_ACCESORIOS_POR_PIEZA)
+        if os.path.isdir(alt):
+            src_root = alt
+
+    movidos = 0
+    if os.path.isdir(src_root):
+        os.makedirs(dest_root, exist_ok=True)
+        for root, _dirs, files in os.walk(src_root):
+            for fn in files:
+                if not fn.lower().endswith(".jpg"):
+                    continue
+                src = os.path.join(root, fn)
+                rel = os.path.relpath(src, src_root)
+                dst = os.path.join(dest_root, rel)
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                try:
+                    if os.path.isfile(dst):
+                        os.remove(dst)
+                    shutil.move(src, dst)
+                    movidos += 1
+                except OSError as err:
+                    _log(f"  AVISO move {fn}: {err}")
+    else:
+        # Fallback: cualquier JPG bajo staging → por pieza/<nombre>/
+        from generador_tanque_completo import (
+            _extraer_pieza_de_jpg,
+            _nombre_carpeta_pieza,
+        )
+
+        os.makedirs(dest_root, exist_ok=True)
+        for root, _dirs, files in os.walk(staging):
+            if os.path.basename(root).casefold().startswith("_staging"):
+                continue
+            for fn in files:
+                if not fn.lower().endswith(".jpg"):
+                    continue
+                pieza = _nombre_carpeta_pieza(_extraer_pieza_de_jpg(fn))
+                dst_dir = os.path.join(dest_root, pieza)
+                os.makedirs(dst_dir, exist_ok=True)
+                src = os.path.join(root, fn)
+                dst = os.path.join(dst_dir, fn)
+                try:
+                    if os.path.isfile(dst):
+                        os.remove(dst)
+                    shutil.move(src, dst)
+                    movidos += 1
+                except OSError as err:
+                    _log(f"  AVISO move {fn}: {err}")
+
+    shutil.rmtree(staging, ignore_errors=True)
+    _log(
+        f"  Accesorios Sueltos por pieza: {movidos} JPG → {dest_root} "
+        f"(flujo ok={ok})"
+    )
+    return movidos
+
 
 def _procesar_kit(
     inv_app, plano, base_sheet, asm_doc, nombre_kit, carpeta_kit, nombre_job
@@ -1487,10 +1765,11 @@ def ejecutar(solo="", max_n=0, listar=False, limpiar=False, ruta_seleccion=""):
             return True
 
         carpeta_tanque = _carpeta_salida_tanque(plano, ensamble)
-        carpeta_raiz = os.path.join(carpeta_tanque, CARPETA_ENSAMBLES)
-        if limpiar and os.path.isdir(carpeta_raiz):
-            shutil.rmtree(carpeta_raiz, ignore_errors=True)
-        os.makedirs(carpeta_raiz, exist_ok=True)
+        rutas = _rutas_corte_maquinado(carpeta_tanque)
+        if limpiar:
+            _limpiar_carpetas_ensambles(rutas, carpeta_tanque)
+        for key in ("accesorios", "inspeccion", "por_pieza"):
+            os.makedirs(rutas[key], exist_ok=True)
 
         try:
             base_sheet = _encontrar_hoja_machote(plano) or plano.Sheets.Item(1)
@@ -1499,10 +1778,11 @@ def ejecutar(solo="", max_n=0, listar=False, limpiar=False, ruta_seleccion=""):
             base_sheet = plano.Sheets.Item(1)
 
         total = 0
+        total_insp = 0
         for asm_doc, nombre, qty, hijos in lista:
             _log(f"\n>>> Kit: {nombre} (qty={qty}, hijos={hijos})")
             carpeta_kit = os.path.join(
-                carpeta_raiz, _nombre_carpeta_pieza(nombre)
+                rutas["accesorios"], _nombre_carpeta_pieza(nombre)
             )
             if os.path.isdir(carpeta_kit):
                 shutil.rmtree(carpeta_kit, ignore_errors=True)
@@ -1516,7 +1796,44 @@ def ejecutar(solo="", max_n=0, listar=False, limpiar=False, ruta_seleccion=""):
                 _log(f"ERROR kit {nombre}: {exc}")
                 _log(traceback.format_exc())
 
-        _log(f"\nListo: {total} JPG en {carpeta_raiz}")
+            try:
+                total_insp += _procesar_inspeccion_visual(
+                    inv_app,
+                    plano,
+                    base_sheet,
+                    asm_doc,
+                    nombre,
+                    rutas["inspeccion"],
+                    job,
+                )
+            except Exception as exc:
+                _log(f"ERROR Inspeccion Visual {nombre}: {exc}")
+                _log(traceback.format_exc())
+
+        nombres_piezas = _nombres_piezas_de_kits(lista)
+        total_por_pieza = 0
+        try:
+            total_por_pieza = _procesar_accesorios_por_pieza(
+                inv_app, plano, ensamble, rutas["piezas"], nombres_piezas
+            )
+        except Exception as exc:
+            _log(f"ERROR Accesorios Sueltos por pieza: {exc}")
+            _log(traceback.format_exc())
+
+        try:
+            from cotas_dossier_registro import publicar_y_sincronizar_dossier
+
+            publicar_y_sincronizar_dossier(rutas["piezas"])
+        except Exception as exc:
+            _log(f"AVISO dossier: {exc}")
+
+        _log(
+            f"\nListo: instructivo={total} JPG | "
+            f"inspeccion={total_insp} | por_pieza={total_por_pieza}"
+        )
+        _log(f"  Accesorios Sueltos → {rutas['accesorios']}")
+        _log(f"  Inspeccion Visual → {rutas['inspeccion']}")
+        _log(f"  Accesorios Sueltos por pieza → {rutas['por_pieza']}")
         ok = True
         return True
     except Exception as exc:

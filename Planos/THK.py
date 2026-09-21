@@ -3675,12 +3675,29 @@ def _clonar_hoja_lado_para_cota(
         print(f"⚠️ {nombre_nueva}: CopyTo falló -> {ultimo_err}")
         return None, None
 
-    # Renombrar. Si Inventor pone auto-sufijo :N no importa (se maneja al
-    # renombrar final del flujo).
+    # Renombrar. Inventor ES/EN a veces deja «Copia de …» / «Copy of …»
+    # si el Name= falla a la primera (jacking pads → Copia de jacking pads).
     try:
-        nueva.Name = nombre_nueva
+        from creador_vistas import forzar_nombre_hoja
+
+        forzar_nombre_hoja(nueva, nombre_nueva)
     except Exception:
-        pass
+        try:
+            nueva.Name = nombre_nueva
+        except Exception:
+            pass
+        try:
+            raw = str(nueva.Name or "")
+            limpio = re.sub(
+                r"^(Copia de |Copy of )", "", raw, flags=re.IGNORECASE
+            ).strip()
+            if limpio and limpio != raw:
+                try:
+                    nueva.Name = nombre_nueva
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     try:
         nueva.Activate()

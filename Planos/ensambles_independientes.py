@@ -6,11 +6,16 @@ OTC / Vantran (tanque ``*-1246-A01``):
   caras A02..A06 del 48, ni TOP familia ``*47*``.
   Equivale a: ``root(tanque) − casco − TOP`` (kits 1250/1251/…, SP-, A20…).
 
+Colorimetría: también incluye .iam con iProperty
+``Clasificación = Ensambles Individuales`` (marcados a mano).
+
 Otros productos: recorrido de árbol excluyendo contenedores de cara (legacy).
 
-Salida::
+Salida (bajo PIEZAS_ACOTADAS)::
 
-    Planos/JPG/<TANQUE>/ENSAMBLES_INDEPENDIENTES/<nombre_ensamble>/*.jpg
+    Corte/Maquinado/Accesorios Sueltos/<kit>/<VISTA>/*.jpg
+    Corte/Maquinado/Inspeccion Visual/<kit>/*.jpg
+    Corte/Maquinado/Accesorios Sueltos por pieza/<pieza>/*.jpg
 """
 
 from __future__ import annotations
@@ -23,9 +28,13 @@ import traceback
 
 from inventor_com import conectar_inventor
 
-CARPETA_ENSAMBLES_INDEPENDIENTES = "ENSAMBLES_INDEPENDIENTES"
+CARPETA_ENSAMBLES_INDEPENDIENTES = "ENSAMBLES_INDEPENDIENTES"  # legacy
 TIPO_DOCUMENTO_ENSAMBLE = 12291
+TIPO_DOCUMENTO_PIEZA = 12290
 MIN_HIJOS_ENSAMBLE = 2
+CLASIFICACION_ENSAMBLES_INDIVIDUALES = "Ensambles Individuales"
+_PROPSET_USER_DEFINED = "Inventor User Defined Properties"
+_PROP_CLASIFICACION = "Clasificación"
 
 # Nombres Vantran / genéricos que nunca son "kit independiente".
 _EXCLUIR_NOMBRE_RE = re.compile(
@@ -279,20 +288,158 @@ def _recolectar_otc_root_tanque(ensamble_raiz, exclusiones_extra=None):
     return lista
 
 
+def _leer_clasificacion_ensamble(asm_doc):
+    """Lee ``Clasificación`` del .iam; None si falta o no es Ensambles Individuales."""
+    if asm_doc is None:
+        return None
+    try:
+        from generador_caras_tanque import (
+            CLASIFICACION_ENSAMBLES_INDIVIDUALES as _CLS,
+            _leer_clasificacion_de_doc,
+        )
+
+        return _leer_clasificacion_de_doc(
+            asm_doc, validas=(_CLS,)
+        )
+    except Exception:
+        pass
+    # Fallback local (evita import circular en contextos mínimos).
+    try:
+        user_props = asm_doc.PropertySets.Item(_PROPSET_USER_DEFINED)
+        prop = user_props.Item(_PROP_CLASIFICACION)
+        texto = str(prop.Value or "").strip()
+    except Exception:
+        return None
+    if texto.casefold() == CLASIFICACION_ENSAMBLES_INDIVIDUALES.casefold():
+        return CLASIFICACION_ENSAMBLES_INDIVIDUALES
+    return None
+
+
+def _agregar_resultado(resultados, asm_doc, nombre, occ=None):
+    """Inserta/actualiza un kit en el dict de resultados."""
+    try:
+        ruta = str(asm_doc.FullFileName or "")
+    except Exception:
+        ruta = ""
+    clave = ruta.upper() if ruta else nombre.upper()
+    if clave in resultados:
+        resultados[clave]["qty"] += 1
+        return
+    n_hijos = _contar_hijos(asm_doc)
+    if n_hijos < MIN_HIJOS_ENSAMBLE:
+        return
+    resultados[clave] = {
+        "doc": asm_doc,
+        "nombre": nombre,
+        "qty": 1,
+        "hijos": n_hijos,
+        "fuente": "colorimetria" if occ is not None else "otc",
+    }
+
+
+def _recolectar_por_colorimetria(ensamble_raiz, exclusiones_extra=None):
+    """
+    Ensambles con iProperty Clasificación = Ensambles Individuales.
+
+    Prioriza occs de 1er nivel (mismo criterio Colorimetría / OTC).
+    """
+    resultados = {}
+    excl = {str(x).upper() for x in (exclusiones_extra or []) if x}
+    try:
+        occs = ensamble_raiz.ComponentDefinition.Occurrences
+        total = int(occs.Count)
+    except Exception as exc:
+        _log(f"AVISO colorimetria ensambles: no se leyeron occs: {exc}")
+        return {}
+
+    for i in range(1, total + 1):
+        try:
+            occ = occs.Item(i)
+            if occ.Suppressed:
+                continue
+        except Exception:
+            continue
+        if not _es_ensamble_occ(occ):
+            continue
+        try:
+            asm_doc = occ.Definition.Document
+        except Exception:
+            continue
+        if _leer_clasificacion_ensamble(asm_doc) is None:
+            continue
+        try:
+            nombre = _nombre_doc(asm_doc)
+        except Exception:
+            nombre = str(getattr(occ, "Name", "ENSAMBLE")).split(":")[0]
+        if _nombre_en_exclusiones(nombre, asm_doc, occ, excl):
+            continue
+        _agregar_resultado(resultados, asm_doc, nombre, occ=occ)
+
+    if resultados:
+        _log(
+            f"  Colorimetría Ensambles Individuales: {len(resultados)} kit(s)"
+        )
+        for v in resultados.values():
+            _log(f"    · {v['nombre']}  hijos={v['hijos']}")
+    return resultados
+
+
+def _fusionar_resultados(*dicts):
+    """Une dicts clave→kit; suma qty si la clave se repite."""
+    out = {}
+    for d in dicts:
+        for clave, v in (d or {}).items():
+            if clave in out:
+                out[clave]["qty"] += int(v.get("qty") or 1)
+            else:
+                out[clave] = dict(v)
+    return out
+
+
 def recolectar_ensambles_independientes(ensamble_raiz, exclusiones_extra=None):
     """
     Lista única de ``(asm_doc, nombre_base, qty_instancias, hijos)``.
 
-    Tanque OTC (``*-1246-A01``): aislamiento ``root - casco - TOP``.
-    Otros: recorrido de árbol legacy (contenedores de cara se exploran).
+    Une:
+      1) Detección OTC / legacy (estructura y nombres).
+      2) Colorimetría ``Clasificación = Ensambles Individuales`` en .iam.
     """
+    por_color = _recolectar_por_colorimetria(ensamble_raiz, exclusiones_extra)
+
     try:
         nombre_raiz = _nombre_doc(ensamble_raiz)
     except Exception:
         nombre_raiz = ""
+
     if _es_tanque_raiz_otc(nombre_raiz):
         _log(f"  Raiz OTC tanque detectada: {nombre_raiz}")
-        return _recolectar_otc_root_tanque(ensamble_raiz, exclusiones_extra)
+        lista_otc = _recolectar_otc_root_tanque(ensamble_raiz, exclusiones_extra)
+        por_otc = {}
+        for asm_doc, nombre, qty, hijos in lista_otc:
+            try:
+                ruta = str(asm_doc.FullFileName or "")
+            except Exception:
+                ruta = ""
+            clave = ruta.upper() if ruta else nombre.upper()
+            por_otc[clave] = {
+                "doc": asm_doc,
+                "nombre": nombre,
+                "qty": qty,
+                "hijos": hijos,
+                "fuente": "otc",
+            }
+        fusion = _fusionar_resultados(por_otc, por_color)
+        lista = [
+            (v["doc"], v["nombre"], v["qty"], v["hijos"])
+            for v in fusion.values()
+        ]
+        lista.sort(key=lambda t: t[1].upper())
+        _log(
+            f"Ensambles independientes (OTC + Colorimetría): {len(lista)}"
+        )
+        for _doc, nom, qty, hijos in lista:
+            _log(f"  - {nom}  qty={qty}  hijos={hijos}")
+        return lista
 
     resultados = {}
     excl = {str(x).upper() for x in (exclusiones_extra or []) if x}
@@ -338,6 +485,7 @@ def recolectar_ensambles_independientes(ensamble_raiz, exclusiones_extra=None):
                     "nombre": nombre,
                     "qty": 1,
                     "hijos": n_hijos,
+                    "fuente": "legacy",
                 }
             else:
                 _log(
@@ -362,13 +510,14 @@ def recolectar_ensambles_independientes(ensamble_raiz, exclusiones_extra=None):
         except Exception as exc:
             _log(f"AVISO: occ raíz #{i}: {exc}")
 
+    fusion = _fusionar_resultados(resultados, por_color)
     lista = [
         (v["doc"], v["nombre"], v["qty"], v["hijos"])
-        for v in resultados.values()
+        for v in fusion.values()
     ]
     lista.sort(key=lambda t: t[1].upper())
     _log(
-        f"Ensambles independientes detectados: {len(lista)} "
+        f"Ensambles independientes (legacy + Colorimetría): {len(lista)} "
         f"(únicos; instancias sumadas en qty)"
     )
     for _doc, nom, qty, hijos in lista:

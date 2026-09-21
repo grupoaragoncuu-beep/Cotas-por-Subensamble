@@ -93,7 +93,7 @@ def _imprimir_instrucciones_ribbon():
     print("   - COTAS_POR_SEG_PIEZAS     (prueba rapida: piezas de UNA cara)")
     print(f"   - {NOMBRE_REGLA}      (solo piezas acotadas, tanque completo)")
     print("   - COTAS_ENSAMBLES_INDEPENDIENTES  (instructivo kits FRONT/TOP/RIGHT)")
-    print("   - COTAS_BOARD             (tablero GIGA/Board → JPG/.../BOARD)")
+    print("   - COTAS_BOARD             (tablero GIGA/Board -> JPG/.../BOARD)")
     print()
     print("4. Opcional: activa 'Texto' y tamano grande en el boton.")
     print()
@@ -124,6 +124,19 @@ def _ruta_ya_registrada(contenido, regla_path):
     return any(c and os.path.normcase(c) in contenido_norm for c in candidatos)
 
 
+def _bloque_external_rules(rutas_reglas):
+    entradas = "".join(
+        f'      <ExternalRuleFilename Path="{ruta}"/>\n' for ruta in rutas_reglas
+    )
+    return (
+        "    <iLogic>\n"
+        "      <ExternalRuleFilenames>\n"
+        f"{entradas}"
+        "      </ExternalRuleFilenames>\n"
+        "    </iLogic>"
+    )
+
+
 def _registrar_reglas_en_xml(xml_path, rutas_reglas):
     try:
         with open(xml_path, "r", encoding="utf-16") as f:
@@ -131,7 +144,45 @@ def _registrar_reglas_en_xml(xml_path, rutas_reglas):
     except Exception as e:
         return False, f"no se pudo leer ({e})"
 
+    # Inventor 2027 (y perfiles nuevos) llegan con <iLogic/> vacío.
+    if "<iLogic/>" in contenido or "<iLogic />" in contenido:
+        contenido = contenido.replace(
+            "<iLogic/>", _bloque_external_rules(rutas_reglas), 1
+        ).replace(
+            "<iLogic />", _bloque_external_rules(rutas_reglas), 1
+        )
+        try:
+            with open(xml_path, "w", encoding="utf-16") as f:
+                f.write(contenido)
+        except Exception as e:
+            return False, f"no se pudo escribir ({e})"
+        nombres = ", ".join(os.path.basename(r) for r in rutas_reglas)
+        return True, f"bloque iLogic creado; registradas: {nombres}"
+
     if CERRAR_ILOGIC_MARKER not in contenido:
+        if "</iLogic>" in contenido:
+            entradas = "".join(
+                f'      <ExternalRuleFilename Path="{ruta}"/>\n'
+                for ruta in rutas_reglas
+                if not _ruta_ya_registrada(contenido, ruta)
+            )
+            if not entradas and all(
+                _ruta_ya_registrada(contenido, r) for r in rutas_reglas
+            ):
+                return True, "todas ya estaban registradas"
+            bloque = (
+                "      <ExternalRuleFilenames>\n"
+                f"{entradas}"
+                "      </ExternalRuleFilenames>\n"
+                "    </iLogic>"
+            )
+            contenido = contenido.replace("</iLogic>", bloque, 1)
+            try:
+                with open(xml_path, "w", encoding="utf-16") as f:
+                    f.write(contenido)
+            except Exception as e:
+                return False, f"no se pudo escribir ({e})"
+            return True, "ExternalRuleFilenames insertado en <iLogic>"
         return False, "no tiene bloque ExternalRuleFilenames"
 
     nuevas = [r for r in rutas_reglas if not _ruta_ya_registrada(contenido, r)]
@@ -214,12 +265,20 @@ def instalar():
             print(f"  {estado} {nombre}: {detalle}")
 
     print()
-    print("Conectando con Inventor (opcional)...")
-    inv_app = conectar_inventor()
+    print("Conectando con Inventor (COM / iLogic)...")
+    try:
+        inv_app = conectar_inventor()
+    except Exception as e:
+        inv_app = None
+        print(f"AVISO: Inventor no disponible por COM ({e})")
+        print("       Abre Inventor y vuelve a ejecutar este instalador.")
+
     if inv_app is not None:
         ok, detalle = configurar_carpeta_reglas_ilogic(inv_app, ilogic_dir)
         if ok:
-            print(f"OK Carpeta iLogic tambien registrada en sesion: {detalle}")
+            print(f"OK Carpeta iLogic registrada en sesion: {detalle}")
+        else:
+            print(f"AVISO: No se pudo registrar carpeta iLogic por COM: {detalle}")
 
     _imprimir_instrucciones_ribbon()
     print("Instalacion completada.")

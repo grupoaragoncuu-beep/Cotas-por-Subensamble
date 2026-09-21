@@ -61,6 +61,9 @@ SUBCARPETAS_CLASIFICACION_PIEZAS = (
     "Doblado",
     "Plasma",
     "Plasma Doblado",
+    "Piezas Soldadas",
+    # Solo routing sintético (ensambles individuales → por pieza); no iProp.
+    "Accesorios Sueltos por pieza",
 )
 SUBCARPETA_SIN_CLASIFICAR = "SIN CLASIFICACION"
 
@@ -69,13 +72,29 @@ SUBCARPETA_SIN_CLASIFICAR = "SIN CLASIFICACION"
 #   Corte/Plasma y Laser/Corte Busbar/<PIEZA>/  ← (secundario)
 #   Corte/Maquinado/Maquinados metal/<PIEZA>/
 #   Corte/Maquinado/Corte Busbar/<PIEZA>/      ← flat cobre
+#   Corte/Maquinado/Piezas Soldadas/<PIEZA>/
+#   Corte/Maquinado/Accesorios Sueltos/<kit>/<VISTA>/
+#   Corte/Maquinado/Inspeccion Visual/<kit>/
+#   Corte/Maquinado/Accesorios Sueltos por pieza/<PIEZA>/
 #   Doblado/Metal/<PIEZA>/  |  Doblado/Busbar/<PIEZA>/
 #   Estañado Busbar/*.jpg                      ← cobre isométrico SIN_COTA
 # Legacy (migración): Corte/Corte|Doblado|Estañado
 SUBCARPETAS_CORTE_PLASMA = ("Corte metal", "Corte Busbar")
-SUBCARPETAS_CORTE_MAQUINADO = ("Maquinados metal", "Corte Busbar")
+SUBCARPETAS_CORTE_MAQUINADO = (
+    "Maquinados metal",
+    "Corte Busbar",
+    "Piezas Soldadas",
+    "Accesorios Sueltos",
+    "Inspeccion Visual",
+    "Accesorios Sueltos por pieza",
+)
 SUBCARPETAS_DOBLADO_ANIDADAS = ("Metal", "Busbar")
 SUBCARPETA_ESTANIADO_BUSBAR = "Estañado Busbar"
+# Carpetas lógicas bajo Corte/Maquinado (Colorimetría nueva).
+SUBCARPETA_PIEZAS_SOLDADAS = "Piezas Soldadas"
+SUBCARPETA_ACCESORIOS_SUELTOS = "Accesorios Sueltos"
+SUBCARPETA_INSPECCION_VISUAL = "Inspeccion Visual"
+SUBCARPETA_ACCESORIOS_POR_PIEZA = "Accesorios Sueltos por pieza"
 # Legacy names kept for cleanup/migración de carpetas viejas.
 SUBCARPETAS_CORTE_ANIDADAS = ("Corte", "Doblado", "Estañado")
 STAGING_DESPLIEGUE = "_STAGING_DESPLIEGUE"
@@ -88,6 +107,10 @@ CLASIFICACIONES_LOG = (
     "Corte/Plasma y Laser/Corte Busbar",
     "Corte/Maquinado/Maquinados metal",
     "Corte/Maquinado/Corte Busbar",
+    "Corte/Maquinado/Piezas Soldadas",
+    "Corte/Maquinado/Accesorios Sueltos",
+    "Corte/Maquinado/Inspeccion Visual",
+    "Corte/Maquinado/Accesorios Sueltos por pieza",
     "Doblado/Metal",
     "Doblado/Busbar",
     SUBCARPETA_ESTANIADO_BUSBAR,
@@ -95,6 +118,7 @@ CLASIFICACIONES_LOG = (
     "Doblado",
     "Plasma",
     "Plasma Doblado",
+    "Piezas Soldadas",
     SUBCARPETA_SIN_CLASIFICAR,
 )
 
@@ -441,9 +465,15 @@ def _extraer_pieza_de_jpg(nombre_archivo):
 
 
 def _nombre_carpeta_pieza(nombre_pieza):
-    """Sanea el nombre de pieza para usarlo como carpeta en Windows."""
+    """Sanea el nombre de pieza para usarlo como carpeta en Windows.
+
+    Conserva decimales (``PIPE FLANGE 0.250``). No usar ``rstrip('. ')``:
+    comería ``.250`` carácter a carácter desde la derecha.
+    """
     limpio = re.sub(r'[<>:"/\\|?*]+', "_", str(nombre_pieza).strip())
-    limpio = limpio.rstrip(". ")
+    limpio = limpio.strip().rstrip(" ")
+    if limpio.endswith(".") and (len(limpio) < 2 or not limpio[-2].isdigit()):
+        limpio = limpio[:-1].rstrip(" ")
     return limpio or "PIEZA"
 
 
@@ -805,6 +835,30 @@ def _destino_dirs_clasificacion(
             pieza_folder,
         )
         return destino_dir, "Corte/Maquinado/Maquinados metal", True
+
+    if dest == "piezas soldadas":
+        destino_dir = os.path.join(
+            carpeta_piezas,
+            "Corte",
+            "Maquinado",
+            SUBCARPETA_PIEZAS_SOLDADAS,
+            pieza_folder,
+        )
+        return destino_dir, "Corte/Maquinado/Piezas Soldadas", True
+
+    if dest == "accesorios sueltos por pieza":
+        destino_dir = os.path.join(
+            carpeta_piezas,
+            "Corte",
+            "Maquinado",
+            SUBCARPETA_ACCESORIOS_POR_PIEZA,
+            pieza_folder,
+        )
+        return (
+            destino_dir,
+            "Corte/Maquinado/Accesorios Sueltos por pieza",
+            True,
+        )
 
     # Doblado (iProp Doblado) o Corte doblado histórico → Doblado/Metal|Busbar.
     if dest in ("doblado", "corte"):

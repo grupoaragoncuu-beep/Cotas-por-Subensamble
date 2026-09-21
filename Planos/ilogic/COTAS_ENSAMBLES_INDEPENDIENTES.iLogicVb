@@ -8,13 +8,20 @@
 '   = root(tanque) − casco − TOP  → kits 1250/1251/…, SP-, A20…
 '   Los picks TOP+SEGM+BASE refuerzan exclusiones; no se baja al casco.
 '
+' Colorimetría: también procesa .iam con Clasificación =
+'   "Ensambles Individuales" (kits marcados a mano, 1er nivel).
+'
 ' 1) Seleccion FORZOSA Top Cover + SEGM1-4 + BASE (contrato JSON).
 ' 2) Por kit: 6 vistas ViewCube; (0,0)=esquina SUP-IZQ del ancla.
 '    Cada instancia hija: cota X e Y. TYP + letras A/B/C.
-' 3) Lanza generador_ensambles_instructivo.py
+' 3) Inspeccion Visual: isométrica del kit sin cotas.
+' 4) Accesorios Sueltos por pieza: flujo Abigail de .ipt hijas del kit.
+' 5) Lanza generador_ensambles_instructivo.py
 '
-' Salida:
-'   Planos\JPG\<tanque>\ENSAMBLES_INDEPENDIENTES\<kit>\FRONT|…\
+' Salida (PIEZAS_ACOTADAS):
+'   Corte\Maquinado\Accesorios Sueltos\<kit>\FRONT|…\
+'   Corte\Maquinado\Inspeccion Visual\<kit>\
+'   Corte\Maquinado\Accesorios Sueltos por pieza\<pieza>\
 '
 ' Rutas: COTAS_ABIGAIL_DIR / config_planos.txt / ExternalRuleDirectories.
 
@@ -186,7 +193,10 @@ Sub Main()
         If proc.ExitCode = 0 Then
             System.Windows.Forms.MessageBox.Show(
                 "Instructivo de ensambles exportado." & vbCrLf &
-                "Revisa Planos\JPG\<tanque>\ENSAMBLES_INDEPENDIENTES\<kit>\FRONT|BACK|TOP|BOTTOM|RIGHT|LEFT\.",
+                "Revisa PIEZAS_ACOTADAS\Corte\Maquinado\" & vbCrLf &
+                "  Accesorios Sueltos\<kit>\FRONT|…\" & vbCrLf &
+                "  Inspeccion Visual\<kit>\" & vbCrLf &
+                "  Accesorios Sueltos por pieza\<pieza>\",
                 titulo,
                 System.Windows.Forms.MessageBoxButtons.OK,
                 System.Windows.Forms.MessageBoxIcon.Information)

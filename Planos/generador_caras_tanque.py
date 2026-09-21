@@ -180,7 +180,12 @@ CLASIFICACIONES_VALIDAS = (
     "Doblado",
     "Plasma",
     "Plasma Doblado",
+    "Piezas Soldadas",
 )
+
+# Clasificación de Colorimetría solo para .iam (kits). No entra al mapa de
+# piezas leaf; la lee ``ensambles_independientes``.
+CLASIFICACION_ENSAMBLES_INDIVIDUALES = "Ensambles Individuales"
 
 # Etiqueta para piezas sin iProperty asignado (o con valor no reconocido).
 # Con espacio (como carpeta legible) según convención del usuario.
@@ -302,20 +307,17 @@ def cargar_mapa_piezas_por_clasificacion(carpeta_tanque):
         return {}
 
 
-def _leer_clasificacion_de_part(part_doc):
-    """Lee el iProperty ``Clasificación`` del PropertySet
-    ``Inventor User Defined Properties`` de un PartDocument.
+def _leer_clasificacion_de_doc(doc, validas=None):
+    """Lee ``Clasificación`` de cualquier documento (pieza o ensamble).
 
-    Retorna:
-    - ``str`` con la clasificación normalizada si está entre las válidas.
-    - ``None`` si no existe la propiedad, está vacía, o el valor no
-      corresponde a ninguna clasificación válida (se marcará como
-      SIN CLASIFICACION en el mapa).
+    ``validas``: iterable de strings aceptados (default
+    ``CLASIFICACIONES_VALIDAS``). Para kits use
+    ``(CLASIFICACION_ENSAMBLES_INDIVIDUALES,)``.
     """
-    if part_doc is None:
+    if doc is None:
         return None
     try:
-        propsets = part_doc.PropertySets
+        propsets = doc.PropertySets
     except Exception:
         return None
     try:
@@ -335,13 +337,20 @@ def _leer_clasificacion_de_part(part_doc):
     texto = str(valor).strip()
     if not texto:
         return None
-    # Match tolerante: comparación case-insensitive contra las válidas para
-    # tolerar mayúsculas/minúsculas ("almacén" vs "Almacén"). El acento SÍ
-    # importa (así lo escribe el iLogic).
-    for valida in CLASIFICACIONES_VALIDAS:
+    candidatas = tuple(validas) if validas is not None else CLASIFICACIONES_VALIDAS
+    for valida in candidatas:
         if texto.casefold() == valida.casefold():
             return valida
     return None
+
+
+def _leer_clasificacion_de_part(part_doc):
+    """Lee el iProperty ``Clasificación`` de un PartDocument.
+
+    Retorna la clasificación normalizada si está entre las válidas de
+    piezas, o ``None`` (cae en SIN CLASIFICACION en el mapa).
+    """
+    return _leer_clasificacion_de_doc(part_doc, CLASIFICACIONES_VALIDAS)
 
 
 def detectar_mapa_piezas_por_clasificacion(inv_app, ensamble):
@@ -351,10 +360,13 @@ def detectar_mapa_piezas_por_clasificacion(inv_app, ensamble):
 
     - Piezas cuyo PartDocument tiene una clasificación válida se agrupan
       bajo la clasificación (``"Almacén"``, ``"Corte"``, ``"Maquinado"``,
-      ``"Doblado"``, ``"Plasma"``, ``"Plasma Doblado"``).
+      ``"Doblado"``, ``"Plasma"``, ``"Plasma Doblado"``,
+      ``"Piezas Soldadas"``).
     - Piezas SIN iProperty asignado o con valor no reconocido caen bajo
       ``CLASIFICACION_SIN_ASIGNAR`` ("SIN CLASIFICACION").
     - Ensambles no aportan al mapa (sólo piezas ``.ipt``).
+      Los kits con ``Ensambles Individuales`` los lee
+      ``ensambles_independientes``.
 
     El mapa se poblará también en ``LAST_PIEZAS_POR_CLASIFICACION`` para
     consumo del reordenamiento posterior.

@@ -78,6 +78,8 @@ Public Class MiniToolbarWrapper
         Dim btnDoblado = _toolBar.Controls.AddButton("btnDoblado", "🟪", "Clasificar como Doblado (Piezas Iguales)")
         Dim btnPlasma = _toolBar.Controls.AddButton("btnPlasma", "🟨", "Clasificar como Plasma (Piezas Iguales)")
         Dim btnPlasmaDoblado = _toolBar.Controls.AddButton("btnPlasmaDoblado", "⚪", "Clasificar como Plasma Doblado (Piezas Iguales)")
+        Dim btnEnsamblesInd = _toolBar.Controls.AddButton("btnEnsamblesInd", "🩵", "Clasificar como Ensambles Individuales (.iam completo, Piezas Iguales)")
+        Dim btnPiezasSoldadas = _toolBar.Controls.AddButton("btnPiezasSoldadas", "🟠", "Clasificar como Piezas Soldadas (.ipt, Piezas Iguales)")
 
         AddHandler btnAlmacen.OnClick, Sub() IniciarClasificacion("Almacén", "PorArchivo")
         AddHandler btnCorte.OnClick, Sub() IniciarClasificacion("Corte", "PorArchivo")
@@ -85,6 +87,8 @@ Public Class MiniToolbarWrapper
         AddHandler btnDoblado.OnClick, Sub() IniciarClasificacion("Doblado", "PorArchivo")
         AddHandler btnPlasma.OnClick, Sub() IniciarClasificacion("Plasma", "PorArchivo")
         AddHandler btnPlasmaDoblado.OnClick, Sub() IniciarClasificacion("Plasma Doblado", "PorArchivo")
+        AddHandler btnEnsamblesInd.OnClick, Sub() IniciarClasificacion("Ensambles Individuales", "PorArchivo")
+        AddHandler btnPiezasSoldadas.OnClick, Sub() IniciarClasificacion("Piezas Soldadas", "PorArchivo")
 
         _toolBar.Controls.AddTextBox("lblArchivo", "Sub ensamble")
         _toolBar.Controls.AddNewLine()
@@ -96,6 +100,8 @@ Public Class MiniToolbarWrapper
         Dim btnDoblado1 = _toolBar.Controls.AddButton("btnDoblado1", "🟪", "Clasificar solo esta instancia como Doblado")
         Dim btnPlasma1 = _toolBar.Controls.AddButton("btnPlasma1", "🟨", "Clasificar solo esta instancia como Plasma")
         Dim btnPlasmaDoblado1 = _toolBar.Controls.AddButton("btnPlasmaDoblado1", "⚪", "Clasificar solo esta instancia como Plasma Doblado")
+        Dim btnEnsamblesInd1 = _toolBar.Controls.AddButton("btnEnsamblesInd1", "🩵", "Clasificar solo este .iam como Ensambles Individuales")
+        Dim btnPiezasSoldadas1 = _toolBar.Controls.AddButton("btnPiezasSoldadas1", "🟠", "Clasificar solo esta .ipt como Piezas Soldadas")
 
         AddHandler btnAlmacen1.OnClick, Sub() IniciarClasificacion("Almacén", "PorInstancia")
         AddHandler btnCorte1.OnClick, Sub() IniciarClasificacion("Corte", "PorInstancia")
@@ -103,6 +109,8 @@ Public Class MiniToolbarWrapper
         AddHandler btnDoblado1.OnClick, Sub() IniciarClasificacion("Doblado", "PorInstancia")
         AddHandler btnPlasma1.OnClick, Sub() IniciarClasificacion("Plasma", "PorInstancia")
         AddHandler btnPlasmaDoblado1.OnClick, Sub() IniciarClasificacion("Plasma Doblado", "PorInstancia")
+        AddHandler btnEnsamblesInd1.OnClick, Sub() IniciarClasificacion("Ensambles Individuales", "PorInstancia")
+        AddHandler btnPiezasSoldadas1.OnClick, Sub() IniciarClasificacion("Piezas Soldadas", "PorInstancia")
 
         _toolBar.Controls.AddTextBox("lblInstancia", "Componente")
         _toolBar.Controls.AddNewLine()
@@ -178,6 +186,19 @@ Public Class MiniToolbarWrapper
                     "Blanco - Pintura mural - Brillante",
                     "White",
                     "Blanco"
+                }},
+                {"Ensambles Individuales", New List(Of String) From {
+                    "Cyan",
+                    "Cian",
+                    "Turquoise",
+                    "Turquesa",
+                    "Teal"
+                }},
+                {"Piezas Soldadas", New List(Of String) From {
+                    "Orange",
+                    "Naranja",
+                    "Orange - Wall Paint - Glossy",
+                    "Naranja - Pintura mural - Brillante"
                 }}
             }
 
@@ -245,6 +266,12 @@ Public Class MiniToolbarWrapper
 
         If occ Is Nothing Then Return Nothing
 
+        ' Ensambles Individuales: subir al IAM de 1er nivel (kit completo),
+        ' sin desenrollar wrappers de 1 hijo.
+        If String.Equals(_clasificacionElegida, "Ensambles Individuales", StringComparison.OrdinalIgnoreCase) Then
+            Return ResolverEnsamblePrimerNivel(occ)
+        End If
+
         Try
             While occ.DefinitionDocumentType = DocumentTypeEnum.kAssemblyDocumentObject
                 If occ.SubOccurrences.Count = 1 Then
@@ -257,6 +284,65 @@ Public Class MiniToolbarWrapper
         End Try
 
         Return occ
+    End Function
+
+    ' Sube hasta la ocurrencia de 1er nivel bajo el root (estilo OTC kits).
+    Private Function ResolverEnsamblePrimerNivel(occ As ComponentOccurrence) As ComponentOccurrence
+        If occ Is Nothing Then Return Nothing
+        Try
+            While occ.ParentOccurrence IsNot Nothing
+                occ = occ.ParentOccurrence
+            End While
+        Catch
+        End Try
+        Return occ
+    End Function
+
+    Private Function EsDocumentoEnsamble(doc As Document) As Boolean
+        Try
+            Return doc IsNot Nothing AndAlso TypeOf doc Is AssemblyDocument
+        Catch
+            Return False
+        End Try
+    End Function
+
+    Private Function EsDocumentoPieza(doc As Document) As Boolean
+        Try
+            Return doc IsNot Nothing AndAlso TypeOf doc Is PartDocument
+        Catch
+            Return False
+        End Try
+    End Function
+
+    ' Valida tipo de documento según clasificación (iam vs ipt).
+    Private Function OccValidaParaClasificacion(occ As ComponentOccurrence) As Boolean
+        If occ Is Nothing Then Return False
+        Dim doc As Document = Nothing
+        Try
+            doc = occ.Definition.Document
+        Catch
+            Return False
+        End Try
+
+        If String.Equals(_clasificacionElegida, "Ensambles Individuales", StringComparison.OrdinalIgnoreCase) Then
+            If Not EsDocumentoEnsamble(doc) Then
+                _inventor.StatusBarText =
+                    "Ensambles Individuales solo aplica a .iam completos (kit de 1er nivel)."
+                Return False
+            End If
+            Return True
+        End If
+
+        If String.Equals(_clasificacionElegida, "Piezas Soldadas", StringComparison.OrdinalIgnoreCase) Then
+            If Not EsDocumentoPieza(doc) Then
+                _inventor.StatusBarText =
+                    "Piezas Soldadas solo aplica a piezas .ipt."
+                Return False
+            End If
+            Return True
+        End If
+
+        Return True
     End Function
 
     '-------------------------------------------------------------
@@ -289,8 +375,15 @@ Public Class MiniToolbarWrapper
         _clasificacionElegida = nombre
         _modoClasificacion = modo
         _selectedOccs.Clear()
+        Dim hint As String = ""
+        If String.Equals(nombre, "Ensambles Individuales", StringComparison.OrdinalIgnoreCase) Then
+            hint = " Solo .iam de 1er nivel (kit completo)."
+        ElseIf String.Equals(nombre, "Piezas Soldadas", StringComparison.OrdinalIgnoreCase) Then
+            hint = " Solo piezas .ipt."
+        End If
         _inventor.StatusBarText =
-            "Modo activo: " & nombre & " (" & modo & "). Haz clic en las piezas para aplicar."
+            "Modo activo: " & nombre & " (" & modo & ")." & hint &
+            " Haz clic en los componentes para aplicar."
     End Sub
 
     '-------------------------------------------------------------
@@ -345,7 +438,11 @@ Public Class MiniToolbarWrapper
             {"Plasma Doblado", {"White - Wall Paint - Glossy",
                                 "Blanco - Pintura mural - Brillante",
                                 "White",
-                                "Blanco"}}
+                                "Blanco"}},
+            {"Ensambles Individuales", {"Cyan", "Cian", "Turquoise", "Turquesa", "Teal"}},
+            {"Piezas Soldadas", {"Orange", "Naranja",
+                                 "Orange - Wall Paint - Glossy",
+                                 "Naranja - Pintura mural - Brillante"}}
         }
 
         If Not aparienciasMap.ContainsKey(_clasificacionElegida) Then Exit Sub
@@ -355,6 +452,8 @@ Public Class MiniToolbarWrapper
         CollectAllOccurrences(oAsm.ComponentDefinition.Occurrences, todas)
 
         For Each occSeleccionada As ComponentOccurrence In _selectedOccs
+            If Not OccValidaParaClasificacion(occSeleccionada) Then Continue For
+
             Dim refFullName As String = ""
             Try
                 refFullName = occSeleccionada.Definition.Document.FullFileName
@@ -368,6 +467,8 @@ Public Class MiniToolbarWrapper
             For Each occ As ComponentOccurrence In todas
                 Try
                     Dim occDoc As Document = occ.Definition.Document
+                    If Not OccValidaParaClasificacion(occ) Then Continue For
+
                     Dim occDocPath As String = ""
                     Try
                         occDocPath = occDoc.FullFileName
@@ -434,12 +535,18 @@ Public Class MiniToolbarWrapper
             {"Plasma Doblado", {"White - Wall Paint - Glossy",
                                 "Blanco - Pintura mural - Brillante",
                                 "White",
-                                "Blanco"}}
+                                "Blanco"}},
+            {"Ensambles Individuales", {"Cyan", "Cian", "Turquoise", "Turquesa", "Teal"}},
+            {"Piezas Soldadas", {"Orange", "Naranja",
+                                 "Orange - Wall Paint - Glossy",
+                                 "Naranja - Pintura mural - Brillante"}}
         }
 
+        If Not aparienciasMap.ContainsKey(_clasificacionElegida) Then Exit Sub
         Dim posiblesNombres = aparienciasMap(_clasificacionElegida)
 
         For Each occ In _selectedOccs
+            If Not OccValidaParaClasificacion(occ) Then Continue For
 
             ' --- GUARDAR ESTADO ANTERIOR EN PILA UNDO ---
             Try
@@ -562,7 +669,10 @@ Public Class MiniToolbarWrapper
         For Each occ As ComponentOccurrence In todas
             Try
                 Dim doc As Document = occ.Definition.Document
-                If Not TypeOf doc Is PartDocument Then Continue For
+                ' Piezas .ipt y ensambles .iam (Ensambles Individuales)
+                If Not (TypeOf doc Is PartDocument OrElse TypeOf doc Is AssemblyDocument) Then
+                    Continue For
+                End If
 
                 Dim fullName As String = ""
                 Try
@@ -590,7 +700,7 @@ Public Class MiniToolbarWrapper
         Next
 
         If partMap.Count = 0 Then
-            WinForms.MessageBox.Show("No se encontraron piezas (.ipt) en este ensamble.",
+            WinForms.MessageBox.Show("No se encontraron piezas (.ipt) ni ensambles (.iam) en este ensamble.",
                                      "Reporte Clasificación",
                                      WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Information)
             Return

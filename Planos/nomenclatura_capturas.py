@@ -159,13 +159,27 @@ _RE_CAPTURA_REF_LEGACY = re.compile(
 
 
 def limpiar_token_archivo(nombre: str) -> str:
-    """Quita caracteres inválidos en Windows; colapsa separador reservado."""
+    """Quita caracteres inválidos en Windows; colapsa separador reservado.
+
+    No usa ``os.path.splitext`` ni ``rstrip('.')`` a ciegas: nombres como
+    ``PIPE FLANGE 0.250`` perderían el decimal (``.250`` = “extensión”).
+
+    Sí quita ``.iam`` / ``.ipt`` embebidos en DisplayName de Inventor
+    (``MODELO VANTRAN.iam (Estado de modelo1)``).
+    """
     texto = str(nombre or "").strip()
-    texto = texto.replace(".iam", "").replace(".IAM", "")
-    texto = texto.replace(".ipt", "").replace(".IPT", "")
+    # Extensión Inventor al final O embebida antes de espacio/( 
+    texto = re.sub(r"\.(iam|ipt|idw|dwg)(?=\s|\(|$)", "", texto, flags=re.I)
+    low = texto.casefold()
+    for ext in (".iam", ".ipt", ".idw", ".dwg"):
+        if low.endswith(ext):
+            texto = texto[: -len(ext)]
+            break
     texto = texto.replace(SEP, "_")
     texto = re.sub(r'[<>:"/\\|?*]', "_", texto)
-    texto = texto.strip().rstrip(".")
+    texto = texto.strip().rstrip(" ")
+    if texto.endswith(".") and (len(texto) < 2 or not texto[-2].isdigit()):
+        texto = texto[:-1].rstrip(" ")
     texto = re.sub(r"_+", "_", texto).strip("_")
     return texto or "SIN_NOMBRE"
 

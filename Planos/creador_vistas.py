@@ -252,7 +252,7 @@ def _recolectar_piezas_unicas(ensamble_doc):
             i += 1
             continue
         vistos.add(ruta)
-        part_name = os.path.splitext(os.path.basename(ruta))[0]
+        part_name = _stem_nombre_pieza(ruta)
         piezas.append((part_doc, part_name))
         i += 1
 
@@ -322,13 +322,76 @@ def _limpiar_border_y_titleblock(new_sheet):
             _borrar_todos(coleccion)
 
 
+def forzar_nombre_hoja(hoja, nombre_deseado):
+    """
+    Asigna el nombre de hoja tras ``CopyTo``.
+
+    Inventor en español/inglés puede dejar ``Copia de X`` / ``Copy of X``
+    si el primer ``Name=`` falla o se ignora. Eso inventaba piezas fantasma
+    (``Copia de jacking pads``) en el JPG.
+    """
+    deseado = str(nombre_deseado or "").strip()
+    if hoja is None or not deseado:
+        return False
+    deseado_base = deseado.split(":", 1)[0].strip()
+
+    def _sin_copia(nombre: str) -> str:
+        return re.sub(
+            r"^(Copia de |Copy of )", "", str(nombre or ""), flags=re.IGNORECASE
+        ).strip()
+
+    for _ in range(4):
+        try:
+            hoja.Name = deseado_base
+        except Exception:
+            pass
+        try:
+            actual = str(hoja.Name or "")
+        except Exception:
+            return False
+        base_act = actual.split(":", 1)[0].strip()
+        if base_act.casefold() == deseado_base.casefold():
+            return True
+        # Si quedó «Copia de jacking pads_LADO» y queremos «…_ALTO»,
+        # quitar prefijo y forzar el nombre deseado (no el limpio parcial).
+        limpio = _sin_copia(base_act)
+        if limpio.casefold() == deseado_base.casefold():
+            try:
+                hoja.Name = deseado_base
+            except Exception:
+                pass
+            continue
+        try:
+            hoja.Name = deseado_base
+        except Exception:
+            if limpio and limpio.casefold() != base_act.casefold():
+                try:
+                    # Último recurso: al menos quitar «Copia de».
+                    hoja.Name = limpio
+                except Exception:
+                    pass
+    try:
+        final = _sin_copia(str(hoja.Name or "").split(":", 1)[0])
+        if final.casefold() != deseado_base.casefold():
+            # Renombrar sustituyendo solo el prefijo de copia.
+            try:
+                hoja.Name = deseado_base
+            except Exception:
+                pass
+        return _sin_copia(str(hoja.Name or "").split(":", 1)[0]).casefold() == (
+            deseado_base.casefold()
+        )
+    except Exception:
+        return False
+
+
 def _crear_hoja_vista(machote_doc, base_sheet, nombre_hoja):
     """CopyTo + Activate con un reintento ante COM transitorio."""
     ultimo = None
     for intento in range(2):
         try:
             new_sheet = base_sheet.CopyTo(machote_doc)
-            new_sheet.Name = nombre_hoja
+            forzar_nombre_hoja(new_sheet, nombre_hoja)
             new_sheet.Activate()
             for v in range(new_sheet.DrawingViews.Count, 0, -1):
                 new_sheet.DrawingViews.Item(v).Delete()
@@ -1909,6 +1972,23 @@ def get_nombre_pieza_completo():
     return bool(_NOMBRE_PIEZA_COMPLETO)
 
 
+def _stem_nombre_pieza(part_name: str) -> str:
+    """
+    Quita solo extensión Inventor (``.ipt`` / ``.iam``), nunca un decimal
+    del nombre. ``os.path.splitext('PIPE FLANGE 0.250')`` → ``PIPE FLANGE 0``
+    y mezclaba bridas distintas en la misma carpeta/JPG.
+    """
+    limpio = str(part_name or "").strip()
+    if not limpio:
+        return limpio
+    limpio = os.path.basename(limpio)
+    low = limpio.casefold()
+    for ext in (".ipt", ".iam", ".idw", ".dwg"):
+        if low.endswith(ext):
+            return limpio[: -len(ext)]
+    return limpio
+
+
 def obtener_nombre_base_corto(part_name):
     """
     Identidad de pieza para hojas JPG / carpetas.
@@ -1919,10 +1999,9 @@ def obtener_nombre_base_corto(part_name):
     IPT, solo sin ``:ocurrencia`` ni extensión — cada sufijo distinto es
     pieza independiente.
     """
-    limpio = str(part_name or "").strip()
+    limpio = _stem_nombre_pieza(part_name)
     if not limpio:
         return limpio
-    limpio = os.path.splitext(os.path.basename(limpio))[0]
     if ":" in limpio:
         limpio = limpio.split(":", 1)[0].strip()
     if _NOMBRE_PIEZA_COMPLETO:

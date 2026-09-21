@@ -7,7 +7,7 @@ Si el código, un chat o un documento viejo contradicen esto, **gana este archiv
 
 | | |
 |--|--|
-| Actualizado | 2026-09-18 |
+| Actualizado | 2026-09-21 |
 | Reglas iLogic principales | `COTAS_POR_SUBENSAMBLE` · `COTAS_ILOGIC_ABIGAIL` |
 | Complemento caras (detalle UI) | [`DEBER_SER_COTAS_CARAS.md`](DEBER_SER_COTAS_CARAS.md) |
 | Contrato DB legacy ANS | [`ALINEACION_COTAS_DOSSIER_ANS.md`](ALINEACION_COTAS_DOSSIER_ANS.md) — **este archivo manda** en árbol JPGS y `seleccionadas` |
@@ -94,10 +94,11 @@ Machote (.dwg/.idw) + ensamble principal (.iam) abiertos
 **Deber ser — TANQUE:**
 
 1. Mismos picks TOP + SEGM1–4 + BASE que caras.
-2. Organiza salida en `PIEZAS_ACOTADAS/<SEGM*|TOP|BASE|OTROS>/<clasificación>/<PIEZA>/`.
-3. Dims tipicas: LENGTH / WIDTH / THK / HEIGHT / LEG / OD / HOLE…
-4. Regla **Corte vs Doblado** (iProperty `Clasificación`) — ver §3.
-5. Tras reorganizar: sync dossier (fail-soft).
+2. Organiza salida **local** en `PIEZAS_ACOTADAS/<SEGM*|TOP|BASE|OTROS>/<clasificación>/<PIEZA>/` (o solo por clasificación tras reorg).
+3. En el **dossier** `JPGS\PIEZAS_ACOTADAS\` queda solo `<clasificación>/<…>/<PIEZA>/` (sin carpetas de cara).
+4. Dims tipicas: LENGTH / WIDTH / THK / HEIGHT / LEG / OD / HOLE…
+5. Regla **Corte vs Doblado** (iProperty `Clasificación`) — ver §3.
+6. Tras reorganizar: sync dossier (fail-soft; gates §4.2).
 
 **Deber ser — BOARD / GIGA tablero:**
 
@@ -229,7 +230,9 @@ Raíz canónica:
       <CLIENTE>\
         <JOB>\
           DOSSIER FILES\
-            JPGS\          ← evidencias Cotas (espejo del árbol de proceso)
+            JPGS\          ← evidencias Cotas (única raíz de dossier)
+              ├── COTAS_POR_REFERENCIA\SEGM*|TOP|BASE\…   ← caras (sí por cara)
+              └── PIEZAS_ACOTADAS\<proceso>\…\            ← solo proceso
 ```
 
 Ejemplos vivos:
@@ -240,15 +243,26 @@ Ejemplos vivos:
 | `9919-Board 11` | GIGA | ENCLOSURES NEMA 1 | `…\GIGA\9919-BOARD-11_1\DOSSIER FILES\JPG\` (o `JPGS\`) |
 | `9919-BOARD2_2` | GIGA | ENCLOSURES NEMA 1 | `…\GIGA\9919-BOARD2_2\DOSSIER FILES\JPGS\` |
 | Tanque OTC `62223-…` | OTC (u otro) | TANKS | `…\TANKS\<CLIENTE>\<JOB>\DOSSIER FILES\JPGS\` |
+| Vantran `261093` | VANTRAN | TANKS | `…\TANKS\VANTRAN\261093\DOSSIER FILES\JPGS\` |
 
 > **Board 5 (post-corrida):** la export overnight pudo haber publicado mal hacia OTC/62223. La ruta **canónica** a corregir es la de `9919-Board5\DOSSIER FILES\JPGS` arriba (cliente GIGA, producto ENCLOSURES NEMA 1). Luego quitar Almacén de disco + DB.
 
-**Publicación relativa:**
+**Publicación relativa (`cotas_dossier_registro.publicar_*`):**
 
 | Flujo | Qué se copia bajo `JPGS\` |
 |-------|---------------------------|
-| TANQUE | Se conserva ancla `PIEZAS_ACOTADAS\…` y/o `COTAS_POR_REFERENCIA\…` |
-| BOARD (Abigail) | Árbol de proceso (`Corte\…`, `Doblado\…`, `Estañado Busbar\…`) |
+| TANQUE caras | `COTAS_POR_REFERENCIA\SEGM*|TOP|BASE\…` (caras **sí** se conservan) |
+| TANQUE Abigail | `PIEZAS_ACOTADAS\<proceso>\…` — **sin** `SEGM*`/`TOP`/`BASE`/`OTROS` en el path publicado |
+| BOARD Abigail | Árbol de proceso (`Corte\…`, `Doblado\…`, `Estañado Busbar\…`) |
+
+**Gates anti-basura (obligatorios):**
+
+| Condición | Acción |
+|-----------|--------|
+| Ruta contiene `_STAGING_*` | **No publicar** ni registrar en DB |
+| `Clasificación` / path Almacén | **No publicar** ni registrar (corridas nuevas) |
+| JPG suelto `PIEZAS_ACOTADAS\file.jpg` o bajo SEGM sin proceso | **Diferir** hasta reorg por proceso |
+| `PIEZAS_ACOTADAS\SEGM2\Corte\…` | Publicar como `PIEZAS_ACOTADAS\Corte\…` (sanear cara) |
 
 Helpers de ruta GIGA: `Planos/rutas_arbol_giga.py` (`dest_flat`, `dest_doblado`, `dest_estanado`).
 
@@ -336,6 +350,12 @@ Prioridad al resolver cliente/producto:
 
 Separador: `__` (`nomenclatura_capturas.SEP`).
 
+**Limpieza de tokens (`limpiar_token_archivo`):**
+
+- **No** usar `os.path.splitext` ni `rstrip('.')` a ciegas sobre el nombre de pieza: `PIPE FLANGE 0.250` debe conservar el decimal (nunca `PIPE FLANGE 0`).
+- Sí quitar `.iam` / `.ipt` embebidos en DisplayName (`MODELO VANTRAN.iam (Estado…)` → token de job limpio).
+- Inventor ES: hojas `Copia de …` / `Copy of …` se normalizan al nombre real de la pieza antes de mapear THK/LADO.
+
 Medidas frecuentes:
 
 | Token | Uso |
@@ -345,6 +365,14 @@ Medidas frecuentes:
 | `XCENTRO` / `YCENTRO` / `XCENTRO_TYP` / `YCENTRO_TYP` | Barrenos en DESPLIEGUE |
 | `HOLE01`… | Diámetros |
 | `TYP` / `TYP+` | Coincidencias tipadas (spoteos) |
+
+**Cotas redondas / THK (anti-huecos):**
+
+| Caso | Deber ser |
+|------|-----------|
+| Nipple / boss / tierra / brida (Ø exterior) | `OD` desde anillo de silueta (`solo_interiores=False` en export OD) |
+| Solera / pata | `LEG` cuenta como ancho de pata |
+| THK canto fino (bbox 2D pequeño) | Exportar si hay cota asociativa o nota THK (no tumbar por bbox ≥ 0.05) |
 
 ---
 
@@ -411,6 +439,11 @@ Medidas frecuentes:
 5. **No** inventar `cliente`/`producto`: salen de VSM (o override explícito).
 6. **No** dejar el machote en hoja `Model (AutoCAD)` al terminar.
 7. BASE es pick **obligatorio** en tanque (docs viejos que digan “5 picks” están obsoletos).
+8. **No** publicar `_STAGING_*` al share ni en `cotas_dossier`.
+9. **No** publicar `SEGM*`/`TOP`/`BASE`/`OTROS` bajo `JPGS\PIEZAS_ACOTADAS` (sí bajo `COTAS_POR_REFERENCIA`).
+10. **No** publicar JPG sueltos en la raíz de `PIEZAS_ACOTADAS` (diferir hasta proceso).
+11. **No** truncar nombres con decimal vía `splitext` (`PIPE FLANGE 0.250` ≠ `PIPE FLANGE 0`).
+12. **No** filtrar OD solo a barrenos interiores cuando la pieza es silueta redonda (boss/nipple/tierra).
 
 ---
 

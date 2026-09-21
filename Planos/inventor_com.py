@@ -4,6 +4,8 @@ import time
 import pythoncom
 import win32com.client
 
+ILOGIC_ADDIN_GUID = "{3BDD8D79-2179-4B11-8A5A-257B1C0263AC}"
+
 
 def _es_instancia_disponible(inv_app):
     """Comprueba que el proxy COM no apunte a un Inventor ya cerrado."""
@@ -119,9 +121,20 @@ def obtener_ilogic_automation(inv_app):
     Devuelve el objeto Automation del complemento iLogic, o None si no está activo.
     """
     try:
+        addin = inv_app.ApplicationAddIns.ItemById(ILOGIC_ADDIN_GUID)
+        if addin is not None:
+            if not addin.Activated:
+                addin.Activate()
+            return addin.Automation
+    except Exception:
+        pass
+
+    try:
         for addin in inv_app.ApplicationAddIns:
             try:
                 if "iLogic" in addin.DisplayName:
+                    if not addin.Activated:
+                        addin.Activate()
                     return addin.Automation
             except Exception:
                 pass
@@ -129,6 +142,14 @@ def obtener_ilogic_automation(inv_app):
         return None
 
     return None
+
+
+def _as_bstr_array(paths):
+    """Inventor 2026/2027 exige SAFEARRAY(BSTR); list/tuple de Python no basta."""
+    return win32com.client.VARIANT(
+        pythoncom.VT_ARRAY | pythoncom.VT_BSTR,
+        list(paths),
+    )
 
 
 def configurar_carpeta_reglas_ilogic(inv_app, carpeta_ilogic):
@@ -155,7 +176,17 @@ def configurar_carpeta_reglas_ilogic(inv_app, carpeta_ilogic):
 
         if carpeta_ilogic not in actuales:
             actuales.append(carpeta_ilogic)
-            opciones.ExternalRuleDirectories = actuales
+            opciones.ExternalRuleDirectories = _as_bstr_array(actuales)
+
+        # Releer para confirmar
+        dirs = opciones.ExternalRuleDirectories
+        confirmados = (
+            [os.path.normpath(str(dirs[i])) for i in range(len(dirs))]
+            if dirs is not None
+            else []
+        )
+        if carpeta_ilogic not in confirmados:
+            return False, "ExternalRuleDirectories no retuvo la carpeta"
 
         return True, carpeta_ilogic
     except Exception as e:
