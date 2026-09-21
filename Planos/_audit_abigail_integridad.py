@@ -6,8 +6,9 @@ Compara el ensamble abierto en Inventor contra lo exportado en disco:
   - mapa cara (seleccion_caras.json)
   - mapa clasificación (iProperty)
   - árbol PIEZAS_ACOTADAS/<cara>/<clase…>/<pieza>/*.jpg
-  - reglas TANQUE: Corte sin HOLE/XCENTRO (sí XMIN/YMIN/CUT_* si hay hueco);
-    Doblado con dims generales
+  - reglas TANQUE: Corte sin flat/barrenos/cortes internos
+    (sin HOLE/XCENTRO/XMIN/YMIN/CUT_*); esos van en Doblado.
+    Doblado: dims generales + flat si hay huecos.
 
 Uso (Inventor con 62223-1246-A01.iam abierto):
   python _audit_abigail_integridad.py
@@ -28,10 +29,10 @@ sys.path.insert(0, ROOT)
 JOB_DEFAULT = "62223-1246-A01"
 SEL_PATH = os.path.join(ROOT, "seleccion_caras.json")
 
-# Medidas ilegales en Corte TANQUE (barrenos Ø / centro).
-# XMIN/YMIN/CUT_* sí se permiten si hay hueco rectangular.
+# Medidas ilegales en Corte TANQUE: todo flat (barrenos, XY, CUT).
 _RE_FLAT_ILEGAL_CORTE = re.compile(
-    r"__(?:XCENTRO(?:_TYP)?|YCENTRO(?:_TYP)?|HOLE\d{2})_",
+    r"__(?:CUT_LENGTH|CUT_WIDTH|XCENTRO(?:_TYP)?|YCENTRO(?:_TYP)?|"
+    r"XMIN(?:_TYP)?|YMIN(?:_TYP)?|HOLE\d{0,2})_",
     re.I,
 )
 _RE_FLAT = _RE_FLAT_ILEGAL_CORTE  # compat nombre histórico
@@ -334,8 +335,8 @@ def main() -> int:
         for row in mal_clase[:20]:
             _log(f"    {row[0]}/{row[1]}: iProp={row[2]} disco={row[3]} ({row[4]} JPG)")
 
-    # --- 4) Regla TANQUE Corte: sin HOLE/XCENTRO (CUT/XMIN OK) ---
-    _log("\n--- Regla TANQUE: Corte iProp sin HOLE/XCENTRO ---")
+    # --- 4) Regla TANQUE Corte: sin flat/barrenos/CUT ---
+    _log("\n--- Regla TANQUE: Corte iProp sin flat/XY/CUT/HOLE ---")
     corte_keys = {_clave_pieza(p) for p in (mapa_cls.get("Corte") or [])}
     viol_corte = []
     for cara, piezas in por_cara_pieza.items():
@@ -345,11 +346,11 @@ def main() -> int:
             flats = [f for f in info["files"] if _RE_FLAT_ILEGAL_CORTE.search(f)]
             if flats:
                 viol_corte.append((cara, ck, flats[:5], len(flats)))
-    _log(f"  piezas Corte con HOLE/XCENTRO ilegal: {len(viol_corte)}")
+    _log(f"  piezas Corte con flat ilegal: {len(viol_corte)}")
     if viol_corte:
         hallazgos.append(
-            f"TANQUE/Corte con HOLE/XCENTRO: {len(viol_corte)} piezas "
-            f"(XMIN/YMIN/CUT_* sí permitidos)"
+            f"TANQUE/Corte con flat/XY/CUT/HOLE: {len(viol_corte)} piezas "
+            f"(deben ir en Doblado)"
         )
         for cara, ck, samples, n in viol_corte[:15]:
             _log(f"    {cara}/{ck}: {n} ilegal → {samples[0]}")

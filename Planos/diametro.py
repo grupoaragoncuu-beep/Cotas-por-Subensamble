@@ -839,7 +839,7 @@ def acotar_barrenos_placas(nombres_frente_ok=None):
                 if _es_pieza_corte(pieza_hoja):
                     print(
                         f"  {base_cmp}: TANQUE/Corte → omitido HOLE "
-                        f"(cortes rectangulares van por barrenos_xy)"
+                        f"(sin flat / barrenos / cortes internos)"
                     )
                     continue
         except Exception:

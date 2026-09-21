@@ -1458,28 +1458,18 @@ def acotar_barrenos_xy_despliegue(nombres_frente_ok=None):
             print(f"  ⚠️ {nombre}: sin barrenos (modelo ni HLR)")
             continue
 
-        # TANQUE + iProp Corte: solo huecos no-redondos (XMIN/YMIN + CUT_*).
-        # Circulares → omitidos (HOLE ya se bloquea en diametro.py).
+        # TANQUE + iProp Corte: NUNCA flat/barrenos/cortes internos
+        # (DEBER_SER_COTAS_FLUJOS §3.1).
         try:
             from creador_vistas import producto_flujo_actual, _es_pieza_corte
 
             pieza = _pieza_desde_hoja_despliegue(nombre)
             if producto_flujo_actual() == "TANQUE" and _es_pieza_corte(pieza):
-                n_antes = len(barrenos)
-                barrenos = [
-                    b for b in barrenos if str(b.get("tipo") or "") == "corte"
-                ]
-                if n_antes != len(barrenos):
-                    print(
-                        f"  {nombre.rsplit(':',1)[0]}: TANQUE/Corte → "
-                        f"solo cortes internos ({len(barrenos)}/{n_antes})"
-                    )
-                if not barrenos:
-                    print(
-                        f"  {nombre.rsplit(':',1)[0]}: TANQUE/Corte sin "
-                        f"hueco rectangular → omitido XY"
-                    )
-                    continue
+                print(
+                    f"  {nombre.rsplit(':',1)[0]}: TANQUE/Corte → omitido "
+                    f"XY/CUT/HOLE (sin flat ni cortes internos)"
+                )
+                continue
         except Exception:
             pass
 

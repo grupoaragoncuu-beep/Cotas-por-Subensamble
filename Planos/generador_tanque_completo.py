@@ -712,12 +712,37 @@ def _clasificacion_para_pieza(nombre_archivo, mapa_por_clasificacion):
 
 
 def _es_jpg_despliegue(nombre_archivo, staging_marker=None):
-    """True si la captura viene del flat pattern (corte plano)."""
+    """
+    True si la captura es de flat pattern (huecos / barrenos / CUT).
+
+    Incluye staging ``_STAGING_DESPLIEGUE``, token ``DESPLIEGUE`` en el nombre
+    y medidas de flat: CUT_*/XCENTRO/YCENTRO/XMIN/YMIN/HOLE*.
+    """
     marker = str(staging_marker or "").upper()
     nombre_u = str(nombre_archivo or "").upper()
     if STAGING_DESPLIEGUE.upper() in marker or "DESPLIEGUE" in marker:
         return True
-    return "DESPLIEGUE" in nombre_u
+    if "DESPLIEGUE" in nombre_u:
+        return True
+    # Medidas de flat aunque el export ya haya renombrado la hoja.
+    return bool(
+        re.search(
+            r"__(?:CUT_LENGTH|CUT_WIDTH|XCENTRO(?:_TYP)?|YCENTRO(?:_TYP)?|"
+            r"XMIN(?:_TYP)?|YMIN(?:_TYP)?|HOLE\d{0,2})_",
+            nombre_u,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _producto_flujo_reorg() -> str:
+    """TANQUE / BOARD según sesión Abigail (fail-soft)."""
+    try:
+        from creador_vistas import producto_flujo_actual
+
+        return str(producto_flujo_actual() or "").strip().upper()
+    except Exception:
+        return ""
 
 
 def _es_jpg_estanado(nombre_archivo, staging_marker=None, nombre_pieza=None):
@@ -794,11 +819,23 @@ def _destino_dirs_clasificacion(
         destino_dir = os.path.join(carpeta_piezas, SUBCARPETA_ESTANIADO_BUSBAR)
         return destino_dir, SUBCARPETA_ESTANIADO_BUSBAR, False
 
-    # Flat (despliegue): metal → Plasma y Laser; cobre → Maquinado/Corte Busbar.
+    # Flat (despliegue):
+    #   BOARD/GIGA → Corte/Plasma (metal) o Corte/Maquinado/Corte Busbar (cobre)
+    #   TANQUE     → Doblado/Metal|Busbar (NUNCA bajo Corte; DEBER_SER §3.1)
     if _es_jpg_despliegue(nombre_archivo, staging_marker) or dest in (
         "plasma",
         "plasma doblado",
     ):
+        if _producto_flujo_reorg() == "TANQUE":
+            if cobre:
+                destino_dir = os.path.join(
+                    carpeta_piezas, "Doblado", "Busbar", pieza_folder
+                )
+                return destino_dir, "Doblado/Busbar", True
+            destino_dir = os.path.join(
+                carpeta_piezas, "Doblado", "Metal", pieza_folder
+            )
+            return destino_dir, "Doblado/Metal", True
         if cobre:
             destino_dir = os.path.join(
                 carpeta_piezas,
@@ -860,8 +897,12 @@ def _destino_dirs_clasificacion(
             True,
         )
 
-    # Doblado (iProp Doblado) o Corte doblado histórico → Doblado/Metal|Busbar.
-    if dest in ("doblado", "corte"):
+    # Doblado iProp → Doblado/Metal|Busbar.
+    # Corte iProp (dims generales L/W/THK): TANQUE → Corte/Plasma; BOARD →
+    # histórico Doblado (compat GIGA) salvo que ya se haya ruteado flat arriba.
+    if dest == "doblado" or (
+        dest == "corte" and _producto_flujo_reorg() != "TANQUE"
+    ):
         if cobre:
             destino_dir = os.path.join(
                 carpeta_piezas, "Doblado", "Busbar", pieza_folder
@@ -871,6 +912,25 @@ def _destino_dirs_clasificacion(
             carpeta_piezas, "Doblado", "Metal", pieza_folder
         )
         return destino_dir, "Doblado/Metal", True
+
+    if dest == "corte":
+        if cobre:
+            destino_dir = os.path.join(
+                carpeta_piezas,
+                "Corte",
+                "Maquinado",
+                "Corte Busbar",
+                pieza_folder,
+            )
+            return destino_dir, "Corte/Maquinado/Corte Busbar", True
+        destino_dir = os.path.join(
+            carpeta_piezas,
+            "Corte",
+            "Plasma y Laser",
+            "Corte metal",
+            pieza_folder,
+        )
+        return destino_dir, "Corte/Plasma y Laser/Corte metal", True
 
     destino_dir = os.path.join(carpeta_piezas, destino_sub, pieza_folder)
     return destino_dir, destino_sub, True

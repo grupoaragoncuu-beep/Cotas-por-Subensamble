@@ -120,10 +120,10 @@ def _sm_tiene_barrenos_o_cortes(part_doc) -> bool:
 
 def _debe_crear_despliegue(part_name, part_doc, is_sm) -> bool:
     """
-    ¿Crear vistas DESPLIEGUE (flat + X/Y/HOLE/THK)?
+    ¿Crear vistas DESPLIEGUE (flat + X/Y/HOLE/THK/CUT_*)?
 
     - BOARD/GIGA: Corte iProp **o** chapa con barrenos/cortes.
-    - TANQUE: Corte con hueco → flat solo para XMIN/YMIN + CUT_* (sin HOLE).
+    - TANQUE: **Corte → nunca** (ni flat, ni barrenos, ni cortes internos).
       Doblado con huecos → flat (holes / cortes). Otras clases → no flat.
     """
     if not is_sm:
@@ -131,9 +131,7 @@ def _debe_crear_despliegue(part_name, part_doc, is_sm) -> bool:
     tipo = producto_flujo_actual()
     if tipo == "TANQUE":
         if _es_pieza_corte(part_name):
-            # Flat permitido SOLO para acotar huecos no-redondos (XMIN/YMIN +
-            # CUT_LENGTH/CUT_WIDTH). Barrenos Ø siguen omitidos en diametro.py.
-            return _sm_tiene_barrenos_o_cortes(part_doc)
+            return False
         if _es_pieza_doblado(part_name):
             return _sm_tiene_barrenos_o_cortes(part_doc)
         return False

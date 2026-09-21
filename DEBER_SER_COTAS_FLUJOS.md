@@ -152,7 +152,7 @@ Implementación: `creador_vistas._debe_crear_despliegue`.
 
 | Producto | iProp **Corte** | iProp **Doblado** | Otra chapa con huecos |
 |----------|-----------------|-------------------|------------------------|
-| **TANQUE** | **Nunca** flat / barrenos / cortes internos | Flat **solo si** hay barrenos o cortes pasantes | No (salvo Doblado) |
+| **TANQUE** | **Nunca** bajo `Corte/`: ni flat, ni barrenos, ni cortes internos (`CUT_*`, `XMIN`/`YMIN`, `HOLE`, `XCENTRO`/`YCENTRO`). Esas cotas van a **`Doblado/Metal`** (o Busbar). | Flat **sí** si hay barrenos o cortes pasantes → `Doblado/…` | No (salvo Doblado) |
 | **BOARD** | **Sí** DESPLIEGUE | Sí si aplica | **Sí** DESPLIEGUE |
 
 Staging temporal: `_STAGING_DESPLIEGUE/` → luego árbol Corte/…  
@@ -445,6 +445,7 @@ Medidas frecuentes:
 10. **No** publicar JPG sueltos en la raíz de `PIEZAS_ACOTADAS` (diferir hasta proceso).
 11. **No** truncar nombres con decimal vía `splitext` (`PIPE FLANGE 0.250` ≠ `PIPE FLANGE 0`).
 12. **No** filtrar OD solo a barrenos interiores cuando la pieza es silueta redonda (boss/nipple/tierra).
+13. **No** rutear flat/DESPLIEGUE de TANQUE a `Corte/Plasma…` (árbol GIGA): en tanque flat → `Doblado/Metal|Busbar`.
 
 ---
 
