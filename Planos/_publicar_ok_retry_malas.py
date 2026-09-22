@@ -161,12 +161,14 @@ def _auditar_piezas(plano) -> tuple[set[str], set[str]]:
 
 
 def _publicar(pieza: str, archivos: list[str], roots: list[str]) -> list[str]:
-    # Solo JPG con valor a 6 decimales (descartar 3)
-    re6 = re.compile(r"\.\d{6}(?:_|\.|$)")
+    # Solo JPG con valor a exactamente 3 decimales
+    re3 = re.compile(r"\.\d{3}(?:_|\.|$)")
+    re_mas = re.compile(r"\.\d{4}")
     archivos = [
         a
         for a in archivos
-        if re6.search(os.path.basename(a))
+        if re3.search(os.path.basename(a))
+        and not re_mas.search(os.path.basename(a))
         and any(t in os.path.basename(a).upper() for t in _TOKENS)
     ]
     out = []

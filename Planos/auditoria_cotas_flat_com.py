@@ -437,8 +437,8 @@ def _hoja_xy_falla(hoja, vista, eje: str) -> tuple[bool, str]:
     if "." in str(texto):
         dec = str(texto).split(".", 1)[1]
         dec = re.split(r"\D", dec)[0]
-        if len(dec) < 6:
-            return True, f"pocos decimales (se exigen 6): {texto}"
+        if len(dec) < 3:
+            return True, f"pocos decimales (se exigen 3): {texto}"
     return False, "ok"
 
 
@@ -592,7 +592,7 @@ def _hoja_hole_falla(hoja, vista) -> tuple[bool, str]:
             return False, "sin ref Ø (skip)"
         if abs(medido - esperado) <= max(_TOL_MM, 0.01):
             return False, "ok"
-        return True, f"Ø {medido} desfazado != {esperado:.6f}"
+        return True, f"Ø {medido} desfazado != {esperado:.3f}"
     except Exception as exc:
         return True, f"Ø check error: {exc}"
 
@@ -801,13 +801,17 @@ def _reparar_hoja_thk(inv_app, plano, hoja, nombre: str) -> list[str]:
         print(f"  REPAIR THK {pieza}: sin part_doc")
         return []
 
-    # Nombre corto tipo Inventor (sin path)
+    # Nombre corto tipo Inventor (sin path). Nunca splitext: rompe
+    # decimales (GENE-FCU-2.25-101 → GENE-FCU-2, PIPE FLANGE 0.250 → 0).
     try:
-        part_name = str(
-            getattr(part_doc, "DisplayName", None)
-            or getattr(part_doc, "FullFileName", pieza)
+        from creador_vistas import _stem_nombre_pieza
+
+        raw = str(
+            getattr(part_doc, "FullFileName", None)
+            or getattr(part_doc, "DisplayName", None)
+            or pieza
         )
-        part_name = os.path.splitext(os.path.basename(part_name))[0]
+        part_name = _stem_nombre_pieza(raw)
         if ":" in part_name:
             part_name = part_name.split(":", 1)[0]
     except Exception:

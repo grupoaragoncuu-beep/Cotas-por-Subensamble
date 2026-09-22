@@ -413,8 +413,10 @@ def detectar_mapa_piezas_por_clasificacion(inv_app, ensamble):
             pass
 
         try:
+            from creador_vistas import _stem_nombre_pieza
+
             ruta = part_doc.FullFileName
-            nombre_base = os.path.splitext(os.path.basename(ruta))[0].upper()
+            nombre_base = _stem_nombre_pieza(ruta).upper()
         except Exception:
             try:
                 nombre_base = str(occ.Name).split(":")[0].strip().upper()
@@ -7005,8 +7007,10 @@ def _adoptar_huerfanas_por_proximidad(
 
         # Nombre base del archivo .ipt (mismo formato que exportar_hojas_jpg usa).
         try:
+            from creador_vistas import _stem_nombre_pieza
+
             ruta = occ.Definition.Document.FullFileName
-            nombre_base = os.path.splitext(os.path.basename(ruta))[0].upper()
+            nombre_base = _stem_nombre_pieza(ruta).upper()
         except Exception:
             nombre_base = nombre_occ
 

@@ -61,13 +61,13 @@ def get_unidad_cota():
 
 
 def _precision_dimension(dimension):
-    """Precision de dibujo: 6 decimales exactos."""
+    """Precision de dibujo: 3 decimales exactos."""
     return _precision_default()
 
 
 def _precision_default():
-    """6 decimales exactos (sin recortar)."""
-    return 6
+    """3 decimales exactos (sin recortar)."""
+    return 3
 
 
 def _strip_unidades(texto):
@@ -100,7 +100,7 @@ def texto_cota_limpio(valor, hoja=None, precision=None):
     Exacto desde DB Inventor (cm):
       mm = cm * 10
       in = cm / 2.54
-    6 decimales (más exacto; no truncar a 3).
+    3 decimales exactos.
     """
     try:
         valor = abs(float(valor))
@@ -114,7 +114,7 @@ def texto_cota_limpio(valor, hoja=None, precision=None):
             precision = int(precision)
         except (TypeError, ValueError):
             precision = _precision_default()
-    precision = max(6, precision)
+    precision = max(0, precision)
 
     unidad = get_unidad_cota()
     try:
@@ -246,12 +246,12 @@ def aplicar_estilo_cota(dimension, inv_app=None, hoja=None, solo_color=False):
 
     _limpiar_prefijos_cota(dimension)
 
-    # Forzar precision Inventor = 6
+    # Forzar precision Inventor = 3
     try:
-        dimension.Precision = 6
+        dimension.Precision = _precision_default()
     except Exception:
         try:
-            dimension.Precision = _precision_default()
+            dimension.Precision = 3
         except Exception:
             pass
 

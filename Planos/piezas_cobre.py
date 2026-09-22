@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-Detección de piezas de COBRE (gabinetes / boards GIGA).
+Detección de piezas de COBRE / busbar (gabinetes GIGA).
 
-Regla de producto (GIGA): solo nombres que **inician** con
-``ABB``, ``GENE`` o ``RLG`` (tras quitar ``NESTING_…_`` opcional).
+Regla de producto (GIGA): solo piezas del catálogo de nesting AutoDXF
+(``cobre_nesting_giga.txt`` = lista exacta de DXF en carpetas ``*COBRE*``).
 
-Por pieza cobre se exporta **una** captura sin cota desde la cara de
-mayor área (LENGTH / FRENTE_1): ``…__LENGTH_<v>.jpg`` +
-``…__LENGTH_SIN_COTA_<v>.jpg``. El resto de cotas (WIDTH, THK, HOLE…)
-no se duplican.
+Eso limita el flujo especial busbar (borde XY, HOLE, SIN_COTA, ESTANIADO,
+carpeta ``Corte Busbar``) a ~175 tipos reales de nesting — no a todo
+``ABB*`` / ``GENE*`` / ``RLG*``.
+
+El resto de piezas en BOARD = corte normal (dims generales) **sin**
+acotar barrenos ni procesamiento busbar.
 """
 
 from __future__ import annotations
@@ -17,14 +19,14 @@ import os
 import re
 from functools import lru_cache
 
-# Únicos prefijos cobre admitidos en GIGA.
+# Prefijos históricos (solo documentación / fallback de parseo de nombre).
 PREFIJOS_COBRE = (
     "ABB",
     "GENE",
     "RLG",
+    "GE813",
 )
 
-# Prefijo al inicio del token (ABB-42…, GENE-FCU…, RLG-…).
 _RE_PREFIJO = re.compile(
     r"^(?:NESTING_[\d.]+_)?(?P<pre>"
     + "|".join(re.escape(p) for p in PREFIJOS_COBRE)
@@ -32,27 +34,67 @@ _RE_PREFIJO = re.compile(
     re.IGNORECASE,
 )
 
+# Quita basura de stem DXF: ", Cobre, QTY 4, Cal 0.25" / ", CU, QTY …"
+_RE_SUFIJO_DXF = re.compile(
+    r"\s*,\s*(?:Cobre|Copper|COBRE|CU)\b.*$",
+    re.IGNORECASE,
+)
+
 SUFIJO_SIN_COTA = "SIN_COTA"
+
+_CATALOGO_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "cobre_nesting_giga.txt"
+)
 
 
 def _nombre_base(nombre: str) -> str:
     s = str(nombre or "").strip()
     s = os.path.basename(s)
-    # Solo extensiones CAD reales (splitext rompe NESTING_1.0_GENE-…).
     s = re.sub(
-        r"\.(ipt|iam|idw|dwg|stp|step|jpg|jpeg|png)$",
+        r"\.(ipt|iam|idw|dwg|stp|step|jpg|jpeg|png|dxf)$",
         "",
         s,
         flags=re.IGNORECASE,
     )
-    # Quita :N de ocurrencia Inventor.
     if ":" in s:
         s = s.split(":", 1)[0]
+    s = re.sub(r"^NESTING_[\d.]+_", "", s, flags=re.IGNORECASE)
+    s = _RE_SUFIJO_DXF.sub("", s)
+    if "," in s:
+        s = s.split(",", 1)[0]
     return s.strip()
 
 
+def nombre_catalogo_cobre(nombre: str) -> str:
+    """Clave canónica para match contra el catálogo nesting."""
+    return _nombre_base(nombre).upper()
+
+
+@lru_cache(maxsize=1)
+def catalogo_cobre_nesting() -> frozenset[str]:
+    """
+    Set UPPER de piezas busbar GIGA (AutoDXF nesting).
+
+    Fuente: ``Planos/cobre_nesting_giga.txt`` (una pieza por línea).
+    """
+    path = _CATALOGO_FILE
+    out: set[str] = set()
+    try:
+        with open(path, encoding="utf-8") as f:
+            for ln in f:
+                s = ln.strip()
+                if not s or s.startswith("#"):
+                    continue
+                key = nombre_catalogo_cobre(s)
+                if key:
+                    out.add(key)
+    except OSError:
+        pass
+    return frozenset(out)
+
+
 def prefijo_cobre(nombre: str) -> str | None:
-    """Devuelve ``ABB`` / ``GENE`` / ``RLG`` o None."""
+    """Devuelve prefijo ABB/GENE/RLG/GE813 si el nombre lo trae (informativo)."""
     base = _nombre_base(nombre)
     if not base:
         return None
@@ -64,11 +106,31 @@ def prefijo_cobre(nombre: str) -> str | None:
 
 def es_pieza_cobre(nombre: str, material: str | None = None) -> bool:
     """
-    True solo si el nombre inicia con ABB / GENE / RLG.
+    True solo si la pieza está en el catálogo nesting cobre GIGA.
 
-    ``material`` se ignora (la regla es por nomenclatura de archivo).
+    ``material`` se ignora (la regla es por nombre = DXF AutoDXF).
+    Env ``COTAS_COBRE_PREFIJO=1``: fallback legacy (cualquier ABB/GENE/RLG).
     """
-    return prefijo_cobre(nombre) is not None
+    _ = material
+    if os.environ.get("COTAS_COBRE_PREFIJO", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "si",
+        "on",
+    ):
+        return prefijo_cobre(nombre) is not None
+
+    cat = catalogo_cobre_nesting()
+    if not cat:
+        # Sin archivo: no inventar cobre por prefijo (evita saturar el flujo).
+        return False
+    return nombre_catalogo_cobre(nombre) in cat
+
+
+def es_busbar_giga(nombre: str) -> bool:
+    """Alias explícito del filtro nesting busbar."""
+    return es_pieza_cobre(nombre)
 
 
 def medida_con_sin_cota(medida: str) -> str:
@@ -82,3 +144,9 @@ def medida_con_sin_cota(medida: str) -> str:
 @lru_cache(maxsize=1)
 def catalogo_prefijos() -> tuple[str, ...]:
     return tuple(sorted(p.upper() for p in PREFIJOS_COBRE))
+
+
+def recargar_catalogo_cobre() -> int:
+    """Invalida cache y relee el txt. Devuelve tamaño del catálogo."""
+    catalogo_cobre_nesting.cache_clear()
+    return len(catalogo_cobre_nesting())

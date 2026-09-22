@@ -1,9 +1,10 @@
 """
-Calidad cobre/busbar: flag ``Seleccionadas`` (sí/no) sobre cotas XCENTRO/YCENTRO.
+Calidad cobre/busbar: flag ``Seleccionadas`` (sí/no) sobre cotas XY de barrenos.
 
-Regla (próximas exportaciones GIGA / Abigail cobre):
+Regla (GIGA / Abigail cobre):
   - Solo piezas ``es_pieza_cobre`` (ABB / GENE / RLG…).
-  - Solo cotas al centro del barreno (XCENTRO / YCENTRO), no Ø / LENGTH / etc.
+  - Cotas al BORDE del barreno (XMIN/XMAX/YMIN/YMAX). También acepta
+    XCENTRO/YCENTRO legado.
   - ``sí`` = las 2 primeras posiciones distintas en X y las 2 primeras en Y
     desde (0,0) (valores numéricos del nombre de captura, ascendente).
   - El resto de cotas de esa pieza → ``no``.
@@ -22,9 +23,9 @@ try:
 except Exception:
     _SEP = "__"
 
-# Medida final: XCENTRO[_TYP]_{valor} / YCENTRO[_TYP]_{valor}
-_RE_MEDIDA_CENTRO = re.compile(
-    r"^(?P<eje>X|Y)CENTRO(?:_TYP)?_(?P<val>-?\d+(?:\.\d+)?)$",
+# Medida final: XMIN/XMAX/XCENTRO[_TYP]_{valor} (idem Y)
+_RE_MEDIDA_XY = re.compile(
+    r"^(?P<eje>X|Y)(?:MIN|MAX|CENTRO)(?:_TYP)?_(?P<val>-?\d+(?:\.\d+)?)$",
     re.IGNORECASE,
 )
 
@@ -33,7 +34,8 @@ _VAL_TOL = 1e-4
 
 def parse_xycentro_captura(nombre_archivo: str) -> tuple[str, str, float] | None:
     """
-    Devuelve ``(item, 'X'|'Y', valor)`` si el JPG es XCENTRO/YCENTRO.
+    Devuelve ``(item, 'X'|'Y', valor)`` si el JPG es cota XY de barreno
+    (MIN/MAX/CENTRO).
     """
     base = os.path.splitext(os.path.basename(str(nombre_archivo or "")))[0]
     if not base:
@@ -48,7 +50,7 @@ def parse_xycentro_captura(nombre_archivo: str) -> tuple[str, str, float] | None
     else:
         item = str(partes[0] or "").strip()
         medida = str(partes[1] or "").strip()
-    m = _RE_MEDIDA_CENTRO.match(medida)
+    m = _RE_MEDIDA_XY.match(medida)
     if not m:
         return None
     eje = str(m.group("eje") or "").upper()
@@ -120,18 +122,3 @@ def seleccionada_para_captura(
     if bn not in {os.path.basename(x) for x in lista}:
         lista.append(bn)
     return mapa_seleccionadas(lista).get(bn, "no")
-
-
-def hermanos_en_carpeta(ruta_jpg: str) -> list[str]:
-    """Basenames JPG/PNG en el mismo directorio que ``ruta_jpg``."""
-    try:
-        carpeta = os.path.dirname(os.path.abspath(str(ruta_jpg or "")))
-        if not carpeta or not os.path.isdir(carpeta):
-            return [os.path.basename(ruta_jpg)]
-        out = []
-        for fn in os.listdir(carpeta):
-            if fn.lower().endswith((".jpg", ".jpeg", ".png")):
-                out.append(fn)
-        return out or [os.path.basename(ruta_jpg)]
-    except Exception:
-        return [os.path.basename(str(ruta_jpg or ""))]

@@ -1,13 +1,13 @@
-' =============================================================================
+﻿' =============================================================================
 ' COTAS_BARRENOS_FLAT_CORTE
 ' =============================================================================
 ' Re-acota SOLO barrenos flat (cualquier job; tipico GIGA Board):
-'   1) Barrenos TYP en X e Y  →  XCENTRO / YCENTRO (+ _TYP)
-'   2) Ø por tipo de tamaño   →  HOLE## (circulo ≠ ovalo; mm ≥6 dec)
-'   3) Espesor               →  THK
-'   4) Auditoría COM al final → revalida / repara
+'   1) Barrenos TYP en X e Y  â†’  XCENTRO / YCENTRO (+ _TYP)
+'   2) Ã˜ por tipo de tamaÃ±o   â†’  HOLE## (circulo â‰  ovalo; mm â‰¥6 dec)
+'   3) Espesor               â†’  THK
+'   4) AuditorÃ­a COM al final â†’ revalida / repara
 '
-' NO genera LENGTH, WIDTH, Doblado ni Estañado.
+' NO genera LENGTH, WIDTH, Doblado ni EstaÃ±ado.
 ' El flujo normal Abigail (generador_piezas) YA crea DESPLIEGUE + barrenos
 ' cuando la chapa tiene huecos; esta regla es re-trabajo / SOLO flat.
 ' Lanza: Planos\_reacotar_barrenos_flat_corte.py
@@ -17,7 +17,7 @@ Sub Main()
     Const kDrawingDocument As Integer = 12292
 
     Dim invApp As Inventor.Application = ThisApplication
-    Dim titulo As String = "FLAT: barrenos X/Y + Ø + THK"
+    Dim titulo As String = "FLAT: barrenos X/Y + Ã˜ + THK"
 
     If invApp.ActiveDocument Is Nothing Then
         System.Windows.Forms.MessageBox.Show( _
@@ -74,9 +74,9 @@ Sub Main()
         System.Windows.Forms.MessageBox.Show( _
             "Re-trabajo SOLO flat (barrenos):" & vbCrLf & vbCrLf & _
             "  1. Barrenos TYP en X/Y  (centro circulo/ovalo)" & vbCrLf & _
-            "  2. Ø por tipo de tamaño (HOLE; circulo ≠ ovalo)" & vbCrLf & _
+            "  2. Ã˜ por tipo de tamaÃ±o (HOLE; circulo â‰  ovalo)" & vbCrLf & _
             "  3. Espesor THK" & vbCrLf & vbCrLf & _
-            "Precision ≥6 decimales (mm)." & vbCrLf & _
+            "Precision 3 decimales (mm)." & vbCrLf & _
             "NO hace Length ni Width ni Doblado." & vbCrLf & _
             "El flujo Abigail normal ya aplica barrenos en chapas con huecos;" & vbCrLf & _
             "usa esta regla para re-acotar / SOLO flat." & vbCrLf & vbCrLf & _

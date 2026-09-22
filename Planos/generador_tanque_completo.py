@@ -763,7 +763,7 @@ def _es_jpg_estanado(nombre_archivo, staging_marker=None, nombre_pieza=None):
 
 
 def _es_cobre_nombre(nombre_archivo, nombre_pieza=None):
-    """True si el JPG pertenece a pieza cobre (ABB/GENE/RLG)."""
+    """True si el JPG es busbar nesting (catálogo AutoDXF cobre GIGA)."""
     try:
         from piezas_cobre import es_pieza_cobre
 

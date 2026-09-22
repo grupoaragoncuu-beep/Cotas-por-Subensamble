@@ -2046,14 +2046,28 @@ def _resolver_prismatico(hoja, vista, tg, datos, nombre_hoja):
             return False, None
 
     # ¿El Thickness de chapa representa el cuerpo o solo un resalte?
+    # Caso Placa Segmento / brida L de canto: envolvente ≈ pata (2 in) y
+    # Thickness = 0.313 in. La envolvente NO es THK → es LEG/ALTO.
     chapa_es_cuerpo = False
-    if thk_chapa_cm is not None and es_canto_aplanado and overall_cm:
-        chapa_es_cuerpo = thk_chapa_cm >= overall_cm * 0.50
-    elif thk_chapa_cm is not None and not es_canto_aplanado:
-        chapa_es_cuerpo = True
+    envolvente_es_pata = False
+    if thk_chapa_cm is not None and overall_cm is not None and thk_chapa_cm > EPS:
+        if overall_cm >= thk_chapa_cm * 1.75:
+            envolvente_es_pata = True
+            chapa_es_cuerpo = True
+            print(
+                f"  {nombre_hoja}: envolvente "
+                f"{overall_cm / IN_TO_CM:.4f} in ≫ chapa "
+                f"{thk_chapa_cm / IN_TO_CM:.4f} in → THK=chapa "
+                f"(envolvente = pata/alto, no espesor)"
+            )
+    if not envolvente_es_pata:
+        if thk_chapa_cm is not None and es_canto_aplanado and overall_cm:
+            chapa_es_cuerpo = thk_chapa_cm >= overall_cm * 0.50
+        elif thk_chapa_cm is not None and not es_canto_aplanado:
+            chapa_es_cuerpo = True
 
     def _clave(c):
-        if es_canto_aplanado and overall_cm:
+        if es_canto_aplanado and overall_cm and not envolvente_es_pata:
             cerca_env = abs(c["valor_cm"] - overall_cm) / max(overall_cm, EPS)
         else:
             cerca_env = 0.0
@@ -2063,9 +2077,12 @@ def _resolver_prismatico(hoja, vista, tg, datos, nombre_hoja):
             if abs(c["valor_cm"] - thk_chapa_cm) <= tol:
                 match_chapa = 0
         # En L/U (no aplanado): menor espesor de catálogo sigue siendo THK.
-        prefer_menor = c["valor_cm"] if not es_canto_aplanado else -c["valor_cm"]
+        # Si envolvente=pata, preferir el menor cercano a chapa.
+        prefer_menor = c["valor_cm"] if (
+            not es_canto_aplanado or envolvente_es_pata
+        ) else -c["valor_cm"]
         return (
-            cerca_env if es_canto_aplanado else 0.0,
+            cerca_env if (es_canto_aplanado and not envolvente_es_pata) else 0.0,
             match_chapa,
             0 if (not es_canto_aplanado and c["snap"].get("desde_catalogo")) else 1,
             prefer_menor,
@@ -2074,7 +2091,7 @@ def _resolver_prismatico(hoja, vista, tg, datos, nombre_hoja):
     ranqueados.sort(key=_clave)
     mejor = ranqueados[0]
 
-    if es_canto_aplanado and overall_cm:
+    if es_canto_aplanado and overall_cm and not envolvente_es_pata:
         tol_env = max(TOL_CM * 4, overall_cm * 0.12)
         cercanos_env = [
             c for c in ranqueados

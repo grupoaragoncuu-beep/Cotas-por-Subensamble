@@ -31,30 +31,30 @@ SHARE_DOSSIER = os.path.join(
 SHARE_JPGS = SHARE_DOSSIER
 JOB = "9919-Board 2"
 _TOKENS = ("XCENTRO", "YCENTRO", "XMIN", "YMIN", "__THK_", "__HOLE")
-# Solo archivos con valor a 6 decimales (25.400000); descartar 3 (25.400)
-_RE_VAL_6DEC = re.compile(r"\.\d{6}(?:_|\.|$)")
-_RE_VAL_3DEC_ONLY = re.compile(r"\.\d{3}(?:_|\.|$)")
+# Solo archivos con valor a exactamente 3 decimales (25.400)
+_RE_VAL_3DEC = re.compile(r"\.\d{3}(?:_|\.|$)")
+_RE_VAL_MAS_DE_3 = re.compile(r"\.\d{4}")
 
 
-def _es_jpg_6dec(fn: str) -> bool:
-    """True si el nombre lleva valor con exactamente 6 decimales."""
+def _es_jpg_3dec(fn: str) -> bool:
+    """True si el nombre lleva valor con exactamente 3 decimales."""
     base = os.path.basename(fn)
     up = base.upper()
     if not any(t in up for t in _TOKENS):
         return False
-    return bool(_RE_VAL_6DEC.search(base))
-
-
-def _es_jpg_3dec_corto(fn: str) -> bool:
-    """True si parece valor a 3 decimales (sin llegar a 6)."""
-    base = os.path.basename(fn)
-    if _RE_VAL_6DEC.search(base):
+    if _RE_VAL_MAS_DE_3.search(base):
         return False
-    return bool(_RE_VAL_3DEC_ONLY.search(base))
+    return bool(_RE_VAL_3DEC.search(base))
 
 
-def _filtrar_solo_6dec(archivos: list[str]) -> list[str]:
-    return [a for a in archivos if _es_jpg_6dec(a)]
+def _es_jpg_6dec_largo(fn: str) -> bool:
+    """True si parece valor a 6 decimales (legado; se descarta)."""
+    base = os.path.basename(fn)
+    return bool(re.search(r"\.\d{6}(?:_|\.|$)", base))
+
+
+def _filtrar_solo_3dec(archivos: list[str]) -> list[str]:
+    return [a for a in archivos if _es_jpg_3dec(a)]
 
 
 def _staging() -> str:
@@ -118,8 +118,8 @@ def _catalogo(raiz: str) -> list[str]:
 
 
 def _publicar(pieza: str, archivos: list[str], roots: list[str]) -> int:
-    # Solo 6 decimales; las de 3 se descartan
-    archivos = _filtrar_solo_6dec(archivos)
+    # Solo 3 decimales exactos
+    archivos = _filtrar_solo_3dec(archivos)
     if not archivos:
         return 0
     n = 0
@@ -131,7 +131,7 @@ def _publicar(pieza: str, archivos: list[str], roots: list[str]) -> int:
                 continue
             if not any(t in fn.upper() for t in _TOKENS):
                 continue
-            # Limpiar destino (incluye borrar las de 3 decimales)
+            # Limpiar destino (incluye borrar las de 6 decimales)
             try:
                 os.remove(os.path.join(dst, fn))
             except OSError:
@@ -244,10 +244,10 @@ def main() -> int:
                             continue
                         if not any(t in fn.upper() for t in _TOKENS):
                             continue
-                        if _es_jpg_3dec_corto(fn):
+                        if _es_jpg_6dec_largo(fn):
                             try:
                                 os.remove(os.path.join(dirpath, fn))
-                                print(f"  DEL 3dec {fn}")
+                                print(f"  DEL 6dec {fn}")
                             except OSError:
                                 pass
 
@@ -269,16 +269,16 @@ def main() -> int:
                 print(f"  SKIP (sin staging): {pieza}")
                 skip_n += 1
                 continue
-            n3 = sum(1 for a in archivos if _es_jpg_3dec_corto(a))
-            archivos = _filtrar_solo_6dec(archivos)
-            if n3:
-                print(f"  (descarta {n3} jpg de 3 decimales)")
+            n6 = sum(1 for a in archivos if _es_jpg_6dec_largo(a))
+            archivos = _filtrar_solo_3dec(archivos)
+            if n6:
+                print(f"  (descarta {n6} jpg de 6 decimales)")
             if not archivos:
-                print(f"  SKIP (sin jpg a 6 dec): {pieza}")
+                print(f"  SKIP (sin jpg a 3 dec): {pieza}")
                 skip_n += 1
                 continue
             if not _completo(archivos):
-                print(f"  SKIP (incompleto 6dec): {pieza} n={len(archivos)}")
+                print(f"  SKIP (incompleto 3dec): {pieza} n={len(archivos)}")
                 skip_n += 1
                 continue
             print(f"\n[{pieza}] audit COM…")
@@ -289,10 +289,10 @@ def main() -> int:
                 continue
             n = _publicar(pieza, archivos, roots)
             if n <= 0:
-                print(f"  SKIP (nada a 6 dec tras filtro): {pieza}")
+                print(f"  SKIP (nada a 3 dec tras filtro): {pieza}")
                 skip_n += 1
                 continue
-            print(f"  SUBE OK → {n} archivos 6dec ({motivo})")
+            print(f"  SUBE OK → {n} archivos 3dec ({motivo})")
             ok_n += 1
             pubs += n
 

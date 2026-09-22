@@ -323,6 +323,7 @@ def _convertir_nombre_tecnico_hoja(
     hojas_diametro_bases=None,
     hojas_lado_sin_thk_bases=None,
     hojas_od_solid_bases=None,
+    piezas_con_despliegue_lado=None,
 ) -> str:
     """
     Convierte nombres finales de hoja.
@@ -339,6 +340,8 @@ def _convertir_nombre_tecnico_hoja(
       se conserva como ``_LADO`` para que el JPG resultante no mienta al
       llamarse ``_THK`` sin cota real.
     - LADO con Ø sólido (barra/pin) -> DIAMETRO_EXTERIOR (no THK).
+    - LADO doblado si la pieza ya tiene DESPLIEGUE_LADO -> LARGO_PATA
+      (pata/flange; el THK real es el del flat).
     - ALTO se mantiene (4ª captura de perfiles U/L)
     """
     if hojas_diametro_visibles is None:
@@ -352,6 +355,9 @@ def _convertir_nombre_tecnico_hoja(
 
     if hojas_od_solid_bases is None:
         hojas_od_solid_bases = set()
+
+    if piezas_con_despliegue_lado is None:
+        piezas_con_despliegue_lado = set()
 
     base, sufijo = _separar_nombre_hoja(nombre)
 
@@ -383,6 +389,9 @@ def _convertir_nombre_tecnico_hoja(
             pieza_base = pieza_base[: -len(suf)]
             break
     tiene_od_lado = pieza_base in od_piezas
+    tiene_flat_lado = pieza_base in {
+        str(x).upper() for x in piezas_con_despliegue_lado
+    }
 
     es_diametro = (
         (visible_up in hojas_diametro_visibles or base_up in hojas_diametro_bases)
@@ -453,6 +462,9 @@ def _convertir_nombre_tecnico_hoja(
             base = base.replace("_LADO", "_DIAMETRO_EXTERIOR")
         elif base_up in hojas_lado_sin_thk_bases:
             pass
+        elif tiene_flat_lado:
+            # Flat ya trae el THK; el LADO doblado es la pata.
+            base = base.replace("_LADO", "_LARGO_PATA")
         else:
             base = base.replace("_LADO", "_THK")
 
@@ -546,6 +558,23 @@ def renombrar_hojas_finales(
         print(f"⚠️ No se pudieron leer las hojas para renombrar: {e}")
         return mapeo
 
+    # Piezas con flat LADO: el LADO doblado es pata (LEG), no THK.
+    piezas_con_despliegue_lado = set()
+    for i in range(1, total_hojas + 1):
+        try:
+            nom = str(draw_doc.Sheets.Item(i).Name).upper()
+        except Exception:
+            continue
+        base_n, _ = _separar_nombre_hoja(nom)
+        if "_DESPLIEGUE_LADO" in base_n:
+            pieza = base_n
+            for suf in ("_DESPLIEGUE_LADO", "_DESPLIEGUE_THK"):
+                if pieza.endswith(suf):
+                    pieza = pieza[: -len(suf)]
+                    break
+            if pieza:
+                piezas_con_despliegue_lado.add(pieza)
+
     for i in range(1, total_hojas + 1):
         try:
             hoja = draw_doc.Sheets.Item(i)
@@ -577,6 +606,7 @@ def renombrar_hojas_finales(
                 hojas_diametro_bases,
                 hojas_lado_sin_thk_bases,
                 hojas_od_solid_bases,
+                piezas_con_despliegue_lado,
             )
 
             nombre_nuevo_base, _ = _separar_nombre_hoja(nombre_nuevo_visible)
@@ -1749,11 +1779,44 @@ def exportar_hojas_jpg(
     exportar_hojas_jpg._sin_cota_hechos = set()
 
     # Items con hoja ESTANIADO (Corte cobre): SIN_COTA solo desde esa hoja.
+    # Piezas con DESPLIEGUE: el flat es la entrega (L/W/THK + barrenos/cortes);
+    # no exportar FRENTE/LADO doblado (evita THK=pata y LENGTH duplicado).
     items_con_estanado = set()
+    piezas_con_despliegue_lado = set()
+    piezas_con_despliegue = set()
     try:
         for _si in range(1, draw_doc.Sheets.Count + 1):
             _sn = str(draw_doc.Sheets.Item(_si).Name)
-            if "_ESTANIADO" not in _sn.upper():
+            _sn_up = _sn.upper()
+            if "_DESPLIEGUE_" in _sn_up:
+                _base_d, _ = _separar_nombre_hoja(_sn_up)
+                _pieza_d = _base_d
+                for _suf in (
+                    "_DESPLIEGUE_FRENTE_1",
+                    "_DESPLIEGUE_FRENTE_2",
+                    "_DESPLIEGUE_LADO",
+                    "_DESPLIEGUE_THK",
+                    "_DESPLIEGUE_LARGO",
+                    "_DESPLIEGUE_ANCHO",
+                    "_DESPLIEGUE_DIAMETRO_EXTERIOR",
+                    "_DESPLIEGUE_DIAMETRO_INTERIOR",
+                ):
+                    if _pieza_d.endswith(_suf):
+                        _pieza_d = _pieza_d[: -len(_suf)]
+                        break
+                else:
+                    # Hojas XY/HOLE/CUT: PART_DESPLIEGUE_XCENTRO…
+                    _m = re.match(
+                        r"^(.*)_DESPLIEGUE_(?:X|Y|CUT_|DIAMETRO_H|HOLE)",
+                        _pieza_d,
+                    )
+                    if _m:
+                        _pieza_d = _m.group(1)
+                if _pieza_d:
+                    piezas_con_despliegue.add(_pieza_d)
+                    if "_DESPLIEGUE_LADO" in _sn_up or "_DESPLIEGUE_THK" in _sn_up:
+                        piezas_con_despliegue_lado.add(_pieza_d)
+            if "_ESTANIADO" not in _sn_up:
                 continue
             if medida_export_desde_hoja:
                 _it, _m, _n = medida_export_desde_hoja(_sn)
@@ -1765,6 +1828,8 @@ def exportar_hojas_jpg(
                     items_con_estanado.add(_base_e.strip().upper())
     except Exception:
         items_con_estanado = set()
+        piezas_con_despliegue = set()
+        piezas_con_despliegue_lado = set()
 
     try:
         from generador_tanque_completo import (
@@ -1825,6 +1890,7 @@ def exportar_hojas_jpg(
                 hojas_diametro_bases,
                 hojas_lado_sin_thk_bases,
                 hojas_od_solid_bases,
+                piezas_con_despliegue_lado,
             )
         except:
             nombre_hoja = f"Hoja_{i}"
@@ -1847,6 +1913,44 @@ def exportar_hojas_jpg(
             omitidas += 1
             continue
 
+        # Si la pieza ya tiene flat, no publicar dims del sólido doblado
+        # (LENGTH/WIDTH/THK de pata). El flat lleva L/W/THK + barrenos/cortes.
+        try:
+            _src_up = str(nombre_hoja_actual_visible).upper()
+            _dst_up = str(nombre_hoja).upper()
+            _es_flat_sheet = "_DESPLIEGUE_" in _src_up or "_DESPLIEGUE_" in _dst_up
+            if not _es_flat_sheet and piezas_con_despliegue:
+                _pieza_exp = None
+                if medida_export_desde_hoja:
+                    _pieza_exp, _, _ = medida_export_desde_hoja(nombre_hoja)
+                if not _pieza_exp:
+                    _bexp, _ = _separar_nombre_hoja(_dst_up)
+                    _pieza_exp = _bexp
+                    for _sx in (
+                        "_FRENTE_1",
+                        "_FRENTE_2",
+                        "_LADO",
+                        "_THK",
+                        "_LARGO",
+                        "_ANCHO",
+                        "_ALTO",
+                        "_LARGO_PATA",
+                        "_DIAMETRO_EXTERIOR",
+                        "_DIAMETRO_INTERIOR",
+                    ):
+                        if _pieza_exp.endswith(_sx):
+                            _pieza_exp = _pieza_exp[: -len(_sx)]
+                            break
+                if str(_pieza_exp or "").upper() in piezas_con_despliegue:
+                    print(
+                        f"⏭️ Omitiendo '{nombre_hoja}': pieza con DESPLIEGUE "
+                        f"— dims dobladas no se exportan (flat = entrega)"
+                    )
+                    omitidas += 1
+                    continue
+        except Exception:
+            pass
+
         # Corrida rápida flat: X/Y (+TYP), Ø por tipo (HOLE/DIAMETRO_H) y THK.
         # EXIGE "_DESPLIEGUE_" en la hoja: nunca exportar LADO/THK/FRENTE doblado.
         if os.environ.get("SOLO_FLAT_CORTE", "").strip().lower() in (
@@ -1863,7 +1967,15 @@ def exportar_hojas_jpg(
                 omitidas += 1
                 continue
             es_xy = any(
-                t in nu for t in ("XCENTRO", "YCENTRO", "XMIN", "YMIN")
+                t in nu
+                for t in (
+                    "XCENTRO",
+                    "YCENTRO",
+                    "XMIN",
+                    "XMAX",
+                    "YMIN",
+                    "YMAX",
+                )
             )
             es_hole = ("DIAMETRO_H" in nu) or ("_HOLE" in nu)
             es_thk = (
@@ -1875,7 +1987,7 @@ def exportar_hojas_jpg(
             if not (es_xy or es_hole or es_thk):
                 print(
                     f"SOLO_FLAT: omitiendo '{nombre_hoja}' "
-                    f"(no es XCENTRO/YCENTRO/HOLE/THK)"
+                    f"(no es XY/HOLE/THK flat)"
                 )
                 omitidas += 1
                 continue

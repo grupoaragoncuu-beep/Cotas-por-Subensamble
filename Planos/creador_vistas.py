@@ -1190,7 +1190,7 @@ def _es_flujo_board_giga(part_name=None) -> bool:
 
 
 def _es_flujo_cobre_giga(part_name) -> bool:
-    """Compat: cobre ABB/GENE/RLG dentro de BOARD."""
+    """Compat: busbar nesting (catálogo AutoDXF) dentro de BOARD."""
     if not _es_flujo_board_giga():
         return False
     try:
@@ -1975,16 +1975,16 @@ def get_nombre_pieza_completo():
 
 def _stem_nombre_pieza(part_name: str) -> str:
     """
-    Quita solo extensión Inventor (``.ipt`` / ``.iam``), nunca un decimal
-    del nombre. ``os.path.splitext('PIPE FLANGE 0.250')`` → ``PIPE FLANGE 0``
-    y mezclaba bridas distintas en la misma carpeta/JPG.
+    Quita solo extensión CAD real (``.ipt`` / ``.iam`` / ``.stp``…), nunca un
+    decimal del nombre. ``os.path.splitext('PIPE FLANGE 0.250')`` →
+    ``PIPE FLANGE 0`` y ``splitext('GENE-FCU-2.25-101')`` → ``GENE-FCU-2``.
     """
     limpio = str(part_name or "").strip()
     if not limpio:
         return limpio
     limpio = os.path.basename(limpio)
     low = limpio.casefold()
-    for ext in (".ipt", ".iam", ".idw", ".dwg"):
+    for ext in (".ipt", ".iam", ".idw", ".dwg", ".stp", ".step", ".jpg", ".jpeg", ".png"):
         if low.endswith(ext):
             return limpio[: -len(ext)]
     return limpio

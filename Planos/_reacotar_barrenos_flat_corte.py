@@ -2,7 +2,10 @@
 """
 REGLA RAPIDA flat — SOLO lo pedido:
 
-  1) Barrenos TYP en X/Y  →  XCENTRO / YCENTRO (+ _TYP)  [centro circulo/ovalo]
+  1) Barrenos X/Y + TYP
+       - Metal: XCENTRO / YCENTRO (centro)
+       - Cobre/busbar (ABB/GENE/RLG): XMIN/XMAX/YMIN/YMAX (borde hacia 0)
+         incluye círculos y óvalos/slots del flat
   2) Ø por tipo de tamaño →  HOLE## (escanea TODOS; 1 cota por Ø distinto;
                                circulo y ovalo NUNCA se mezclan aunque midan parecido)
   3) Espesor              →  THK
@@ -14,6 +17,8 @@ Reemplaza esos JPG en el servidor + filas DB.
 
 Inventor: machote activo + ensamble Board abierto.
   python _reacotar_barrenos_flat_corte.py
+  # Board 11 cobre (borde):
+  python -u .runtime/_reacotar_barrenos_board11_cobre.py
 """
 from __future__ import annotations
 
@@ -35,7 +40,16 @@ ROOT_JPGS = ROOT_JPGS_BOARD2
 JOB = "9919-Board 2"
 
 # Solo estos tokens se borran/reemplazan (no LENGTH/WIDTH).
-_TOKENS_REEMPLAZO = ("__XCENTRO", "__YCENTRO", "__XMIN", "__YMIN", "__THK_", "__HOLE")
+_TOKENS_REEMPLAZO = (
+    "__XCENTRO",
+    "__YCENTRO",
+    "__XMIN",
+    "__XMAX",
+    "__YMIN",
+    "__YMAX",
+    "__THK_",
+    "__HOLE",
+)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 

@@ -36,8 +36,12 @@ _TIPOS_HOJA_A_EXPORT = (
     ("DESPLIEGUE_YCENTRO", "YCENTRO"),
     ("DESPLIEGUE_XMIN_TYP", "XMIN_TYP"),
     ("DESPLIEGUE_YMIN_TYP", "YMIN_TYP"),
+    ("DESPLIEGUE_XMAX_TYP", "XMAX_TYP"),
+    ("DESPLIEGUE_YMAX_TYP", "YMAX_TYP"),
     ("DESPLIEGUE_XMIN", "XMIN"),
     ("DESPLIEGUE_YMIN", "YMIN"),
+    ("DESPLIEGUE_XMAX", "XMAX"),
+    ("DESPLIEGUE_YMAX", "YMAX"),
     ("DESPLIEGUE_CUT_LENGTH", "CUT_LENGTH"),
     ("DESPLIEGUE_CUT_WIDTH", "CUT_WIDTH"),
     ("XCENTRO_TYP", "XCENTRO_TYP"),
@@ -46,8 +50,12 @@ _TIPOS_HOJA_A_EXPORT = (
     ("YCENTRO", "YCENTRO"),
     ("XMIN_TYP", "XMIN_TYP"),
     ("YMIN_TYP", "YMIN_TYP"),
+    ("XMAX_TYP", "XMAX_TYP"),
+    ("YMAX_TYP", "YMAX_TYP"),
     ("XMIN", "XMIN"),
     ("YMIN", "YMIN"),
+    ("XMAX", "XMAX"),
+    ("YMAX", "YMAX"),
     ("CUT_LENGTH", "CUT_LENGTH"),
     ("CUT_WIDTH", "CUT_WIDTH"),
     ("DESPLIEGUE_ANCHO", "WIDTH"),
@@ -87,8 +95,12 @@ _TIPOS_PIEZA_CORE = (
     "YCENTRO",
     "XMIN_TYP",
     "YMIN_TYP",
+    "XMAX_TYP",
+    "YMAX_TYP",
     "XMIN",
     "YMIN",
+    "XMAX",
+    "YMAX",
     "CUT_LENGTH",
     "CUT_WIDTH",
     "DIAMETRO_EXTERIOR",
@@ -188,23 +200,23 @@ def formatear_valor_en_nombre(valor) -> str:
     """
     Valor de cota → sufijo de archivo.
 
-    Exacto a 6 decimales: 10.998200 | 38.100000 | 25.400000
+    Exacto a 3 decimales: 10.998 | 38.100 | 25.400
     """
     if valor is None:
-        return "0.000000"
+        return "0.000"
     if isinstance(valor, (int, float)):
         v = abs(float(valor))
     else:
         texto = str(valor).strip().replace(",", ".")
         m = _RE_NUMERO_EN_TEXTO.search(texto)
         if not m:
-            return limpiar_token_archivo(texto) or "0.000000"
+            return limpiar_token_archivo(texto) or "0.000"
         try:
             v = abs(float(m.group(0).replace(",", ".")))
         except ValueError:
-            return limpiar_token_archivo(m.group(0)) or "0.000000"
+            return limpiar_token_archivo(m.group(0)) or "0.000"
 
-    return f"{v:.6f}"
+    return f"{v:.3f}"
 
 
 def nombre_job_desde_ensamble(ensamble) -> str:

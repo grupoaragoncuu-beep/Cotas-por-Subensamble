@@ -652,13 +652,92 @@ def _ranuras_en_vista(vista, min_tam=None, max_frac=0.45):
     )
 
 
+def _curvas_circulo_en_vista(vista):
+    """
+    Todas las curvas círculo/elipse de la vista (sin filtro de interior).
+
+    Sirve para adjuntar ``DrawingCurve`` a centros del FlatPattern (modelo),
+    que no traen handle de curva y sin eso AddDiameter falla con KeyError.
+    """
+    out = []
+    try:
+        n = int(vista.DrawingCurves.Count)
+    except Exception:
+        return out
+    min_tam = _min_tam_hoja(vista)
+    for j in range(1, n + 1):
+        try:
+            curva = vista.DrawingCurves.Item(j)
+            try:
+                ct = int(curva.CurveType)
+            except Exception:
+                ct = None
+            if ct is not None and ct not in _TIPOS_CIRCULO and ct not in _TIPOS_ARCO:
+                continue
+            caja = curva.Evaluator2D.RangeBox
+            ancho = abs(float(caja.MaxPoint.X) - float(caja.MinPoint.X))
+            alto = abs(float(caja.MaxPoint.Y) - float(caja.MinPoint.Y))
+            if ancho < min_tam or alto < min_tam:
+                continue
+            # Círculos casi redondos; óvalos/slots (aspecto hasta ~3) también
+            # sirven para adjuntar curva a centros modelo.
+            if abs(ancho - alto) > max(ancho, alto) * 0.70:
+                continue
+            tam = min(ancho, alto)  # ancho menor ≈ Ø de slot / círculo
+            cx = (float(caja.MaxPoint.X) + float(caja.MinPoint.X)) / 2.0
+            cy = (float(caja.MaxPoint.Y) + float(caja.MinPoint.Y)) / 2.0
+            out.append({"curva": curva, "tamaño": tam, "cx": cx, "cy": cy})
+        except Exception:
+            continue
+    return out
+
+
+def _adjuntar_curvas_a_centros(vista, centros):
+    """Asocia DrawingCurve HLR al centro modelo más cercano (misma hoja)."""
+    if not centros:
+        return centros
+    hlr = _curvas_circulo_en_vista(vista)
+    if not hlr:
+        return centros
+    for m in centros:
+        if m.get("curva") is not None:
+            continue
+        try:
+            cx, cy = float(m["cx"]), float(m["cy"])
+            tam = float(m.get("tamaño") or 0.2)
+        except Exception:
+            continue
+        best, best_d = None, 1e9
+        for a in hlr:
+            d = (
+                (float(a["cx"]) - cx) ** 2 + (float(a["cy"]) - cy) ** 2
+            ) ** 0.5
+            # Centro cercano y Ø compatible (tol holgada: flat scale varia).
+            if d < best_d and d <= max(0.25, tam * 0.6):
+                if abs(float(a["tamaño"]) - tam) <= max(0.08, tam * 0.45):
+                    best_d = d
+                    best = a
+        if best is None:
+            # Segundo intento: solo proximidad de centro.
+            for a in hlr:
+                d = (
+                    (float(a["cx"]) - cx) ** 2 + (float(a["cy"]) - cy) ** 2
+                ) ** 0.5
+                if d < best_d and d <= max(0.35, tam * 0.8):
+                    best_d = d
+                    best = a
+        if best is not None:
+            m["curva"] = best["curva"]
+    return centros
+
+
 def _barrenos_en_vista(vista):
     """
     Círculos + óvalos/ranuras unificados para HOLE##.
 
-    En SOLO_FLAT: preferir círculos del FlatPattern en bucles INTERIORES
-    (cortes reales). El HLR solo se usa si el modelo no aporta, y nunca
-    para rescatar arcos de muescas de borde.
+    Preferir círculos del FlatPattern en bucles INTERIORES (cortes reales)
+    en DESPLIEGUE / SOLO_FLAT / TANQUE. El HLR solo se usa si el modelo no
+    aporta — nunca para rescatar arcos de muescas de borde.
     """
     import os
 
@@ -669,27 +748,46 @@ def _barrenos_en_vista(vista):
         "si",
         "on",
     )
-    if solo_flat:
+    prefer_modelo = solo_flat
+    try:
+        # Vista de flat: el nombre de hoja suele traer DESPLIEGUE.
+        nom = ""
+        try:
+            nom = str(vista.Parent.Name)
+        except Exception:
+            try:
+                nom = str(vista.Name)
+            except Exception:
+                nom = ""
+        if "DESPLIEGUE" in nom.upper():
+            prefer_modelo = True
+    except Exception:
+        pass
+    if prefer_modelo:
         try:
             from inventor_com import conectar_inventor
             from barrenos_xy_despliegue import _centros_barrenos_modelo
 
             inv = conectar_inventor()
             tg = inv.TransientGeometry
-            modelo = _centros_barrenos_modelo(vista, tg)
+            # Misma silueta que XY: si no, los slots fallan el filtro AABB
+            # y HOLE solo ve círculos (p.ej. GENE-FCU-5-118 → 6 en vez de 30).
+            sil = _silueta_placa_vista(vista) or _silueta_vista(vista)
+            modelo = _centros_barrenos_modelo(vista, tg, sil)
             if modelo:
-                # Solo circulares/óvalos de loops interiores
-                return [
+                centros = [
                     {
                         "cx": float(m["cx"]),
                         "cy": float(m["cy"]),
                         "tamaño": float(m.get("tamaño") or 0.2),
                         "tipo": str(m.get("tipo") or "circulo"),
-                        "fuente": "modelo",
+                        "fuente": str(m.get("fuente") or "modelo"),
                     }
                     for m in modelo
                     if str(m.get("tipo") or "") in ("circulo", "oval", "")
                 ]
+                # AddDiameter exige DrawingCurve; el modelo no la trae.
+                return _adjuntar_curvas_a_centros(vista, centros)
         except Exception:
             pass
     return list(_anillos_en_vista(vista)) + list(_ranuras_en_vista(vista))
@@ -825,23 +923,30 @@ def acotar_barrenos_placas(nombres_frente_ok=None):
         if objetivo is not None and base_cmp not in objetivo:
             continue
         # TANQUE + iProp Corte: omitir barrenos (flat y doblado).
-        # Pizarrón: "En Tanks se omite CORTE → No Flat / No Barrenos / No cortes internos".
+        # BOARD/GIGA: HOLE solo busbar nesting (catálogo cobre AutoDXF).
         try:
             from creador_vistas import producto_flujo_actual, _es_pieza_corte
+            from piezas_cobre import es_pieza_cobre
 
-            if producto_flujo_actual() != "BOARD":
-                pieza_hoja = re.sub(
-                    r"_(?:DESPLIEGUE_)?FRENTE_[12]$",
-                    "",
-                    base_cmp,
-                    flags=re.IGNORECASE,
+            pieza_hoja = re.sub(
+                r"_(?:DESPLIEGUE_)?FRENTE_[12]$",
+                "",
+                base_cmp,
+                flags=re.IGNORECASE,
+            )
+            prod = producto_flujo_actual()
+            if prod != "BOARD" and _es_pieza_corte(pieza_hoja):
+                print(
+                    f"  {base_cmp}: TANQUE/Corte → omitido HOLE "
+                    f"(sin flat / barrenos / cortes internos)"
                 )
-                if _es_pieza_corte(pieza_hoja):
-                    print(
-                        f"  {base_cmp}: TANQUE/Corte → omitido HOLE "
-                        f"(sin flat / barrenos / cortes internos)"
-                    )
-                    continue
+                continue
+            if prod == "BOARD" and not es_pieza_cobre(pieza_hoja):
+                print(
+                    f"  {base_cmp}: BOARD no-busbar → omitido HOLE "
+                    f"(corte normal, sin barrenos)"
+                )
+                continue
         except Exception:
             pass
         if hoja.DrawingViews.Count < 1:
@@ -955,7 +1060,10 @@ def acotar_barrenos_placas(nombres_frente_ok=None):
                 if ovals:
                     objetivo_a = max(ovals, key=lambda x: x["tamaño"])
             dim = None
+            e_diam = None
             try:
+                if objetivo_a.get("curva") is None:
+                    raise KeyError("curva")
                 intent = nueva.CreateGeometryIntent(objetivo_a["curva"])
                 pt = _punto_texto_barreno(
                     nueva,
@@ -968,46 +1076,42 @@ def acotar_barrenos_placas(nombres_frente_ok=None):
                 dim = nueva.DrawingDimensions.GeneralDimensions.AddDiameter(
                     pt, intent
                 )
-            except Exception as e_diam:
-                # Elipses HLR (5124/5125) a veces rechazan AddDiameter →
-                # cota lineal del diámetro/ancho del barreno.
+            except Exception as _e_diam:
+                e_diam = _e_diam
+                # Sin curva (centros modelo) o AddDiameter rechazado →
+                # cota lineal del diámetro en hoja (cx±r, cy).
                 try:
-                    curva = objetivo_a["curva"]
-                    caja = curva.Evaluator2D.RangeBox
-                    x0, x1 = float(caja.MinPoint.X), float(caja.MaxPoint.X)
-                    y0, y1 = float(caja.MinPoint.Y), float(caja.MaxPoint.Y)
+                    cx = float(objetivo_a["cx"])
+                    cy = float(objetivo_a["cy"])
+                    tam = float(objetivo_a["tamaño"])
+                    curva = objetivo_a.get("curva")
+                    if curva is not None:
+                        caja = curva.Evaluator2D.RangeBox
+                        x0, x1 = float(caja.MinPoint.X), float(caja.MaxPoint.X)
+                        y0, y1 = float(caja.MinPoint.Y), float(caja.MaxPoint.Y)
+                    else:
+                        r = max(tam * 0.5, 0.01)
+                        x0, x1 = cx - r, cx + r
+                        y0, y1 = cy - r, cy + r
                     if (x1 - x0) >= (y1 - y0):
                         p1 = tg.CreatePoint2d(x0, (y0 + y1) * 0.5)
                         p2 = tg.CreatePoint2d(x1, (y0 + y1) * 0.5)
-                        pt = _punto_texto_barreno(
-                            nueva,
-                            tg,
-                            vista_n,
-                            (x0 + x1) * 0.5,
-                            (y0 + y1) * 0.5,
-                            objetivo_a["tamaño"],
-                        )
-                        dim = (
-                            nueva.DrawingDimensions.GeneralDimensions.AddLinear(
-                                pt, p1, p2
-                            )
-                        )
                     else:
                         p1 = tg.CreatePoint2d((x0 + x1) * 0.5, y0)
                         p2 = tg.CreatePoint2d((x0 + x1) * 0.5, y1)
-                        pt = _punto_texto_barreno(
-                            nueva,
-                            tg,
-                            vista_n,
-                            (x0 + x1) * 0.5,
-                            (y0 + y1) * 0.5,
-                            objetivo_a["tamaño"],
-                        )
-                        dim = (
-                            nueva.DrawingDimensions.GeneralDimensions.AddLinear(
-                                pt, p1, p2
-                            )
-                        )
+                    pt = _punto_texto_barreno(
+                        nueva,
+                        tg,
+                        vista_n,
+                        (x0 + x1) * 0.5,
+                        (y0 + y1) * 0.5,
+                        tam,
+                    )
+                    i1 = nueva.CreateGeometryIntent(p1)
+                    i2 = nueva.CreateGeometryIntent(p2)
+                    dim = nueva.DrawingDimensions.GeneralDimensions.AddLinear(
+                        pt, i1, i2
+                    )
                     print(
                         f"  ↩️ {nombre_nueva}: AddDiameter no aplicó "
                         f"({e_diam}); cota lineal del Ø/ancho."
@@ -1022,6 +1126,12 @@ def acotar_barrenos_placas(nombres_frente_ok=None):
                     except Exception:
                         pass
                     continue
+            if dim is None:
+                try:
+                    nueva.Delete()
+                except Exception:
+                    pass
+                continue
             try:
                 _aplicar_estilo_y_fuera_pieza(dim, nueva, tg, vista_n)
                 # Forzar texto con conversion GIGA (pulg 3dec → mm), no ModelValue*10 crudo
@@ -1040,6 +1150,10 @@ def acotar_barrenos_placas(nombres_frente_ok=None):
                         if abs(mv - tam_mod) > max(0.05, tam_mod * 0.2):
                             mv = tam_mod
                     txt = texto_cota_dibujo(mv, nueva)
+                    if txt and marcar_typ and len(grupo_n) >= 2:
+                        # Misma Ø repetida → TYP en el texto (no solo marcas A/B).
+                        if "TYP" not in str(txt).upper():
+                            txt = f"{txt} TYP"
                     if txt:
                         dim.HideValue = True
                         bold = "True" if COTA_BOLD else "False"

@@ -77,9 +77,12 @@ def _parse_args(argv=None):
 
 def _nombre_base_doc(doc_or_occ) -> str:
     try:
+        from creador_vistas import _stem_nombre_pieza
+
         ff = str(getattr(doc_or_occ, "FullFileName", "") or "")
         if ff:
-            return os.path.splitext(os.path.basename(ff))[0]
+            return _stem_nombre_pieza(ff)
+        return _stem_nombre_pieza(str(getattr(doc_or_occ, "DisplayName", "") or "KIT"))
     except Exception:
         pass
     try:

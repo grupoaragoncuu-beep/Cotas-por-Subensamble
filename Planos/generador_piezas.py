@@ -345,15 +345,22 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
                 return False
 
         # BOARD: acota piezas únicas excepto Almacén (tornillería/comprados).
-        # Cobre ABB/GENE/RLG = doble captura SIN_COTA al exportar.
-        # Barrenos flat: BOARD = Corte o chapa con huecos.
+        # Busbar = solo catálogo nesting AutoDXF (cobre_nesting_giga.txt):
+        #   XY/HOLE borde + SIN_COTA + ESTANIADO + carpeta Corte Busbar.
+        # Resto = corte normal (dims) sin acotar barrenos.
         # TANQUE = Corte omitido; Doblado + huecos → DESPLIEGUE.
         if es_board and catalogo_filtro is None:
+            try:
+                from piezas_cobre import catalogo_cobre_nesting
+
+                n_bus = len(catalogo_cobre_nesting())
+            except Exception:
+                n_bus = 0
             print(
                 "  BOARD: alcance completo (todas las piezas únicas, "
                 "excepto Almacén). "
-                "Barrenos en chapa → DESPLIEGUE X/Y/HOLE/THK. "
-                "Cobre ABB/GENE/RLG → JPG + SIN_COTA + ESTANIADO."
+                f"Busbar nesting={n_bus} tipos → XY/HOLE/SIN_COTA/ESTANIADO. "
+                "Resto corte → dims sin barrenos."
             )
         elif not es_board:
             print(
