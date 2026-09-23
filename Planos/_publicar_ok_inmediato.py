@@ -31,20 +31,20 @@ SHARE_DOSSIER = os.path.join(
 SHARE_JPGS = SHARE_DOSSIER
 JOB = "9919-Board 2"
 _TOKENS = ("XCENTRO", "YCENTRO", "XMIN", "YMIN", "__THK_", "__HOLE")
-# Solo archivos con valor a exactamente 3 decimales (25.400)
-_RE_VAL_3DEC = re.compile(r"\.\d{3}(?:_|\.|$)")
-_RE_VAL_MAS_DE_3 = re.compile(r"\.\d{4}")
+# Solo archivos con valor a exactamente 2 decimales (25.40 / 25.40mm)
+_RE_VAL_2DEC = re.compile(r"\.\d{2}(?:mm|in)?(?:_|\.|$)", re.I)
+_RE_VAL_MAS_DE_2 = re.compile(r"\.\d{3}")
 
 
-def _es_jpg_3dec(fn: str) -> bool:
-    """True si el nombre lleva valor con exactamente 3 decimales."""
+def _es_jpg_2dec(fn: str) -> bool:
+    """True si el nombre lleva valor con exactamente 2 decimales."""
     base = os.path.basename(fn)
     up = base.upper()
     if not any(t in up for t in _TOKENS):
         return False
-    if _RE_VAL_MAS_DE_3.search(base):
+    if _RE_VAL_MAS_DE_2.search(base):
         return False
-    return bool(_RE_VAL_3DEC.search(base))
+    return bool(_RE_VAL_2DEC.search(base))
 
 
 def _es_jpg_6dec_largo(fn: str) -> bool:
@@ -53,8 +53,8 @@ def _es_jpg_6dec_largo(fn: str) -> bool:
     return bool(re.search(r"\.\d{6}(?:_|\.|$)", base))
 
 
-def _filtrar_solo_3dec(archivos: list[str]) -> list[str]:
-    return [a for a in archivos if _es_jpg_3dec(a)]
+def _filtrar_solo_2dec(archivos: list[str]) -> list[str]:
+    return [a for a in archivos if _es_jpg_2dec(a)]
 
 
 def _staging() -> str:
@@ -118,8 +118,8 @@ def _catalogo(raiz: str) -> list[str]:
 
 
 def _publicar(pieza: str, archivos: list[str], roots: list[str]) -> int:
-    # Solo 3 decimales exactos
-    archivos = _filtrar_solo_3dec(archivos)
+    # Solo 2 decimales exactos
+    archivos = _filtrar_solo_2dec(archivos)
     if not archivos:
         return 0
     n = 0
@@ -233,7 +233,7 @@ def main() -> int:
             pass
         set_unidad_cota("mm")
 
-        # Barrer restos de 3 decimales en shares (dejar solo 6)
+        # Barrer restos de 6 decimales en shares
         for root in roots:
             for flat in roots_flat(root):
                 if not os.path.isdir(flat):
@@ -270,15 +270,15 @@ def main() -> int:
                 skip_n += 1
                 continue
             n6 = sum(1 for a in archivos if _es_jpg_6dec_largo(a))
-            archivos = _filtrar_solo_3dec(archivos)
+            archivos = _filtrar_solo_2dec(archivos)
             if n6:
                 print(f"  (descarta {n6} jpg de 6 decimales)")
             if not archivos:
-                print(f"  SKIP (sin jpg a 3 dec): {pieza}")
+                print(f"  SKIP (sin jpg a 2 dec): {pieza}")
                 skip_n += 1
                 continue
             if not _completo(archivos):
-                print(f"  SKIP (incompleto 3dec): {pieza} n={len(archivos)}")
+                print(f"  SKIP (incompleto 2dec): {pieza} n={len(archivos)}")
                 skip_n += 1
                 continue
             print(f"\n[{pieza}] audit COM…")

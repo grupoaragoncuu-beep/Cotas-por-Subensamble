@@ -23,9 +23,9 @@ try:
 except Exception:
     _SEP = "__"
 
-# Medida final: XMIN/XMAX/XCENTRO[_TYP]_{valor} (idem Y)
+# Medida final: XMIN/XMAX/XCENTRO[_TYP]_{valor}[mm|in] (idem Y)
 _RE_MEDIDA_XY = re.compile(
-    r"^(?P<eje>X|Y)(?:MIN|MAX|CENTRO)(?:_TYP)?_(?P<val>-?\d+(?:\.\d+)?)$",
+    r"^(?P<eje>X|Y)(?:MIN|MAX|CENTRO)(?:_TYP)?_(?P<val>-?\d+(?:\.\d+)?)(?:mm|in)?$",
     re.IGNORECASE,
 )
 

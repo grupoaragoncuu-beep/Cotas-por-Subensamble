@@ -105,6 +105,32 @@ def _runtime_dir() -> str:
 
 
 def _contexto_path() -> str:
+    """
+    Contexto dossier por proceso.
+
+    - ``COTAS_DOSSIER_CONTEXTO_FILE``: ruta absoluta fija (máximo aislamiento).
+    - Si no: ``dossier_contexto_<job>.json`` usando ``COTAS_JOB_OVERRIDE``
+      o ``COTAS_DOSSIER_CTX_KEY`` (dos boards en paralelo no se pisan).
+    - Fallback legacy: ``dossier_contexto.json``.
+    """
+    override = str(os.environ.get("COTAS_DOSSIER_CONTEXTO_FILE") or "").strip()
+    if override:
+        parent = os.path.dirname(override)
+        if parent:
+            try:
+                os.makedirs(parent, exist_ok=True)
+            except OSError:
+                pass
+        return override
+    key = str(
+        os.environ.get("COTAS_JOB_OVERRIDE")
+        or os.environ.get("COTAS_DOSSIER_CTX_KEY")
+        or ""
+    ).strip()
+    if key:
+        safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in key)
+        safe = safe.strip("_") or "job"
+        return os.path.join(_runtime_dir(), f"dossier_contexto_{safe}.json")
     return os.path.join(_runtime_dir(), "dossier_contexto.json")
 
 

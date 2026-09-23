@@ -25,11 +25,20 @@ def main():
     assert pc.prefijo_cobre("RLG-01") == "RLG"
     assert pc.catalogo_prefijos() == ("ABB", "GENE", "RLG")
     assert pc.medida_con_sin_cota("LENGTH") == "LENGTH_SIN_COTA"
+    from cota_estilo import set_unidad_cota
+
+    set_unidad_cota("mm")
     nom = armar_nombre_captura_pieza(
         "9919-Board 1", "GENE-FCU-5-102", "LENGTH_SIN_COTA", "3.5"
     )
-    assert "LENGTH_SIN_COTA_3.5" in nom, nom
+    assert "LENGTH_SIN_COTA_3.500mm" in nom, nom
+    set_unidad_cota("in")
+    nom_in = armar_nombre_captura_pieza(
+        "62223-1246-A01", "62223-1248-P01", "LENGTH", "10.25"
+    )
+    assert "LENGTH_10.250in" in nom_in, nom_in
     print("OK cobre ABB/GENE/RLG + SIN_COTA ->", nom)
+    print("OK tanque in ->", nom_in)
     print("SMOKE piezas_cobre PASS")
     return 0
 

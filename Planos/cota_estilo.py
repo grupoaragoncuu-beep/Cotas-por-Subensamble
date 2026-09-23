@@ -5,6 +5,11 @@ import math
 # Inventor usa cm para FontSize en estilos de dibujo.
 # Base 0.18 → 0.225 (+25%) → 0.3375 (+50%) → 0.50625 (+50% adicional).
 COTA_FONT_SIZE_CM = 0.50625
+# Cobre/GIGA (mm): tipografía más compacta en horizontal → la cota cabe
+# junto a la pieza sin alargar el encuadre ni forzar recorte del JPG.
+COTA_FONT_SIZE_COBRE_CM = 0.38
+# Sufijos TYP / mm|in: 15 % más chicos que el número (rango 10–15 %).
+COTA_SUFIJO_FONT_FACTOR = 0.85
 COTA_NAVY_RGB = (0, 0, 128)
 COTA_BOLD = True
 # Unidad de visualización: tanques Abigail = in; GIGA/BOARD = mm.
@@ -26,6 +31,8 @@ def _env_fuerza_mm() -> bool:
 # Con fuente grande, 1.5 cm era insuficiente (Vantran PIPE FLANGE: texto
 # encima del filete / cota horizontal atravesando el cuerpo).
 OFFSET_FUERA_PIEZA_CM = 2.85
+# Cobre cartesiano: holgura justa (pieza siempre horizontal, cota cerca).
+OFFSET_FUERA_PIEZA_COBRE_CM = 1.25
 MARGEN_COTA_VS_PIEZA_CM = 0.45
 
 _SIMBOLOS_TEXTO = re.compile(r"[Øø⌀°′″±]")
@@ -60,14 +67,85 @@ def get_unidad_cota():
     return str(_UNIDAD_ACTIVA or COTA_UNIDAD or "in")
 
 
+def es_modo_cobre_cota() -> bool:
+    """True en flujo GIGA/BOARD (mm): tipografía y holgura más compactas."""
+    return get_unidad_cota() == "mm"
+
+
+def get_cota_font_size_cm() -> float:
+    """Tamaño de fuente activo (cobre más compacto en horizontal)."""
+    if es_modo_cobre_cota():
+        return float(COTA_FONT_SIZE_COBRE_CM)
+    return float(COTA_FONT_SIZE_CM)
+
+
+def get_offset_fuera_pieza_cm() -> float:
+    if es_modo_cobre_cota():
+        return float(OFFSET_FUERA_PIEZA_COBRE_CM)
+    return float(OFFSET_FUERA_PIEZA_CM)
+
+
+def get_cota_sufijo_font_cm(font_cm=None) -> float:
+    """Tamaño para nomenclatura TYP / mm|in (~15 % menor que el número)."""
+    base = float(font_cm if font_cm is not None else get_cota_font_size_cm())
+    return max(0.12, base * float(COTA_SUFIJO_FONT_FACTOR))
+
+
+def armar_formatted_texto_cota(texto, font_cm=None, bold=True, vertical=False) -> str:
+    """
+    HTML Inventor: número a tamaño normal; ``TYP`` y ``mm``/``in`` ~15 % más chicos.
+
+    Usa StyleOverride **en secuencia** (no anidados): Inventor suele ignorar
+    el FontSize interior si va dentro de otro StyleOverride.
+    """
+    t = _SIMBOLOS_TEXTO.sub("", str(texto or "")).strip()
+    if not t:
+        return ""
+    font = float(font_cm if font_cm is not None else get_cota_font_size_cm())
+    font_suf = get_cota_sufijo_font_cm(font)
+    bold_s = "True" if bold else "False"
+    angle_attr = " Angle='90'" if vertical else ""
+
+    def _num(s: str) -> str:
+        return (
+            f"<StyleOverride FontSize='{font}' Bold='{bold_s}'{angle_attr}>"
+            f"{s}</StyleOverride>"
+        )
+
+    def _suf(s: str) -> str:
+        return (
+            f"<StyleOverride FontSize='{font_suf}' Bold='{bold_s}'{angle_attr}>"
+            f"{s}</StyleOverride>"
+        )
+
+    tokens = re.findall(
+        r"-?\d+(?:[.,]\d+)?|TYP|mm|in|[^\s]+",
+        t,
+        flags=re.IGNORECASE,
+    )
+    if not tokens:
+        return _num(t)
+
+    parts = []
+    for i, tok in enumerate(tokens):
+        sep = " " if i > 0 else ""
+        up = tok.upper()
+        if up == "TYP" or up in ("MM", "IN"):
+            out = "TYP" if up == "TYP" else tok.lower()
+            parts.append(_suf(f"{sep}{out}"))
+        else:
+            parts.append(_num(f"{sep}{tok}" if i > 0 else tok))
+    return "".join(parts)
+
+
 def _precision_dimension(dimension):
-    """Precision de dibujo: 3 decimales exactos."""
+    """Precision de dibujo: 2 decimales exactos."""
     return _precision_default()
 
 
 def _precision_default():
-    """3 decimales exactos (sin recortar)."""
-    return 3
+    """2 decimales exactos (sin recortar)."""
+    return 2
 
 
 def _strip_unidades(texto):
@@ -100,7 +178,7 @@ def texto_cota_limpio(valor, hoja=None, precision=None):
     Exacto desde DB Inventor (cm):
       mm = cm * 10
       in = cm / 2.54
-    3 decimales exactos.
+    2 decimales exactos.
     """
     try:
         valor = abs(float(valor))
@@ -246,12 +324,12 @@ def aplicar_estilo_cota(dimension, inv_app=None, hoja=None, solo_color=False):
 
     _limpiar_prefijos_cota(dimension)
 
-    # Forzar precision Inventor = 3
+    # Forzar precision Inventor = 2
     try:
         dimension.Precision = _precision_default()
     except Exception:
         try:
-            dimension.Precision = 3
+            dimension.Precision = 2
         except Exception:
             pass
 
@@ -261,10 +339,8 @@ def aplicar_estilo_cota(dimension, inv_app=None, hoja=None, solo_color=False):
         pass
 
     bold = "True" if COTA_BOLD else "False"
-    formatted = (
-        f"<StyleOverride FontSize='{COTA_FONT_SIZE_CM}' Bold='{bold}'>"
-        f"{texto}</StyleOverride>"
-    )
+    font_cm = get_cota_font_size_cm()
+    formatted = armar_formatted_texto_cota(texto, font_cm=font_cm, bold=COTA_BOLD)
 
     try:
         dimension.Text.FormattedText = formatted
@@ -313,10 +389,9 @@ def aplicar_estilo_texto_cota(text_obj, texto, inv_app, vertical=False):
         return
 
     bold = "True" if COTA_BOLD else "False"
-    angle_attr = " Angle='90'" if vertical else ""
-    formatted = (
-        f"<StyleOverride FontSize='{COTA_FONT_SIZE_CM}' Bold='{bold}'{angle_attr}>"
-        f"{texto}</StyleOverride>"
+    font_cm = get_cota_font_size_cm()
+    formatted = armar_formatted_texto_cota(
+        texto, font_cm=font_cm, bold=COTA_BOLD, vertical=vertical
     )
 
     try:
@@ -329,7 +404,7 @@ def aplicar_estilo_texto_cota(text_obj, texto, inv_app, vertical=False):
 
     try:
         text_obj.Style.Bold = COTA_BOLD
-        text_obj.Style.FontSize = COTA_FONT_SIZE_CM
+        text_obj.Style.FontSize = font_cm
     except Exception:
         pass
 
@@ -369,12 +444,14 @@ def clearance_texto_cota_cm(n_chars=8):
     """
     Separación mínima silueta → texto para que el número no monte la pieza.
 
-    Escala con ``COTA_FONT_SIZE_CM`` (negrita navy).
+    Escala con el tamaño de fuente activo (cobre más compacto).
     """
     n = max(4, int(n_chars or 8))
+    font = get_cota_font_size_cm()
+    offset = get_offset_fuera_pieza_cm()
     return max(
-        float(OFFSET_FUERA_PIEZA_CM),
-        float(COTA_FONT_SIZE_CM) * n * 0.55 + 1.15,
+        float(offset),
+        float(font) * n * 0.55 + (0.55 if es_modo_cobre_cota() else 1.15),
     )
 
 
@@ -479,8 +556,8 @@ def dim_solapa_pieza(dim, pieza_bbox, holgura=None, solo_texto=False, n_chars=10
         except Exception:
             o = dim.Text.Origin
             ox, oy = float(o.X), float(o.Y)
-            hw = float(COTA_FONT_SIZE_CM) * max(4, int(n_chars or 10)) * 0.38
-            hh = float(COTA_FONT_SIZE_CM) * 0.95
+            hw = float(get_cota_font_size_cm()) * max(4, int(n_chars or 10)) * 0.38
+            hh = float(get_cota_font_size_cm()) * 0.95
             tb = (ox - hw, ox + hw, oy - hh, oy + hh)
         if tb is not None and bbox_intersecta(pieza, tb, holgura=h):
             return True

@@ -1768,28 +1768,155 @@ def _crear_vistas_despliegue_corte(
                 cam = crear_camara(
                     part_doc, tg, to, cx, cy, cz, v_lado, v_frente
                 )
+                view = _crear_vista_base(
+                    new_sheet,
+                    part_doc,
+                    tg,
+                    to,
+                    px,
+                    py,
+                    cam,
+                    use_flat_pattern_view=True,
+                )
             else:
                 up_f = v_guia if tiene_guia else v_lado
-                cam = crear_camara(
-                    part_doc, tg, to, cx, cy, cz, v_frente, up_f
-                )
-            view = _crear_vista_base(
-                new_sheet,
-                part_doc,
-                tg,
-                to,
-                px,
-                py,
-                cam,
-                use_flat_pattern_view=True,
-            )
+                es_cobre_prev = False
+                try:
+                    from piezas_cobre import es_pieza_cobre
+
+                    es_cobre_prev = bool(es_pieza_cobre(part_name))
+                except Exception:
+                    es_cobre_prev = False
+                # Cobre: probar cámara normal y volteada (up/-up y frente/-frente)
+                # hasta lograr escuadra cartesiana (nada cuelga del origen IL).
+                intentos = [(v_frente, up_f, "norm")]
+                if es_cobre_prev:
+                    up_neg = tg.CreateVector(-up_f.X, -up_f.Y, -up_f.Z)
+                    vf_neg = tg.CreateVector(
+                        -v_frente.X, -v_frente.Y, -v_frente.Z
+                    )
+                    intentos = [
+                        (v_frente, up_f, "norm"),
+                        (v_frente, up_neg, "flip_up"),
+                        (vf_neg, up_f, "flip_eye"),
+                        (vf_neg, up_neg, "flip_both"),
+                    ]
+                best_view = None
+                best_esc = False
+                for eye_v, up_v, tag in intentos:
+                    # Limpiar vista previa del intento
+                    try:
+                        for vv in range(new_sheet.DrawingViews.Count, 0, -1):
+                            new_sheet.DrawingViews.Item(vv).Delete()
+                    except Exception:
+                        pass
+                    try:
+                        cam = crear_camara(
+                            part_doc, tg, to, cx, cy, cz, eye_v, up_v
+                        )
+                        cand = _crear_vista_base(
+                            new_sheet,
+                            part_doc,
+                            tg,
+                            to,
+                            px,
+                            py,
+                            cam,
+                            use_flat_pattern_view=True,
+                        )
+                    except Exception as ex_try:
+                        _log(
+                            f"  AVISO cam {tag} {part_name}: {ex_try}"
+                        )
+                        continue
+                    if cand is None:
+                        continue
+                    escalar_vista(
+                        machote_doc,
+                        cand,
+                        tg,
+                        px,
+                        py,
+                        ancho_util,
+                        alto_util,
+                        modo_cobre=es_cobre_prev,
+                    )
+                    if es_cobre_prev:
+                        try:
+                            from cobre_irregular import (
+                                aplicar_orientacion_cobre,
+                                _escuadra_cartesiana,
+                            )
+                            import time as _time_ori
+
+                            _time_ori.sleep(0.35)
+                            try:
+                                _ = int(cand.DrawingCurves.Count)
+                            except Exception:
+                                pass
+                            aplicar_orientacion_cobre(
+                                cand, part_name, tg, log=_log
+                            )
+                            escalar_vista(
+                                machote_doc,
+                                cand,
+                                tg,
+                                px,
+                                py,
+                                ancho_util,
+                                alto_util,
+                                modo_cobre=True,
+                            )
+                            esc_ok = bool(
+                                _escuadra_cartesiana(cand).get("ok")
+                            )
+                        except Exception as exc_ori:
+                            _log(
+                                f"  AVISO orient cobre {part_name}: {exc_ori}"
+                            )
+                            esc_ok = False
+                    else:
+                        esc_ok = True
+                    best_view = cand
+                    if esc_ok:
+                        if tag != "norm":
+                            _log(
+                                f"  cobre escuadra OK con cámara {tag}"
+                            )
+                        best_esc = True
+                        break
+                    _log(
+                        f"  cobre cámara {tag}: sin escuadra, probando otra…"
+                    )
+                view = best_view
+                if es_cobre_prev and view is not None and not best_esc:
+                    _log(
+                        f"  AVISO {part_name}: ninguna cámara logró "
+                        f"escuadra cartesiana (revisar geometría)"
+                    )
         except Exception as ex1:
             _log(f"⚠️ {part_name} DESPLIEGUE {sufijo}: {ex1}")
             continue
         if view is not None:
-            escalar_vista(
-                machote_doc, view, tg, px, py, ancho_util, alto_util
-            )
+            es_cobre = False
+            try:
+                from piezas_cobre import es_pieza_cobre
+
+                es_cobre = bool(es_pieza_cobre(part_name))
+            except Exception:
+                es_cobre = False
+            # LADO / no-cobre: escalar aquí (cobre FRENTE ya escaló en el loop)
+            if is_side or not es_cobre:
+                escalar_vista(
+                    machote_doc,
+                    view,
+                    tg,
+                    px,
+                    py,
+                    ancho_util,
+                    alto_util,
+                    modo_cobre=es_cobre,
+                )
 
 
 def _crear_vista_estanado_iso(
@@ -1841,25 +1968,16 @@ def _crear_vista_estanado_iso(
     _log(f"  {part_name}: hoja ESTANIADO isométrica (cara mayor)")
 
 
-def escalar_vista(doc, view, tg, px, py, ancho_util=None, alto_util=None):
+def escalar_vista(doc, view, tg, px, py, ancho_util=None, alto_util=None, modo_cobre=False):
     """
     Escala y centra la vista de forma que la PIEZA + espacio para cotas
-    quede DENTRO del sheet físico. La regla es:
+    quede DENTRO del sheet físico.
 
-    - Reserva 2.5 cm de espacio para cotas por cada lado (número + flecha
-      + margen al borde caben siempre).
-    - La pieza sola no puede ocupar más del 55 % del área útil.
-    - Se elige la escala discreta MÁS GRANDE cuyo bbox de vista + reserva
-      de cotas cabe dentro del área útil.
-    - VERIFICACIÓN POST-ESCALA: después de aplicar escala y posición,
-      leemos ``view.Left``/``view.Top``/``view.Width``/``view.Height`` y
-      confirmamos que el rectángulo real de la vista está DENTRO del sheet
-      físico. Si no lo está (por asimetría del bbox 2D o errores de
-      redondeo), bajamos a la siguiente escala y reintentamos.
-
-    Con esto se garantiza que:
-    1. La pieza nunca se sale del sheet, aunque su bbox 2D esté descentrado.
-    2. Las cotas nunca se pierden en el borde.
+    - ``modo_cobre=True``: la escala la define el **tamaño real** de la
+      pieza (llena ~78–85 % del área útil con reserva justa de cota).
+      Piezas largas → escala menor; piezas chicas → escala mayor.
+      Mejora resolución percibida sin fijar 1/4 a ciegas.
+    - Resto: escala discreta más grande que quepa (comportamiento clásico).
     """
     try:
         doc.Update()
@@ -1878,14 +1996,18 @@ def escalar_vista(doc, view, tg, px, py, ancho_util=None, alto_util=None):
         if alto_util is None or alto_util <= 0:
             alto_util = 20.0
 
-        # Reserva para cotas (cm) por cada lado.
-        reserva_cotas = 2.5
+        if modo_cobre:
+            # Escala por tamaño: reserva justa + alto fill del útil.
+            reserva_cotas = 1.8
+            fill = 0.82
+        else:
+            reserva_cotas = 3.5
+            fill = 0.60
+
         max_ancho_pieza = max(1e-3, ancho_util - 2.0 * reserva_cotas)
         max_alto_pieza = max(1e-3, alto_util - 2.0 * reserva_cotas)
-
-        # La pieza sola nunca puede pasar del 55 % del área útil.
-        max_ancho_pieza = min(max_ancho_pieza, ancho_util * 0.55)
-        max_alto_pieza = min(max_alto_pieza, alto_util * 0.55)
+        max_ancho_pieza = min(max_ancho_pieza, ancho_util * fill)
+        max_alto_pieza = min(max_alto_pieza, alto_util * fill)
 
         escalas = [
             5.0, 4.0, 3.0, 2.0, 1.5, 1.0, 0.75, 0.5,
@@ -1894,12 +2016,17 @@ def escalar_vista(doc, view, tg, px, py, ancho_util=None, alto_util=None):
             0.004, 0.003, 0.002, 0.0015, 0.001,
         ]
 
-        # Índice inicial: primera escala cuyo bbox teórico cabe.
+        def _cabe(e_val: float) -> bool:
+            return (
+                real_w * e_val <= max_ancho_pieza
+                and real_h * e_val <= max_alto_pieza
+            )
+
+        # Escala = f(tamaño pieza): la mayor discreta que cabe en el útil.
+        # real_w/real_h ya vienen del modelo → piezas grandes bajan escala.
         indice_inicial = len(escalas) - 1
         for idx, e_val in enumerate(escalas):
-            w_esc = real_w * e_val
-            h_esc = real_h * e_val
-            if w_esc <= max_ancho_pieza and h_esc <= max_alto_pieza:
+            if _cabe(e_val):
                 indice_inicial = idx
                 break
 
@@ -1940,9 +2067,8 @@ def escalar_vista(doc, view, tg, px, py, ancho_util=None, alto_util=None):
             right = left + width
             bottom = top - height
 
-            # Margen mínimo al borde del sheet: 1.5 cm (para que la cota
-            # tenga espacio de dibujarse sin salirse).
-            margen = 1.5
+            # Margen al borde: cobre más justo (cota cabe en reserva_cotas).
+            margen = 1.5 if modo_cobre else 2.0
             fits = (
                 left >= margen
                 and right <= sheet_w - margen

@@ -1074,6 +1074,20 @@ def acotar_planos(nombres_permitidos=None, reset_diametro=True):
     except Exception as e:
         print(f"AVISO: barrenos X/Y despliegue fallo: {e}")
 
+    # Cobre irregular (zapato): WIDTH por tramo pad/brazo
+    try:
+        from cobre_irregular import acotar_widths_tramos_irregular
+
+        print("\nWIDTH tramos cobre irregular (si aplica)...")
+        w_extra = acotar_widths_tramos_irregular(None)
+        if w_extra:
+            hojas_extra_barrenos.extend(w_extra)
+            print(f"  -> {len(w_extra)} hojas WIDTH tramo")
+        else:
+            print("  -> 0 (sin escalón o no cobre irregular)")
+    except Exception as e:
+        print(f"AVISO: WIDTH irregular fallo: {e}")
+
     # Ø: una hoja por cada tamaño distinto (circulo 11 + oval 13 = 2 hojas).
     try:
         frentes_diam = []

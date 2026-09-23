@@ -114,17 +114,38 @@ def _bbox_pieza_vista(vista):
 
 def _punto_texto_barreno(hoja, tg, vista, cx, cy, tam):
     """
-    Origen de texto para Ø/barreno: siempre fuera de la silueta de la pieza,
-    con holgura generosa (visión).
+    Origen de texto para Ø/barreno: fuera de la silueta, CERCA del barreno.
+
+    En piezas alargadas (busbar) NO se empuja al extremo izq/der del bbox
+    completo: eso alarga el líder a todo el largo y el JPG queda
+    "letterbox". Preferimos arriba/abajo del agujero con holgura justa.
     """
     pieza_bb = _bbox_pieza_vista(vista)
-    clr = clearance_texto_cota_cm(10) + max(1.0, float(tam) * 0.45)
+    # Holgura justa (~6 chars: "11.11 mm"); evita el salto enorme a borde sheet.
+    clr = clearance_texto_cota_cm(6) + max(0.35, float(tam) * 0.25)
     if pieza_bb is None:
         return _clampear_punto_hoja(
-            hoja, tg, float(cx) + clr, float(cy) + clr, margen=1.2
+            hoja, tg, float(cx) + clr, float(cy) + clr, margen=1.0
         )
-    # Preferir el lado del sheet con más aire respecto al centro del barreno.
     minx, maxx, miny, maxy = pieza_bb
+    ancho = max(1e-6, maxx - minx)
+    alto = max(1e-6, maxy - miny)
+    try:
+        sheet_h = float(hoja.Height)
+        aire_sup = sheet_h - maxy
+        aire_inf = miny
+    except Exception:
+        aire_sup = aire_inf = 1.0
+
+    # Busbar / pieza larga: texto arriba o abajo del propio barreno.
+    if ancho > 2.0 * alto:
+        lado = "sup" if aire_sup >= aire_inf else "inf"
+        x, y = empujar_punto_fuera_bbox(cx, cy, pieza_bb, lado, clr)
+        return _clampear_punto_hoja(
+            hoja, tg, x, y, margen=1.0, evitar_bbox=pieza_bb
+        )
+
+    # Pieza compacta: lado del sheet con más aire (comportamiento previo).
     try:
         sheet_w = float(hoja.Width)
         sheet_h = float(hoja.Height)
@@ -139,17 +160,17 @@ def _punto_texto_barreno(hoja, tg, vista, cx, cy, tam):
         lado = "der"
     x, y = empujar_punto_fuera_bbox(cx, cy, pieza_bb, lado, clr)
     return _clampear_punto_hoja(
-        hoja, tg, x, y, margen=1.2, evitar_bbox=pieza_bb
+        hoja, tg, x, y, margen=1.0, evitar_bbox=pieza_bb
     )
 
 
 def _aplicar_estilo_y_fuera_pieza(dim, hoja, tg, vista):
-    """Estilo navy + forzar texto fuera de la silueta."""
+    """Estilo navy + forzar texto fuera de la silueta (cerca, sin alargar)."""
     aplicar_estilo_cota(dim, hoja=hoja)
     pieza_bb = _bbox_pieza_vista(vista)
     if pieza_bb is not None:
         ok = asegurar_cota_fuera_pieza_robusto(
-            dim, tg, pieza_bb, holgura=0.6, n_chars=12
+            dim, tg, pieza_bb, holgura=0.45, n_chars=8
         )
         if not ok:
             print(
@@ -1138,7 +1159,8 @@ def acotar_barrenos_placas(nombres_frente_ok=None):
                 try:
                     from cota_estilo import (
                         texto_cota_dibujo,
-                        COTA_FONT_SIZE_CM,
+                        get_cota_font_size_cm,
+                        armar_formatted_texto_cota,
                         COTA_BOLD,
                     )
 
@@ -1156,10 +1178,10 @@ def acotar_barrenos_placas(nombres_frente_ok=None):
                             txt = f"{txt} TYP"
                     if txt:
                         dim.HideValue = True
-                        bold = "True" if COTA_BOLD else "False"
-                        dim.Text.FormattedText = (
-                            f"<StyleOverride FontSize='{COTA_FONT_SIZE_CM}' "
-                            f"Bold='{bold}'>{txt}</StyleOverride>"
+                        dim.Text.FormattedText = armar_formatted_texto_cota(
+                            txt,
+                            font_cm=get_cota_font_size_cm(),
+                            bold=COTA_BOLD,
                         )
                 except Exception:
                     pass

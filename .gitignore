@@ -29,6 +29,11 @@ Planos/ilogic/config_planos.txt
 
 # Runtime inter-módulos (antes C:\Temp)
 Planos/.runtime/
+.runtime/
+
+# Dumps/caches de red o máquina (no replicables)
+Planos/192.168.2.80/
+Planos/JPG/*.zip
 
 # Logs de corridas locales (rutas/máquina específicas)
 Planos/error_log.txt

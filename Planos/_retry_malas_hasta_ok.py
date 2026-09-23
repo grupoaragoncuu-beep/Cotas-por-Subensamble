@@ -5,7 +5,7 @@ Reintenta piezas malas/faltantes hasta que el dossier tenga XY+THK a 6 dec.
   1) Flujo flat solo para faltantes
   2) Auditoría COM + reparación XY/THK
   3) Export JPG
-  4) Publicar SOLO OK con 3 decimales
+  4) Publicar SOLO OK con 2 decimales
   5) Repetir hasta 100% o MAX_PASADAS
 """
 from __future__ import annotations

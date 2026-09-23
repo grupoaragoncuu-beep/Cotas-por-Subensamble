@@ -2,15 +2,16 @@
 """
 Detección de piezas de COBRE / busbar (gabinetes GIGA).
 
-Regla de producto (GIGA): solo piezas del catálogo de nesting AutoDXF
-(``cobre_nesting_giga.txt`` = lista exacta de DXF en carpetas ``*COBRE*``).
+Fuente oficial del catálogo ``cobre_nesting_giga.txt``:
+**todas las carpetas AutoDXF** bajo GIGA (y ``GIGA BOARD * - COBRE``),
+regeneradas con ``.runtime/_rebuild_cobre_nesting_giga.py``.
 
-Eso limita el flujo especial busbar (borde XY, HOLE, SIN_COTA, ESTANIADO,
-carpeta ``Corte Busbar``) a ~175 tipos reales de nesting — no a todo
-``ABB*`` / ``GENE*`` / ``RLG*``.
+En Inventor el material suele figurar como acero hasta que lo cambian a
+cobre después; **no** usar material Inventor para clasificar cobre.
+La verdad es el nesting AutoDXF (nombres ``*, Cobre, QTY…``).
 
-El resto de piezas en BOARD = corte normal (dims generales) **sin**
-acotar barrenos ni procesamiento busbar.
+Eso limita el flujo busbar (XY/HOLE/SIN_COTA/ESTANIADO / Corte Busbar)
+a piezas con DXF de cobre real. El resto en BOARD = corte normal.
 """
 
 from __future__ import annotations

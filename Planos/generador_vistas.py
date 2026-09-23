@@ -452,7 +452,21 @@ def _convertir_nombre_tecnico_hoja(
             "on",
         )
         if not solo_flat:
-            base = base.replace("_DESPLIEGUE_FRENTE_2", "_DESPLIEGUE_ANCHO")
+            # Cobre irregular: FRENTE_2 global → WIDTH_TOTAL (env set by cobre_irregular)
+            if os.environ.get("COTAS_WIDTH_TOTAL", "").strip().lower() in (
+                "1",
+                "true",
+                "yes",
+                "si",
+                "on",
+            ):
+                base = base.replace(
+                    "_DESPLIEGUE_FRENTE_2", "_DESPLIEGUE_WIDTH_TOTAL"
+                )
+                if "_DESPLIEGUE_ANCHO" in base and "_WIDTH_TOTAL" not in base.upper():
+                    base = base.replace("_DESPLIEGUE_ANCHO", "_DESPLIEGUE_WIDTH_TOTAL")
+            else:
+                base = base.replace("_DESPLIEGUE_FRENTE_2", "_DESPLIEGUE_ANCHO")
 
     elif "_ESTANIADO" in base_up:
         pass  # captura SIN_COTA isométrica; no renombrar
@@ -913,10 +927,15 @@ def _obtener_bbox_pieza(hoja):
 
 def _obtener_bbox_cotas(hoja):
     """
-    Bbox de las cotas dibujadas en la hoja. Incluye tanto ``RangeBox`` como
-    la ``Text.Origin`` cuando esté disponible, porque en algunos casos el
-    ``RangeBox`` no cubre el texto del número (queda parcialmente fuera del
-    bbox reportado y la cota se pierde al recortar el JPG).
+    Bbox de cotas + nomenclatura en la hoja.
+
+    Incluye:
+    - ``GeneralDimensions`` (RangeBox + Text.Origin con margen amplio)
+    - TextBoxes de sketches (cotas XY barrenos / motor subensamble)
+    - Geometry de sketches de cota (líneas de extensión / cota)
+    - ``GeneralNotes`` visibles (por si el valor quedó como nota)
+
+    El padding del texto cubre nomenclatura larga (``64.29 TYP mm``).
     """
     bbox = None
     try:
@@ -940,18 +959,114 @@ def _obtener_bbox_cotas(hoja):
         except Exception:
             pass
 
-        # Incluir la posición del texto por seguridad: RangeBox a veces
-        # reporta sólo la línea de cota sin el número.
+        # Incluir la posición del texto: RangeBox a veces reporta sólo la
+        # línea de cota sin el número + sufijo TYP/unidad (~3–4 cm).
         try:
             texto = dim.Text
             origen = texto.Origin
             tx = float(origen.X)
             ty = float(origen.Y)
-            # Añadimos un padding pequeño alrededor del punto del texto para
-            # cubrir el ancho aproximado del número (~1.2 cm).
-            bbox = _expandir_bbox(bbox, tx - 0.6, tx + 0.6, ty - 0.4, ty + 0.4)
+            bbox = _expandir_bbox(bbox, tx - 1.4, tx + 1.4, ty - 0.6, ty + 0.6)
         except Exception:
             pass
+
+    # Sketches de cotas (barrenos XY / tramos WIDTH): TextBoxes + líneas.
+    sketches = None
+    try:
+        sketches = hoja.Sketches
+    except Exception:
+        pass
+    if sketches is None:
+        try:
+            sketches = hoja.DrawingSketches
+        except Exception:
+            sketches = None
+    if sketches is not None:
+        try:
+            n_sk = int(sketches.Count)
+        except Exception:
+            n_sk = 0
+        for i in range(1, n_sk + 1):
+            try:
+                sk = sketches.Item(i)
+            except Exception:
+                continue
+            # TextBoxes (nomenclatura dibujada)
+            try:
+                boxes = sk.TextBoxes
+                for j in range(1, int(boxes.Count) + 1):
+                    try:
+                        tb = boxes.Item(j)
+                        # Origen del texto
+                        try:
+                            o = tb.Origin
+                            tx = float(o.X)
+                            ty = float(o.Y)
+                        except Exception:
+                            try:
+                                o = tb.Position
+                                tx = float(o.X)
+                                ty = float(o.Y)
+                            except Exception:
+                                continue
+                        # Ancho/alto aproximados del literal (TYP + unidad)
+                        half_w = 1.4
+                        half_h = 0.55
+                        try:
+                            raw = str(tb.Text or "")
+                            # ~0.18 cm por carácter a tamaño de cota típico
+                            half_w = max(1.2, 0.09 * max(6, len(raw)))
+                        except Exception:
+                            pass
+                        bbox = _expandir_bbox(
+                            bbox, tx - half_w, tx + half_w, ty - half_h, ty + half_h
+                        )
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+            # RangeBox del sketch completo (líneas de cota + extensiones)
+            try:
+                rb = sk.RangeBox
+                bbox = _expandir_bbox(
+                    bbox,
+                    float(rb.MinPoint.X),
+                    float(rb.MaxPoint.X),
+                    float(rb.MinPoint.Y),
+                    float(rb.MaxPoint.Y),
+                )
+            except Exception:
+                pass
+
+    # Notas visibles de nomenclatura (NO metadata XY=/CUT=/THK= en esquina).
+    try:
+        notes = hoja.DrawingNotes.GeneralNotes
+        for i in range(1, int(notes.Count) + 1):
+            try:
+                nota = notes.Item(i)
+                try:
+                    if hasattr(nota, "Visible") and not bool(nota.Visible):
+                        continue
+                except Exception:
+                    pass
+                try:
+                    txt = str(nota.Text or "").strip().upper()
+                except Exception:
+                    txt = ""
+                # Notas de valor para el nombre de archivo: viven en (0.4,0.4)
+                # y NO deben entrar al encuadre (inflan el JPG con vacío).
+                if txt.startswith(("XY=", "CUT=", "THK=", "THK ")):
+                    continue
+                if not any(ch.isdigit() for ch in txt):
+                    continue
+                pos = nota.Position
+                tx = float(pos.X)
+                ty = float(pos.Y)
+                bbox = _expandir_bbox(bbox, tx - 1.2, tx + 1.2, ty - 0.5, ty + 0.5)
+            except Exception:
+                continue
+    except Exception:
+        pass
 
     return bbox
 
@@ -980,58 +1095,50 @@ def _bbox_recorte_ideal(hoja):
     blanco en ``_recortar_exportacion_jpg``.
 
     Reglas del bbox ideal:
-    - Centrado en el centro geométrico de la pieza.
-    - Incluye todas las cotas dibujadas (con margen extra por seguridad).
-    - Padding generoso alrededor: 25 % del tamaño de la pieza, mínimo 2.5 cm.
-    - Padding EXTRA cuando NO se detectan cotas en la hoja (la cota puede
-      no haberse creado, o `_obtener_bbox_cotas` no la detectó): en ese
-      caso se añaden 4 cm adicionales por lado para no perder una cota que
-      Inventor sí dibujó pero que este código no llegó a ver.
-    - NO se fuerza aspect ratio: antes se comprimía a [0.55, 1.80] y eso
-      era el origen del "corta las cotas"; ahora respetamos el ratio real
-      del contenido y compensamos con padding blanco en el paso siguiente.
+    - Contiene la unión pieza ∪ cotas/nomenclatura (sin espejar vacío).
+      Antes se centraba en la pieza con radio simétrico: si la cota quedaba
+      a la derecha, el JPG ganaba el mismo vacío a la izquierda y salía
+      "demasiado largo" en horizontal (p. ej. HOLE en busbars).
+    - Padding justo: ~8 % del contenido, piso 1.0 cm, techo 2.0 cm.
+    - Si no hay cotas detectadas, +1.5 cm extra por lado (no 4 cm).
+    - NO se fuerza aspect ratio.
     """
     bbox_pieza = _obtener_bbox_pieza(hoja)
     if bbox_pieza is None:
         return None
     minx_p, maxx_p, miny_p, maxy_p = bbox_pieza
-    cx = (minx_p + maxx_p) / 2.0
-    cy = (miny_p + maxy_p) / 2.0
     ancho_pieza = max(1e-6, maxx_p - minx_p)
     alto_pieza = max(1e-6, maxy_p - miny_p)
 
     bbox_cotas = _obtener_bbox_cotas(hoja)
 
-    # Radios desde el centro de la pieza hasta cubrir todo el contenido
-    # visible (pieza + cotas).
-    dx_max = max(cx - minx_p, maxx_p - cx)
-    dy_max = max(cy - miny_p, maxy_p - cy)
-
+    # Unión contenido real (pieza + cotas). Sin simetría forzada.
+    minx = minx_p
+    maxx = maxx_p
+    miny = miny_p
+    maxy = maxy_p
     if bbox_cotas is not None:
         minx_c, maxx_c, miny_c, maxy_c = bbox_cotas
-        dx_max = max(dx_max, cx - minx_c, maxx_c - cx)
-        dy_max = max(dy_max, cy - miny_c, maxy_c - cy)
+        minx = min(minx, minx_c)
+        maxx = max(maxx, maxx_c)
+        miny = min(miny, miny_c)
+        maxy = max(maxy, maxy_c)
 
-    # Padding generoso: nunca menos de 2.5 cm por lado.
-    pad_x = max(2.5, ancho_pieza * 0.25)
-    pad_y = max(2.5, alto_pieza * 0.25)
+    ancho = max(1e-6, maxx - minx)
+    alto = max(1e-6, maxy - miny)
 
-    # Si no detectamos cotas en la hoja, damos padding EXTRA por si Inventor
-    # dibujó algo que _obtener_bbox_cotas no llegó a ver (cotas de tipos
-    # exóticos, notas, etc.). Mejor sobre-incluir que perder cotas.
+    # Margen suficiente, sin exagerar. Cap duro evita letterbox en busbars.
+    pad_x = min(2.0, max(1.0, ancho * 0.08))
+    pad_y = min(2.0, max(1.0, alto * 0.10))
+    # Piezas muy planas: un poco más de aire vertical para la cota debajo.
+    if ancho_pieza > 2.5 * alto_pieza:
+        pad_y = min(2.5, max(pad_y, 1.4))
+
     if bbox_cotas is None:
-        pad_x += 4.0
-        pad_y += 4.0
+        pad_x += 1.5
+        pad_y += 1.5
 
-    dx_max += pad_x
-    dy_max += pad_y
-
-    minx = cx - dx_max
-    maxx = cx + dx_max
-    miny = cy - dy_max
-    maxy = cy + dy_max
-
-    return (minx, maxx, miny, maxy)
+    return (minx - pad_x, maxx + pad_x, miny - pad_y, maxy + pad_y)
 
 
 # Alias público de compatibilidad para llamadores que usaran el nombre viejo.
@@ -1097,6 +1204,39 @@ def _blanquear_fondo(img, umbral=180):
     return Image.composite(blanco, rgb, mascara)
 
 
+def _recortar_whitespace_contenido(img, margen_frac=0.025, margen_min_px=12, margen_max_px=36, umbral=245):
+    """
+    Recorte final al contenido no-blanco (+ margen justo).
+
+    El bbox API de Inventor a veces infla el JPG (sketches, líderes,
+    simetría). Este paso garantiza zoom ajustado: pieza + cota + texto
+    con aire suficiente, sin letterbox exagerado.
+    """
+    rgb = img.convert("RGB")
+    w, h = rgb.size
+    if w < 8 or h < 8:
+        return rgb
+    gris = rgb.convert("L")
+    # Píxeles de dibujo = gris por debajo del umbral (casi blanco).
+    mask = gris.point(lambda p: 255 if p < umbral else 0, mode="L")
+    bbox = mask.getbbox()
+    if not bbox:
+        return rgb
+    left, upper, right, lower = bbox
+    cw = max(1, right - left)
+    ch = max(1, lower - upper)
+    # Margen proporcional al contenido, con piso/techo en px.
+    mx = int(round(min(margen_max_px, max(margen_min_px, cw * margen_frac))))
+    my = int(round(min(margen_max_px, max(margen_min_px, ch * margen_frac))))
+    left = max(0, left - mx)
+    upper = max(0, upper - my)
+    right = min(w, right + mx)
+    lower = min(h, lower + my)
+    if right - left < 4 or lower - upper < 4:
+        return rgb
+    return rgb.crop((left, upper, right, lower))
+
+
 def _recortar_exportacion_jpg(hoja, ruta_temporal, ruta_final):
     """
     Recorta el JPG exportado dejando la pieza CENTRADA en la imagen final,
@@ -1119,9 +1259,8 @@ def _recortar_exportacion_jpg(hoja, ruta_temporal, ruta_final):
     if not bbox_ideal:
         try:
             img_tmp = Image.open(ruta_temporal)
-            _blanquear_fondo(img_tmp).save(
-                ruta_final, quality=95, subsampling=0
-            )
+            out = _recortar_whitespace_contenido(_blanquear_fondo(img_tmp))
+            out.save(ruta_final, quality=95, subsampling=0)
             img_tmp.close()
             try:
                 os.remove(ruta_temporal)
@@ -1159,7 +1298,8 @@ def _recortar_exportacion_jpg(hoja, ruta_temporal, ruta_final):
     cobertura_x = ancho_ideal_cm / sheet_w
     cobertura_y = alto_ideal_cm / sheet_h
     if cobertura_x >= 0.85 and cobertura_y >= 0.85:
-        img.save(ruta_final, quality=95, subsampling=0)
+        out = _recortar_whitespace_contenido(img)
+        out.save(ruta_final, quality=95, subsampling=0)
         img.close()
         try:
             os.remove(ruta_temporal)
@@ -1213,6 +1353,8 @@ def _recortar_exportacion_jpg(hoja, ruta_temporal, ruta_final):
 
     canvas = Image.new("RGB", (canvas_w, canvas_h), (255, 255, 255))
     canvas.paste(recorte, (offset_x, offset_y))
+    # Zoom final: quitar blanco sobrante (API bbox a veces infla).
+    canvas = _recortar_whitespace_contenido(canvas)
     canvas.save(ruta_final, quality=95, subsampling=0)
 
     try:
@@ -1437,6 +1579,20 @@ def _leer_valor_cota_hoja(hoja):
     return None
 
 
+def _parse_valor_numerico_captura(valor) -> float | None:
+    """Extrae float de '19.844' / '19.844mm' / 'XY=19.844 mm'."""
+    if valor is None:
+        return None
+    s = str(valor).strip().replace(",", ".")
+    m = re.search(r"-?\d+(?:\.\d+)?", s)
+    if not m:
+        return None
+    try:
+        return float(m.group(0))
+    except ValueError:
+        return None
+
+
 def _hoja_exportable(hoja, nombre_hoja):
     """
     Gate anti-JPG vacío / solo-nota.
@@ -1539,34 +1695,33 @@ def _hoja_exportable(hoja, nombre_hoja):
     )
     if es_cota and not _hoja_tiene_cota_asociativa(hoja):
         if "_THK" in nombre_up and _hoja_tiene_nota_thk(hoja):
-            valor = _leer_valor_cota_hoja(hoja)
-            try:
-                v = float(str(valor).replace(",", "."))
-            except Exception:
-                v = None
+            v = _parse_valor_numerico_captura(_leer_valor_cota_hoja(hoja))
             # Sin cota asociativa, rechazar notas tipo ALTO de perfil U.
             if v is not None and v >= 0.5:
                 return False, "nota THK sospechosa (>=0.5 in sin cota asociativa)"
             return True, ""
         # Ø sólido / varilla: a veces solo queda nota Ø / DIAMETRO=…
         if "_DIAMETRO" in nombre_up:
-            valor = _leer_valor_cota_hoja(hoja)
-            try:
-                v = float(str(valor).replace(",", "."))
-            except Exception:
-                v = None
+            v = _parse_valor_numerico_captura(_leer_valor_cota_hoja(hoja))
             if v is not None and v > 0:
                 return True, ""
-        # XMIN/YMIN/CUT_* dibujados por sketch + nota XY=/CUT_=
+        # XMIN/YMIN/CUT_* / ANCHO tramo: sketch + nota XY=/CUT_=
         if any(
             t in nombre_up
-            for t in ("_XMIN", "_YMIN", "_XCENTRO", "_YCENTRO", "_CUT_LENGTH", "_CUT_WIDTH")
+            for t in (
+                "_XMIN",
+                "_YMIN",
+                "_XMAX",
+                "_YMAX",
+                "_XCENTRO",
+                "_YCENTRO",
+                "_CUT_LENGTH",
+                "_CUT_WIDTH",
+                "_ANCHO",
+                "_WIDTH",
+            )
         ):
-            valor = _leer_valor_cota_hoja(hoja)
-            try:
-                v = float(str(valor).replace(",", "."))
-            except Exception:
-                v = None
+            v = _parse_valor_numerico_captura(_leer_valor_cota_hoja(hoja))
             if v is not None and v > 0:
                 return True, ""
         return False, "sin GeneralDimension (posible solo-nota)"
