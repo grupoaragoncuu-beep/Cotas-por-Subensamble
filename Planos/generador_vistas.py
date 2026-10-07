@@ -667,8 +667,14 @@ _SUFIJOS_JPG_PIEZA_EXPORTADA = (
     "YCENTRO",
     "XMIN_TYP",
     "YMIN_TYP",
+    "XMAX_TYP",
+    "YMAX_TYP",
     "XMIN",
     "YMIN",
+    "XMAX",
+    "YMAX",
+    "CUT_LENGTH_TYP",
+    "CUT_WIDTH_TYP",
     "CUT_LENGTH",
     "CUT_WIDTH",
     r"HOLE\d{2}",
@@ -684,13 +690,15 @@ _SUFIJOS_JPG_PIEZA_EXPORTADA = (
     "LADO",
 )
 _RE_JPG_PIEZA = re.compile(
-    r"^(?P<pieza>.+?)_(?:" + "|".join(_SUFIJOS_JPG_PIEZA_EXPORTADA) + r")(?:_\d+(?:\.\d+)?)?$",
+    r"^(?P<pieza>.+?)_(?:"
+    + "|".join(_SUFIJOS_JPG_PIEZA_EXPORTADA)
+    + r")(?:_\d+(?:\.\d+)?)?(?:mm|in)?$",
     re.IGNORECASE,
 )
 _RE_JPG_PIEZA_JOB = re.compile(
     r"^.+?__(?P<pieza>.+?)__(?:"
     + "|".join(_SUFIJOS_JPG_PIEZA_EXPORTADA)
-    + r")_\d+(?:\.\d+)?$",
+    + r")_\d+(?:\.\d+)?(?:mm|in)?$",
     re.IGNORECASE,
 )
 
@@ -1063,6 +1071,23 @@ def _obtener_bbox_cotas(hoja):
                 tx = float(pos.X)
                 ty = float(pos.Y)
                 bbox = _expandir_bbox(bbox, tx - 1.2, tx + 1.2, ty - 0.5, ty + 0.5)
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    try:
+        simbolos = hoja.SketchedSymbols
+        for i in range(1, int(simbolos.Count) + 1):
+            try:
+                caja = simbolos.Item(i).RangeBox
+                bbox = _expandir_bbox(
+                    bbox,
+                    float(caja.MinPoint.X),
+                    float(caja.MaxPoint.X),
+                    float(caja.MinPoint.Y),
+                    float(caja.MaxPoint.Y),
+                )
             except Exception:
                 continue
     except Exception:
@@ -1474,6 +1499,8 @@ def _leer_valor_cota_hoja(hoja):
         return str(texto_o_num).strip() or None
 
     # 1) Dimensiones asociativas: tomar la de mayor ModelValue (cota principal).
+    # Si HideValue (texto forzado a Sheet Metal Thickness), preferir el texto
+    # visible para el nombre JPG — no el ModelValue del gap/feature.
     mejor_cm = None
     mejor_txt = None
     try:
@@ -1484,20 +1511,40 @@ def _leer_valor_cota_hoja(hoja):
                 mv = abs(float(dim.ModelValue))
             except Exception:
                 mv = None
+            hide = False
+            try:
+                hide = bool(dim.HideValue)
+            except Exception:
+                hide = False
             txt = None
-            if mv is not None and texto_cota_limpio is not None:
+            try:
+                txt = str(dim.Text.Text or "").strip()
+            except Exception:
                 try:
-                    txt = texto_cota_limpio(mv, hoja)
+                    raw = str(getattr(dim.Text, "FormattedText", "") or "")
+                    # Quitar tags StyleOverride si vienen formateados.
+                    if "<" in raw and ">" in raw:
+                        import re as _re
+
+                        txt = _re.sub(r"<[^>]+>", "", raw).strip()
+                    else:
+                        txt = raw.strip()
                 except Exception:
                     txt = None
-            if not txt:
+            if hide and txt:
+                # Override tipográfico (Plan A / align a chapa).
+                mejor_cm = mv if mv is not None else mejor_cm
+                mejor_txt = txt
+                break
+            if (
+                not hide
+                and mv is not None
+                and texto_cota_limpio is not None
+            ):
                 try:
-                    txt = str(dim.Text.Text or "").strip()
+                    txt = texto_cota_limpio(mv, hoja) or txt
                 except Exception:
-                    try:
-                        txt = str(getattr(dim.Text, "FormattedText", "") or "")
-                    except Exception:
-                        txt = None
+                    pass
             if mv is not None and (mejor_cm is None or mv > mejor_cm):
                 mejor_cm = mv
                 mejor_txt = txt or mv
@@ -1695,11 +1742,9 @@ def _hoja_exportable(hoja, nombre_hoja):
     )
     if es_cota and not _hoja_tiene_cota_asociativa(hoja):
         if "_THK" in nombre_up and _hoja_tiene_nota_thk(hoja):
-            v = _parse_valor_numerico_captura(_leer_valor_cota_hoja(hoja))
-            # Sin cota asociativa, rechazar notas tipo ALTO de perfil U.
-            if v is not None and v >= 0.5:
-                return False, "nota THK sospechosa (>=0.5 in sin cota asociativa)"
-            return True, ""
+            # THK NUNCA se exporta solo con nota tipográfica: debe haber
+            # GeneralDimension (flechas). Nota suelta = captura inválida.
+            return False, "THK sin cota asociativa (solo nota)"
         # Ø sólido / varilla: a veces solo queda nota Ø / DIAMETRO=…
         if "_DIAMETRO" in nombre_up:
             v = _parse_valor_numerico_captura(_leer_valor_cota_hoja(hoja))
@@ -2070,11 +2115,44 @@ def exportar_hojas_jpg(
 
         # Si la pieza ya tiene flat, no publicar dims del sólido doblado
         # (LENGTH/WIDTH/THK de pata). El flat lleva L/W/THK + barrenos/cortes.
+        # EXCEPCIONES (sí se exportan aunque haya DESPLIEGUE):
+        #   - ESTANIADO → isométrica SIN_COTA (Estañado Busbar)
+        #   - ALTO / LARGO_PATA → HEIGHT / LEG (Doblado/Busbar)
         try:
             _src_up = str(nombre_hoja_actual_visible).upper()
             _dst_up = str(nombre_hoja).upper()
             _es_flat_sheet = "_DESPLIEGUE_" in _src_up or "_DESPLIEGUE_" in _dst_up
-            if not _es_flat_sheet and piezas_con_despliegue:
+            _es_estanado_sheet = (
+                "_ESTANIADO" in _src_up or "_ESTANIADO" in _dst_up
+            )
+            _es_doblado_hl = any(
+                s in _src_up or s in _dst_up
+                for s in ("_ALTO", "_LARGO_PATA", "_HEIGHT", "_LEG", "_WING")
+            )
+            # THK del LADO doblado (no flat): permitido con SOLO_THK_DOBLADO.
+            _solo_thk_dob = os.environ.get("SOLO_THK_DOBLADO", "").strip().lower() in (
+                "1",
+                "true",
+                "yes",
+                "si",
+                "on",
+            )
+            _es_thk_doblado = _solo_thk_dob and (
+                "_THK" in _src_up
+                or "_THK" in _dst_up
+                or (
+                    "_LADO" in _src_up
+                    and "_DESPLIEGUE_" not in _src_up
+                    and "_DESPLIEGUE_" not in _dst_up
+                )
+            )
+            if (
+                not _es_flat_sheet
+                and not _es_estanado_sheet
+                and not _es_doblado_hl
+                and not _es_thk_doblado
+                and piezas_con_despliegue
+            ):
                 _pieza_exp = None
                 if medida_export_desde_hoja:
                     _pieza_exp, _, _ = medida_export_desde_hoja(nombre_hoja)
@@ -2105,6 +2183,61 @@ def exportar_hojas_jpg(
                     continue
         except Exception:
             pass
+
+        # Solo THK del sólido doblado (LADO → THK), sin flat/DESPLIEGUE.
+        if os.environ.get("SOLO_THK_DOBLADO", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "si",
+            "on",
+        ):
+            nu_thk = str(nombre_hoja).upper()
+            nu_src = str(nombre_hoja_actual_visible).upper()
+            if "_DESPLIEGUE_" in nu_thk or "_DESPLIEGUE_" in nu_src:
+                omitidas += 1
+                continue
+            # LADO cotado → nombre convertido a _THK; aceptar ambos.
+            ok_thk = (
+                "_THK" in nu_thk
+                or "_THK" in nu_src
+                or (
+                    "_LADO" in nu_src
+                    and "_DESPLIEGUE_" not in nu_src
+                    and "_ALTO" not in nu_src
+                    and "_LARGO_PATA" not in nu_src
+                )
+            )
+            if not ok_thk:
+                omitidas += 1
+                continue
+
+        # Solo isométrica + doblado cobre: ESTANIADO / ALTO / LARGO_PATA.
+        # No exportar DESPLIEGUE ni FRENTE (evita tocar Corte Busbar).
+        if os.environ.get("SOLO_ISO_DOBLADO", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "si",
+            "on",
+        ):
+            nu_iso = str(nombre_hoja).upper()
+            nu_src = str(nombre_hoja_actual_visible).upper()
+            ok_iso = (
+                "_ESTANIADO" in nu_iso
+                or "_ESTANIADO" in nu_src
+                or "_ALTO" in nu_iso
+                or "_ALTO" in nu_src
+                or "_LARGO_PATA" in nu_iso
+                or "_LARGO_PATA" in nu_src
+                or "_HEIGHT" in nu_iso
+                or "_LEG" in nu_iso
+                or "_WING" in nu_iso
+                or "_WING" in nu_src
+            )
+            if not ok_iso:
+                omitidas += 1
+                continue
 
         # Corrida rápida flat: X/Y (+TYP), Ø por tipo (HOLE/DIAMETRO_H) y THK.
         # EXIGE "_DESPLIEGUE_" en la hoja: nunca exportar LADO/THK/FRENTE doblado.
@@ -2651,6 +2784,14 @@ def ejecutar_flujo_desde_app(
         piezas_pendientes = []
         for part_doc, part_name in piezas:
             base = creador_vistas.obtener_nombre_base_corto(part_name)
+            if os.environ.get("COTAS_COBRE_ABC", "").strip() == "1":
+                try:
+                    from piezas_cobre import es_pieza_cobre as _es_cobre_abc
+
+                    if _es_cobre_abc(base) or _es_cobre_abc(part_name):
+                        continue
+                except Exception:
+                    pass
             solo_flat_corte = os.environ.get("SOLO_FLAT_CORTE", "").strip().lower() in (
                 "1",
                 "true",
@@ -2687,6 +2828,20 @@ def ejecutar_flujo_desde_app(
             if base in piezas_a_saltar:
                 log(f"  ⏭️ {part_name} (base={base}) — ya exportada, se salta.")
                 continue
+            # Plan trazable: saltar piezas ya OK (reanudación / incremental).
+            try:
+                from plan_trabajo_piezas import contexto_activo, buscar_entry
+
+                ctx_tr = contexto_activo()
+                if ctx_tr:
+                    ent = buscar_entry(ctx_tr.get("plan") or {}, part_name)
+                    if ent and str(ent.get("estado") or "").lower() == "ok":
+                        log(
+                            f"  ⏭️ {part_name} — plan_trabajo estado=ok, se salta."
+                        )
+                        continue
+            except Exception:
+                pass
             piezas_pendientes.append((part_doc, part_name))
 
         total_pendientes = len(piezas_pendientes)
@@ -2879,6 +3034,21 @@ def ejecutar_flujo_desde_app(
                 log(f"❌ Error exportando JPG del lote {idx_lote}: {e}")
                 log(traceback.format_exc())
             log(f"  [chk] LOTE {idx_lote}: JPGs exportados.")
+
+            # Abigail trazable: mover a estructura, publish UNC por pieza, DB por lote.
+            try:
+                from plan_trabajo_piezas import contexto_activo, on_lote_exportado
+
+                if contexto_activo():
+                    on_lote_exportado(
+                        carpeta_salida,
+                        lote,
+                        idx_lote,
+                        total_pendientes,
+                        log_fn=log,
+                    )
+            except Exception as e:
+                log(f"AVISO trazable lote {idx_lote}: {e}")
 
             # 6) Borrar hojas del lote para liberar memoria
             try:

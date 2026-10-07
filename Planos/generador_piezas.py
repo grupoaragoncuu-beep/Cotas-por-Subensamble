@@ -256,9 +256,10 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
             if info.get("tipo") == "BOARD":
                 es_board = True
                 tipo_producto = "BOARD"
+                os.environ["COTAS_COBRE_ABC"] = "1"
                 print(
                     "  BOARD: flujo PIEZAS completo; "
-                    "ABB/GENE/RLG → cota + SIN_COTA."
+                    "cobre → hojas ISO / DOBLADO / CORTE."
                 )
         except Exception as exc_cls:
             print(f"  AVISO clasificar producto: {exc_cls}")
@@ -452,10 +453,45 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
                     f"  Catálogo tras excluir Almacén: {len(catalogo_filtro)} piezas."
                 )
 
+        # --- Abigail trazable (OTC --seleccion): plan + mkdir antes de acotar ---
+        trazable = False
+        plan_trabajo = None
+        try:
+            from plan_trabajo_piezas import (
+                trazable_habilitado,
+                wipe_job_habilitado,
+                construir_inventario,
+                guardar_plan,
+                precrear_arbol,
+                wipe_local_piezas,
+                wipe_dossier_piezas_acotadas,
+                activar_contexto,
+                desactivar_contexto,
+                marcar_ok_existentes_incremental,
+                resumen_plan,
+            )
+            from nomenclatura_capturas import nombre_job_desde_ensamble
+
+            trazable = trazable_habilitado(
+                con_seleccion=bool(ruta_seleccion), es_board=es_board
+            )
+        except Exception as exc_tr0:
+            print(f"  AVISO trazable import: {exc_tr0}")
+            trazable = False
+
+        # Limpieza ANTES de precrear estructura (evita borrar el árbol nuevo).
         if solo:
             _limpiar_solo_cara_piezas(carpeta_piezas, solo)
-        else:
-            # PIEZAS_FILTRO = reintento parcial: NUNCA vaciar toda la carpeta.
+        elif trazable and wipe_job_habilitado(
+            trazable=True, incremental=incremental
+        ):
+            print("  [TRAZABLE] wipe job local PIEZAS_ACOTADAS...")
+            try:
+                wipe_local_piezas(carpeta_piezas)
+                wipe_dossier_piezas_acotadas()
+            except Exception as exc_w:
+                print(f"  AVISO wipe: {exc_w}")
+        elif not trazable:
             filtro_activo = bool(os.environ.get("PIEZAS_FILTRO", "").strip())
             incr_limpieza = incremental or filtro_activo
             if filtro_activo and not incremental:
@@ -464,6 +500,46 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
                     "(no se vacía el job)."
                 )
             _limpiar_exportacion_piezas(carpeta_piezas, incremental=incr_limpieza)
+
+        if trazable:
+            try:
+                job_tok = nombre_job_desde_ensamble(ensamble)
+                plan_trabajo = construir_inventario(
+                    job=job_tok,
+                    mapa_por_cara=mapa_reorg or mapa_por_cara,
+                    mapa_clasificacion=mapa_clasificacion,
+                    catalogo=catalogo_filtro,
+                    nombres_almacen=nombres_alm,
+                )
+                n_dirs = precrear_arbol(carpeta_piezas, plan_trabajo)
+                ruta_plan = guardar_plan(carpeta_tanque, plan_trabajo)
+                print(
+                    f"  [TRAZABLE] plan {len(plan_trabajo.get('piezas') or [])} "
+                    f"piezas; {n_dirs} carpetas → {ruta_plan}"
+                )
+                if incremental:
+                    n_skip = marcar_ok_existentes_incremental(
+                        plan_trabajo, carpeta_piezas
+                    )
+                    guardar_plan(carpeta_tanque, plan_trabajo)
+                    if n_skip:
+                        print(
+                            f"  [TRAZABLE] incremental: {n_skip} piezas ya OK "
+                            "(se saltarán en el flujo)."
+                        )
+                activar_contexto(
+                    plan=plan_trabajo,
+                    carpeta_tanque=carpeta_tanque,
+                    carpeta_piezas=carpeta_piezas,
+                )
+            except Exception as exc_tr:
+                print(f"  AVISO trazable init: {exc_tr}")
+                trazable = False
+                try:
+                    desactivar_contexto()
+                except Exception:
+                    pass
+
         _recuperar_antes_de_piezas(inv_app, plano)
 
         print("Ejecutando cotas por pieza...")
@@ -472,6 +548,11 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
             print(f"  Destino: {carpeta_piezas}\\{solo}\\")
         if incremental:
             print("  Modo incremental ACTIVO (PIEZAS_INCREMENTAL=1).")
+        if trazable:
+            print(
+                "  [TRAZABLE] lotes → pieza a Y: al completar; "
+                "DB al cerrar cada lote de ~20."
+            )
 
         ok = bool(
             ejecutar_flujo_desde_app(
@@ -518,12 +599,42 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
             except Exception as err:
                 print(f"AVISO: fallo en reorganización de PIEZAS_ACOTADAS: {err}")
 
+            if es_board:
+                # Cobre: ISO / DOBLADO / CORTE combinados. La DB se carga aparte.
+                try:
+                    from cobre_abc import acotar_cobre_ensamble
+
+                    acotar_cobre_ensamble(inv_app, ensamble)
+                except Exception as exc_abc:
+                    print(f"AVISO COBRE ABC: {exc_abc}")
+            try:
+                from wing_cobre import acotar_wings_ensamble
+
+                acotar_wings_ensamble(inv_app, ensamble, plano)
+            except Exception as exc_wing:
+                print(f"AVISO WING: {exc_wing}")
+
+            try:
+                from angulo_doblez import acotar_angulos_ensamble
+
+                acotar_angulos_ensamble(inv_app, ensamble, plano)
+            except Exception as exc_ang:
+                print(f"AVISO ANGLE: {exc_ang}")
+
             try:
                 from cotas_dossier_registro import publicar_y_sincronizar_dossier
 
+                # Trazable ya publicó por pieza/lote; sync final = safety net.
                 publicar_y_sincronizar_dossier(carpeta_piezas)
             except Exception as err_dos:
                 print(f"AVISO dossier sync post-reorg: {err_dos}")
+
+            if trazable and plan_trabajo is not None:
+                try:
+                    print(f"  [TRAZABLE] {resumen_plan(plan_trabajo)}")
+                    guardar_plan(carpeta_tanque, plan_trabajo)
+                except Exception as exc_fin:
+                    print(f"  AVISO trazable resumen: {exc_fin}")
 
         # Kits OTC: solo en tanque completo. En BOARD no aplica.
         # A/B/C TYP siguen ON para ensambles independientes.
@@ -561,6 +672,12 @@ def ejecutar(ruta_seleccion=None, solo_cara=None):
 
         return ok
     finally:
+        try:
+            from plan_trabajo_piezas import desactivar_contexto
+
+            desactivar_contexto()
+        except Exception:
+            pass
         try:
             from cota_estilo import set_unidad_cota, set_typ_letras_habilitadas
 

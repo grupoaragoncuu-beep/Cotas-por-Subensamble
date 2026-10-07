@@ -2,16 +2,14 @@
 """
 Detección de piezas de COBRE / busbar (gabinetes GIGA).
 
-Fuente oficial del catálogo ``cobre_nesting_giga.txt``:
-**todas las carpetas AutoDXF** bajo GIGA (y ``GIGA BOARD * - COBRE``),
-regeneradas con ``.runtime/_rebuild_cobre_nesting_giga.py``.
+Fuente oficial ``cobre_nesting_giga.txt``: DXF cuyo **2º campo** del
+nombre es material cobre (``…, Cobre, QTY…`` / ``Copper`` / ``CU``),
+tomados de carpetas AutoDXF / ``GIGA BOARD * - COBRE``.
 
-En Inventor el material suele figurar como acero hasta que lo cambian a
-cobre después; **no** usar material Inventor para clasificar cobre.
-La verdad es el nesting AutoDXF (nombres ``*, Cobre, QTY…``).
+``…, A 36 Galv, …`` / ``A 36`` = acero → **no** entran al catálogo.
 
-Eso limita el flujo busbar (XY/HOLE/SIN_COTA/ESTANIADO / Corte Busbar)
-a piezas con DXF de cobre real. El resto en BOARD = corte normal.
+En Inventor el material suele figurar como acero hasta después; no usar
+material Inventor. Rebuild: ``.runtime/_rebuild_cobre_nesting_giga.py``.
 """
 
 from __future__ import annotations
