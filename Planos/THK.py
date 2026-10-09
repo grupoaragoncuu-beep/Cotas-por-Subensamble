@@ -419,7 +419,10 @@ def _intent_en_extremo(hoja, tg, dato, lado):
 
 def _validar_span_cota(dimension, esperado_sheet, vista, nombre_hoja, etiqueta):
     """
-    Rechaza cotas ancladas a tangencia de doblez (típicamente 2–8% cortas).
+    Rechaza cotas ancladas a tangencia / cara interna (corto 1×THK).
+
+    Producción: debe cubrir ≥99.5% de la silueta 2D, o quedar a ≤0.05 cm
+    del span esperado (no aceptar ~0.97 que dejaba pasar −0.25 in).
     """
     try:
         valor = abs(float(dimension.ModelValue))
@@ -429,7 +432,8 @@ def _validar_span_cota(dimension, esperado_sheet, vista, nombre_hoja, etiqueta):
     if esperado <= EPS:
         return True
     ratio = valor / esperado
-    if ratio < 0.97 or ratio > 1.05:
+    abs_err = abs(valor - esperado)
+    if (ratio < 0.995 and abs_err > 0.05) or ratio > 1.05:
         try:
             dimension.Delete()
         except Exception:
@@ -437,7 +441,8 @@ def _validar_span_cota(dimension, esperado_sheet, vista, nombre_hoja, etiqueta):
         print(
             f"⚠️ {nombre_hoja}: {etiqueta} descartada "
             f"(valor={valor / IN_TO_CM:.3f} in, "
-            f"silueta≈{esperado / IN_TO_CM:.3f} in, ratio={ratio:.3f})"
+            f"silueta≈{esperado / IN_TO_CM:.3f} in, ratio={ratio:.3f}, "
+            f"err={abs_err * 10:.2f} mm)"
         )
         return False
     return True
@@ -812,66 +817,30 @@ def _espesor_thk_validado(vista, alto_cm=None, datos=None, nombre_hoja=None):
     """
     Espesor usable para etiquetar/exportar como THK.
 
-    Prioridad BOARD/GIGA (nombre pieza completo):
-      1) Sheet Metal Thickness (canónico en chapa)
-      2) Gap fino de curvas 2D (pared)
-      3) Bbox 3D menor si no duplica ALTO
-
-    Prioridad tanque:
-      1) Gap fino de curvas 2D (pared)
-      2) Thickness de Sheet Metal (si no duplica el ALTO)
+    Prioridad unificada (Board y OTC / tanque):
+      1) Sheet Metal Thickness (canónico en chapa modelada)
+      2) Gap fino de curvas 2D (pared) — solo si no hay Thickness usable
       3) Bbox 3D menor SOLO si es claramente más fino que el ALTO
+         (omitido en Parking U: el menor suele ser el alto del doblez)
 
-    Si no hay ancla confiable → None (mejor omitir THK que confundir).
+    Evita que ranuras/features (p. ej. 0.35 in en P87) ganen al espesor
+    real de chapa (p. ej. 2 mm). Si no hay ancla confiable → None.
     """
     parking = _nombre_parece_parking_u(nombre_hoja)
-
-    board_giga = False
-    try:
-        from creador_vistas import get_nombre_pieza_completo
-
-        board_giga = bool(get_nombre_pieza_completo())
-    except Exception:
-        board_giga = False
-
-    if board_giga:
-        chapa = _espesor_chapa_desde_vista(vista)
-        if chapa is not None and chapa > EPS:
-            if alto_cm and _thk_duplica_referencia(chapa, alto_cm):
-                print(
-                    f"⚠️ {nombre_hoja or 'hoja'}: Thickness BOARD "
-                    f"≈ ALTO; se intenta pared/bbox."
-                )
-            else:
-                return float(chapa), "sheet_metal_thickness_board"
-        pared = _espesor_pared_desde_curvas(vista, datos, alto_cm=alto_cm)
-        if pared is not None and pared > EPS:
-            return float(pared), "curva_pared_board"
-        bbox = _espesor_desde_bbox_3d(vista)
-        if bbox is not None and bbox > EPS:
-            if not (
-                alto_cm
-                and (
-                    _thk_duplica_referencia(bbox, alto_cm)
-                    or float(bbox) >= float(alto_cm) * 0.45
-                )
-            ):
-                return float(bbox), "bbox_3d_board"
-        return None, None
-
-    pared = _espesor_pared_desde_curvas(vista, datos, alto_cm=alto_cm)
-    if pared is not None and pared > EPS:
-        return float(pared), "curva_pared"
 
     chapa = _espesor_chapa_desde_vista(vista)
     if chapa is not None and chapa > EPS:
         if alto_cm and _thk_duplica_referencia(chapa, alto_cm):
             print(
                 f"⚠️ {nombre_hoja or 'hoja'}: Thickness de chapa "
-                f"({chapa / IN_TO_CM:.4f} in) ≈ ALTO; no se usa como THK."
+                f"({chapa / IN_TO_CM:.4f} in) ≈ ALTO; se intenta pared/bbox."
             )
         else:
             return float(chapa), "sheet_metal_thickness"
+
+    pared = _espesor_pared_desde_curvas(vista, datos, alto_cm=alto_cm)
+    if pared is not None and pared > EPS:
+        return float(pared), "curva_pared"
 
     if parking:
         # En U Parking el bbox menor = alto del doblez con mucha frecuencia.
@@ -890,20 +859,40 @@ def _espesor_thk_validado(vista, alto_cm=None, datos=None, nombre_hoja=None):
 
 def _alinear_cota_thk_a_chapa_board(hoja, vista, nombre_hoja, meta=None):
     """
-    En BOARD: si hay Sheet Metal Thickness y la cota dibujada difiere,
+    Si hay Sheet Metal Thickness y la cota dibujada difiere (Board u OTC),
     fuerza el texto visible al Thickness (LADO solo ancla visual).
+
+    NO aplica a disco/brida mecanizada: Thickness suele ser basura (0.079)
+    y el ModelValue del canto (0.5–1.0 in) es el THK real (SP-741).
     """
-    try:
-        from creador_vistas import get_nombre_pieza_completo
-
-        if not get_nombre_pieza_completo():
-            return False
-    except Exception:
-        return False
-
     chapa = _espesor_chapa_desde_vista(vista)
     if chapa is None or chapa <= EPS:
         return False
+
+    # ¿La cota dibujada ya es un espesor de disco razonable y ≫ Thickness?
+    try:
+        dims = hoja.DrawingDimensions.GeneralDimensions
+        for di in range(1, int(dims.Count) + 1):
+            try:
+                mv = float(dims.Item(di).ModelValue)
+            except Exception:
+                continue
+            if (
+                0.20 * IN_TO_CM <= mv <= 1.25 * IN_TO_CM
+                and mv >= chapa * 3.0
+            ):
+                print(
+                    f"  {nombre_hoja}: se conserva THK medido "
+                    f"{mv / IN_TO_CM:.4f} in "
+                    f"(Thickness {chapa / IN_TO_CM:.4f} in ignorado)"
+                )
+                if isinstance(meta, dict):
+                    meta["valor_cm"] = float(mv)
+                    meta["gap_sheet"] = float(mv)
+                    meta["origen_thk"] = "envolvente_disco"
+                return False
+    except Exception:
+        pass
 
     try:
         from cota_estilo import texto_cota_dibujo
@@ -957,7 +946,7 @@ def _alinear_cota_thk_a_chapa_board(hoja, vista, nombre_hoja, meta=None):
         if isinstance(meta, dict):
             meta["valor_cm"] = float(chapa)
             meta["gap_sheet"] = float(chapa)
-            meta["origen_thk"] = "sheet_metal_thickness_board_forced"
+            meta["origen_thk"] = "sheet_metal_thickness_forced"
         print(
             f"↩️ {nombre_hoja}: THK texto alineado a Sheet Metal "
             f"Thickness ({chapa / IN_TO_CM:.4f} in)"
@@ -965,14 +954,19 @@ def _alinear_cota_thk_a_chapa_board(hoja, vista, nombre_hoja, meta=None):
     return cambiado
 
 
+def _hoja_tiene_general_dimension(hoja) -> bool:
+    try:
+        return int(hoja.DrawingDimensions.GeneralDimensions.Count) >= 1
+    except Exception:
+        return False
+
+
 def _forzar_cota_thk_desde_modelo(hoja, tg, vista, nombre_hoja, alto_cm=None, datos=None):
     """
-    Fallback tipográfico SOLO con espesor validado (Sheet Metal o pared 2D).
+    Fallback THK: cota asociativa cuyo ModelValue ≈ Thickness.
 
-    Ya no publica ``THK = …`` desde bbox 3D crudo: en perfiles U eso
-    etiquetaba el ALTO (0.875) como THK y confundía las capturas.
-
-    Retorna (True, valor_cm) si logró agregar la nota, (False, None) si no.
+    NUNCA nota sola. NUNCA HideValue sobre un largo/ancho (flechas de 12 in
+    con texto 2.00). Si la vista no muestra el canto, se omite la captura.
     """
     valor_cm, origen = _espesor_thk_validado(
         vista, alto_cm=alto_cm, datos=datos, nombre_hoja=nombre_hoja
@@ -983,59 +977,84 @@ def _forzar_cota_thk_desde_modelo(hoja, tg, vista, nombre_hoja, alto_cm=None, da
             f"ni pared 2D); no se etiqueta como THK."
         )
         return False, None
-
-    try:
-        from cota_estilo import texto_cota_dibujo
-
-        texto = f"THK = {texto_cota_dibujo(valor_cm)}"
-    except Exception:
-        valor_in = valor_cm / IN_TO_CM
-        texto = f"THK = {valor_in:.3f} in"
-
-    # Posición de la nota: al lado derecho de la vista, cerca de la esquina
-    # superior. Se clampea al sheet para no salirse.
-    try:
-        left = float(vista.Left)
-        top = float(vista.Top)
-        width = float(vista.Width)
-        pt_x = left + width + 1.0
-        pt_y = top - 0.6
-    except Exception:
-        pt_x, pt_y = 5.0, 5.0
-
-    pt = _clampear_punto_hoja(hoja, tg, pt_x, pt_y)
-
-    try:
-        gn = hoja.DrawingNotes.GeneralNotes.AddFitted(pt, texto)
-        # Misma legibilidad que las cotas (+25% fuente vía cota_estilo).
-        try:
-            from cota_estilo import COTA_FONT_SIZE_CM, COTA_BOLD, COTA_NAVY_RGB
-            bold = "True" if COTA_BOLD else "False"
-            gn.FormattedText = (
-                f"<StyleOverride FontSize='{COTA_FONT_SIZE_CM}' Bold='{bold}'>"
-                f"{texto}</StyleOverride>"
-            )
-            app_nota = None
-            try:
-                app_nota = conectar_inventor()
-            except Exception:
-                app_nota = None
-            if app_nota is not None:
-                r, g, b = COTA_NAVY_RGB
-                gn.Color = app_nota.TransientObjects.CreateColor(r, g, b)
-        except Exception:
-            pass
-    except Exception as exc:
-        print(
-            f"⚠️ {nombre_hoja}: no se pudo crear nota THK forzada ({exc})."
-        )
+    if not datos:
+        print(f"⚠️ {nombre_hoja}: sin curvas 2D para anclar cota THK.")
         return False, None
 
+    tol = max(TOL_CM * 3, abs(valor_cm) * 0.12)
+
+    def _limpiar_dims():
+        try:
+            dims = hoja.DrawingDimensions.GeneralDimensions
+            for di in range(int(dims.Count), 0, -1):
+                dims.Item(di).Delete()
+        except Exception:
+            pass
+
+    def _mv_ok() -> bool:
+        try:
+            dims = hoja.DrawingDimensions.GeneralDimensions
+            for di in range(1, int(dims.Count) + 1):
+                mv = abs(float(dims.Item(di).ModelValue))
+                if abs(mv - valor_cm) <= tol:
+                    return True
+        except Exception:
+            pass
+        return False
+
+    # 1) Gap lineal ≈ Thickness.
+    if _acotar_espesor_cercano_chapa(
+        hoja, vista, tg, datos, nombre_hoja, valor_cm
+    ):
+        if _mv_ok():
+            print(
+                f"↩️ {nombre_hoja}: THK cota asociativa = "
+                f"{valor_cm / IN_TO_CM:.4f} in ({origen}, gap≈chapa)"
+            )
+            return True, valor_cm
+        _limpiar_dims()
+
+    # 2) Silueta solo si el span ES el Thickness (canto real).
+    minx, maxx, miny, maxy = _bbox_global(datos)
+    w = maxx - minx
+    h = maxy - miny
+    ejes = []
+    if h > EPS:
+        span_cm = _esperado_modelo(vista, h)
+        if abs(span_cm - valor_cm) <= tol:
+            ejes.append(("V", span_cm))
+    if w > EPS:
+        span_cm = _esperado_modelo(vista, w)
+        if abs(span_cm - valor_cm) <= tol:
+            ejes.append(("H", span_cm))
+    ejes.sort(key=lambda t: abs(t[1] - valor_cm))
+
+    for orient, span_cm in ejes:
+        if not _acotar_lado_bbox(
+            hoja,
+            vista,
+            tg,
+            datos,
+            nombre_hoja,
+            orient,
+            "THK",
+            ratio_min=0.80,
+        ):
+            continue
+        if _mv_ok():
+            print(
+                f"↩️ {nombre_hoja}: THK cota asociativa = "
+                f"{valor_cm / IN_TO_CM:.4f} in ({origen}, "
+                f"canto {orient}≈{span_cm / IN_TO_CM:.4f} in)"
+            )
+            return True, valor_cm
+        _limpiar_dims()
+
     print(
-        f"↩️ {nombre_hoja}: THK forzado desde modelo = {texto} "
-        f"(origen={origen})"
+        f"⚠️ {nombre_hoja}: vista sin canto medible ≈ "
+        f"{valor_cm / IN_TO_CM:.4f} in; no se inventa cota falsa."
     )
-    return True, valor_cm
+    return False, None
 
 
 def _forzar_nota_dimension_individual(
@@ -2048,10 +2067,45 @@ def _resolver_prismatico(hoja, vista, tg, datos, nombre_hoja):
     # ¿El Thickness de chapa representa el cuerpo o solo un resalte?
     # Caso Placa Segmento / brida L de canto: envolvente ≈ pata (2 in) y
     # Thickness = 0.313 in. La envolvente NO es THK → es LEG/ALTO.
+    #
+    # EXCEPCIÓN disco/brida de canto (LADO = rectángulo largo×fino):
+    # la envolvente CORTA ES el espesor real (SP-741: 0.75 in) y el
+    # Thickness de chapa puede ser basura (0.079 in). No tratar como pata.
     chapa_es_cuerpo = False
     envolvente_es_pata = False
-    if thk_chapa_cm is not None and overall_cm is not None and thk_chapa_cm > EPS:
-        if overall_cm >= thk_chapa_cm * 1.75:
+    es_disco_canto = False
+    # Disco/brida mecanizada: Thickness de chapa suele ser basura (0.079)
+    # y la envolvente del LADO (0.5–1.0 in) ES el espesor. Patas L (~2 in+)
+    # no entran en esta banda.
+    if (
+        es_canto_aplanado
+        and thk_chapa_cm is not None
+        and overall_cm is not None
+        and thk_chapa_cm > EPS
+    ):
+        overall_in = overall_cm / IN_TO_CM
+        thk_in = thk_chapa_cm / IN_TO_CM
+        if (
+            0.20 <= overall_in <= 1.25
+            and thk_in < 0.15
+            and overall_in >= thk_in * 3.0
+        ):
+            es_disco_canto = True
+    if (
+        thk_chapa_cm is not None
+        and overall_cm is not None
+        and thk_chapa_cm > EPS
+        and overall_cm >= thk_chapa_cm * 1.75
+    ):
+        if es_disco_canto:
+            envolvente_es_pata = False
+            chapa_es_cuerpo = False
+            print(
+                f"  {nombre_hoja}: disco/brida de canto — THK=envolvente "
+                f"{overall_cm / IN_TO_CM:.4f} in (ignora Thickness "
+                f"{thk_chapa_cm / IN_TO_CM:.4f} in)"
+            )
+        else:
             envolvente_es_pata = True
             chapa_es_cuerpo = True
             print(
@@ -2170,6 +2224,34 @@ def _resolver_prismatico(hoja, vista, tg, datos, nombre_hoja):
                 print(
                     f"⚠️ {nombre_hoja}: sin candidato cercano al thk_chapa; "
                     f"no se dibuja cota falsa (pendiente para revisión manual)."
+                )
+                return False, None
+
+    # Opción A: Thickness de chapa manda. Si el mejor gap 2D no está cerca
+    # (ranura/feature tipo P87 0.35 in vs 2 mm), no dibujar ese gap como THK;
+    # el fallback usará Sheet Metal Thickness validado.
+    if (
+        thk_chapa_cm is not None
+        and thk_chapa_cm > EPS
+        and chapa_es_cuerpo
+    ):
+        tol_ch = max(TOL_CM * 3, abs(thk_chapa_cm) * 0.20)
+        if abs(mejor["valor_cm"] - thk_chapa_cm) > tol_ch:
+            cercanos_chapa = [
+                c
+                for c in ranqueados
+                if abs(c["valor_cm"] - thk_chapa_cm) <= tol_ch
+            ]
+            if cercanos_chapa:
+                mejor = min(
+                    cercanos_chapa,
+                    key=lambda x: abs(x["valor_cm"] - thk_chapa_cm),
+                )
+            else:
+                print(
+                    f"↩️ {nombre_hoja}: gap 2D "
+                    f"{mejor['valor_cm'] / IN_TO_CM:.4f} in ≠ Thickness "
+                    f"{thk_chapa_cm / IN_TO_CM:.4f} in — THK=chapa (fallback)."
                 )
                 return False, None
 
@@ -2444,8 +2526,11 @@ def _acotar_lado_bbox(
         sheet_h = None
 
     span = h if orientacion == "V" else w
-    tol = max(0.03, max(w, h) * 0.02)
-    ratio_ok = float(ratio_min) if ratio_min else 0.97
+    # Tol holgada (~2% del span) dejaba pasar anclas a 1×THK hacia adentro
+    # (cobre 0.25 in ≈ 0.635 cm): HEIGHT salía corto exactamente el espesor.
+    # Extremo real de silueta: tolerancia absoluta chica, no proporcional.
+    tol = min(0.08, max(0.02, span * 0.0015))
+    ratio_ok = float(ratio_min) if ratio_min else 0.995
 
     def _pt_para_orient(a, b, dx_off, dy_off):
         clr = clearance_texto_cota_cm()
@@ -2753,7 +2838,8 @@ def _acotar_thk_asociativa_forzada(hoja, vista, tg, datos, nombre_hoja, thk_cm):
     if max(w, h) <= EPS:
         return False
 
-    tol = max(TOL_CM * 4, abs(thk_cm) * 0.25)
+    # Misma tolerancia estricta que cercanos-a-chapa (no aceptar LEG/brazo).
+    tol = max(TOL_CM * 3, abs(thk_cm) * 0.12)
     ejes = []
     if h > EPS:
         ejes.append(("V", h, abs(_esperado_modelo(vista, h) - thk_cm)))
@@ -2780,9 +2866,13 @@ def _acotar_thk_asociativa_forzada(hoja, vista, tg, datos, nombre_hoja, thk_cm):
             )
             return True
 
-    # Último intento silueta: lado menor del bbox (canto).
+    # Último intento silueta: lado menor del bbox (canto) — SOLO si ≈ thk_cm.
+    # Sin este filtro, un brazo/LEG (p. ej. P87 1.50 in) se publica como THK
+    # aunque el Thickness real sea otro (2.00 in).
     orient = "V" if h <= w else "H"
-    if _acotar_lado_bbox(
+    span_menor = h if orient == "V" else w
+    span_menor_cm = _esperado_modelo(vista, span_menor)
+    if abs(span_menor_cm - thk_cm) <= tol and _acotar_lado_bbox(
         hoja,
         vista,
         tg,
@@ -2792,10 +2882,9 @@ def _acotar_thk_asociativa_forzada(hoja, vista, tg, datos, nombre_hoja, thk_cm):
         "THK",
         ratio_min=ratio_sil,
     ):
-        span = h if orient == "V" else w
         print(
             f"↩️ {nombre_hoja}: THK asociativa eje menor {orient} "
-            f"≈ {_esperado_modelo(vista, span) / IN_TO_CM:.4f} in"
+            f"≈ {span_menor_cm / IN_TO_CM:.4f} in"
         )
         return True
 
@@ -2956,7 +3045,8 @@ def _acotar_espesor_cercano_chapa(hoja, vista, tg, datos, nombre_hoja, thk_cm):
     candidatos = _buscar_candidatos_lineales(datos)
     if not candidatos:
         return False
-    tol = max(TOL_CM * 3, abs(thk_cm) * 0.35)
+    # 12%: un brazo/LEG (P87 1.50 vs Thickness 2.00 = 25%) NO debe pasar.
+    tol = max(TOL_CM * 3, abs(thk_cm) * 0.12)
     cercanos = []
     for c in candidatos:
         valor_cm = _esperado_modelo(vista, c["gap_sheet"])
@@ -4665,6 +4755,35 @@ def acotar_thk(nombres_permitidos=None):
                 forzado_ok = _acotar_thk_asociativa_forzada(
                     hoja, vista, tg, datos, nombre_hoja, thk_fallback
                 )
+                if forzado_ok:
+                    # Solo aceptar si ModelValue ≈ Thickness (flechas reales).
+                    try:
+                        dims = hoja.DrawingDimensions.GeneralDimensions
+                        mv_ok = False
+                        for di in range(1, int(dims.Count) + 1):
+                            try:
+                                mv = abs(float(dims.Item(di).ModelValue))
+                            except Exception:
+                                continue
+                            if abs(mv - thk_fallback) <= max(
+                                TOL_CM * 3, abs(thk_fallback) * 0.12
+                            ):
+                                mv_ok = True
+                                break
+                        if not mv_ok:
+                            forzado_ok = False
+                            try:
+                                for di in range(int(dims.Count), 0, -1):
+                                    dims.Item(di).Delete()
+                            except Exception:
+                                pass
+                            print(
+                                f"↩️ {nombre_hoja}: ancla ≠ Thickness "
+                                f"{thk_fallback / IN_TO_CM:.4f} in "
+                                f"— se descarta (no se falsifica texto)."
+                            )
+                    except Exception:
+                        pass
                 if forzado_ok:
                     _valor_cm = thk_fallback
                     print(

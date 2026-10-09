@@ -2,13 +2,15 @@
 """
 Barrenos flat (DESPLIEGUE): X/Y + TYP.
 
-- Metal (no cobre): circulo/ovalo → CENTRO (XCENTRO / YCENTRO)
-- Cobre/busbar GIGA: circulo/ovalo → BORDE hacia el origen
+- Circulo/ovalo (cobre y acero): BORDE hacia el origen
   (XMIN / YMIN = del 0 a la tangente inferior/izquierda del barreno;
    XMAX / YMAX si el barreno queda al otro lado del 0)
-- Ovalo/slot metal: centro geometrico; cobre: mismo borde (radio ≈ tamaño/2)
-- Cortes rectangulares: siempre INICIO (XMIN/YMIN del bbox)
-- TYP si ≥2 refs comparten la misma distancia (tol geometrica estricta)
+- Ovalo/slot: mismo borde (radio ≈ tamaño/2)
+- Cortes rectangulares internos pasantes:
+  - Inicio del hueco → XMIN / YMIN (bbox); TYP si ≥2 comparten inicio
+  - Tamaño → CUT_WIDTH (dx) + CUT_LENGTH (dy), **una vez por tamaño**
+    (TYP si ≥2 huecos comparten ancho×largo; tope de tamaños distintos)
+- TYP en barrenos Ø si ≥2 refs comparten la misma distancia (tol estricta)
 """
 
 from __future__ import annotations
@@ -48,15 +50,6 @@ def _pieza_desde_hoja_despliegue(nombre_hoja: str) -> str:
     return base.strip() or ""
 
 
-def _es_cobre_hoja(nombre_hoja: str) -> bool:
-    try:
-        from piezas_cobre import es_pieza_cobre
-
-        return bool(es_pieza_cobre(_pieza_desde_hoja_despliegue(nombre_hoja)))
-    except Exception:
-        return False
-
-
 def _radio_hoja_barreno(b: dict) -> float:
     """Radio en cm de hoja (circulo) o semi-eje aprox. (ovalo)."""
     try:
@@ -72,6 +65,9 @@ def _radio_hoja_barreno(b: dict) -> float:
     except Exception:
         pass
     return 0.0
+
+
+LAST_XY_N: dict[str, dict] = {}
 
 
 def _ancla_borde_desde_origen(
@@ -443,10 +439,11 @@ def _cortes_internos_inicio(vista, tg, sil=None) -> list[dict]:
                 # Aspecto extremo aunque el lado menor pase el piso
                 if aspect > 8.0:
                     continue
-                # Área mínima de core real (~40 in²). Excluye marcaje
-                # rectangular tipo parking/HV (~3.5×2) y muescas chicas.
-                # Oil-gauge / ventanas de placa quedan (p.ej. ~26×7 ≈ 180).
-                if area_in < 40.0:
+                # Área mínima de core real. En tanque ~40 in² (el marcaje
+                # parking/HV ronda 7 in²). En flat de corte una ventana de
+                # ~4×4 in (16 in²) también es hueco, no marcaje.
+                area_min = 12.0 if solo_flat else 40.0
+                if area_in < area_min:
                     continue
                 # Centro del hueco debe caer dentro de la placa (pasante)
                 cx = 0.5 * (x0 + x1)
@@ -705,7 +702,9 @@ def _slots_barrenos_modelo(vista, tg, sil, vistos=None) -> list[dict]:
         "si",
         "on",
     )
-    min_lado = max(0.05, 0.4 * escala) if solo_flat else max(0.08, 0.8 * escala)
+    # Mínimo en MODELO (cm): con escala baja (0.1–0.2) el umbral en hoja
+    # tumba slots/Ø chicos de acero (p.ej. DF-10-124 bbox hoja 0.03×0.10).
+    min_modelo_cm = 0.08  # ≥0.8 mm
 
     for body in _cuerpos_para_barrenos(doc):
         try:
@@ -731,6 +730,7 @@ def _slots_barrenos_modelo(vista, tg, sil, vistos=None) -> list[dict]:
                 n_arc = n_line = n_circ = 0
                 xs: list[float] = []
                 ys: list[float] = []
+                radios: list[float] = []
                 for ei in range(1, n_e + 1):
                     try:
                         edge = loop.Edges.Item(ei)
@@ -752,6 +752,7 @@ def _slots_barrenos_modelo(vista, tg, sil, vistos=None) -> list[dict]:
                         if es_arc:
                             n_arc += 1
                             # Muestrear extremos del arco en hoja
+                            sx = sy = ex = ey = cx_a = cy_a = None
                             for attr in ("StartPoint", "EndPoint", "Center"):
                                 try:
                                     pt = getattr(geom, attr, None)
@@ -762,43 +763,101 @@ def _slots_barrenos_modelo(vista, tg, sil, vistos=None) -> list[dict]:
                                             float(pt.X), float(pt.Y), float(pt.Z)
                                         )
                                     )
-                                    xs.append(float(p2.X))
-                                    ys.append(float(p2.Y))
+                                    px, py = float(p2.X), float(p2.Y)
+                                    xs.append(px)
+                                    ys.append(py)
+                                    if attr == "StartPoint":
+                                        sx, sy = px, py
+                                    elif attr == "EndPoint":
+                                        ex, ey = px, py
+                                    else:
+                                        cx_a, cy_a = px, py
                                 except Exception:
                                     pass
+                            # Punta del semicírculo: perpendicular a la cuerda,
+                            # a un radio del centro. El extremo interior no
+                            # agranda el bbox; el exterior es la esquina.
+                            if (
+                                sx is not None
+                                and ex is not None
+                                and cx_a is not None
+                            ):
+                                cdx, cdy = ex - sx, ey - sy
+                                clen = (cdx * cdx + cdy * cdy) ** 0.5
+                                if clen > _EPS:
+                                    ux, uy = -cdy / clen, cdx / clen
+                                    rad = (
+                                        (sx - cx_a) ** 2 + (sy - cy_a) ** 2
+                                    ) ** 0.5
+                                    if rad > _EPS:
+                                        radios.append(rad)
+                                        xs.append(cx_a + ux * rad)
+                                        ys.append(cy_a + uy * rad)
+                                        xs.append(cx_a - ux * rad)
+                                        ys.append(cy_a - uy * rad)
                             continue
                         if "LINE" not in tipo_g:
                             continue
                         n_line += 1
-                        p1 = geom.StartPoint
-                        p2m = geom.EndPoint
-                        s1 = vista.ModelToSheetSpace(
-                            tg.CreatePoint(
-                                float(p1.X), float(p1.Y), float(p1.Z)
+                        try:
+                            p1 = geom.StartPoint
+                            p2m = geom.EndPoint
+                            s1 = vista.ModelToSheetSpace(
+                                tg.CreatePoint(
+                                    float(p1.X), float(p1.Y), float(p1.Z)
+                                )
                             )
-                        )
-                        s2 = vista.ModelToSheetSpace(
-                            tg.CreatePoint(
-                                float(p2m.X), float(p2m.Y), float(p2m.Z)
+                            s2 = vista.ModelToSheetSpace(
+                                tg.CreatePoint(
+                                    float(p2m.X), float(p2m.Y), float(p2m.Z)
+                                )
                             )
-                        )
+                        except Exception:
+                            # LineSegment a veces sin StartPoint → vértices
+                            try:
+                                sp = edge.StartVertex.Point
+                                ep = edge.StopVertex.Point
+                                s1 = vista.ModelToSheetSpace(
+                                    tg.CreatePoint(
+                                        float(sp.X), float(sp.Y), float(sp.Z)
+                                    )
+                                )
+                                s2 = vista.ModelToSheetSpace(
+                                    tg.CreatePoint(
+                                        float(ep.X), float(ep.Y), float(ep.Z)
+                                    )
+                                )
+                            except Exception:
+                                continue
                         xs.extend((float(s1.X), float(s2.X)))
                         ys.extend((float(s1.Y), float(s2.Y)))
                     except Exception:
                         continue
                 # Slot típico: 2 semicírculos + 2 lados (a veces más segmentos)
+                # Círculo partido en ≥3 arcos sin líneas también cuenta.
                 if n_circ > 0:
                     continue
-                if n_arc < 2 or n_line < 2 or len(xs) < 4:
+                if n_arc < 2 or len(xs) < 4:
+                    continue
+                if n_line < 2 and not (n_line == 0 and n_arc >= 3):
                     continue
                 x0, x1 = min(xs), max(xs)
                 y0, y1 = min(ys), max(ys)
                 dx, dy = x1 - x0, y1 - y0
-                if dx < min_lado or dy < min_lado:
+                esc_ok = max(float(escala), 1e-9)
+                dx_m, dy_m = dx / esc_ok, dy / esc_ok
+                if dx_m < min_modelo_cm or dy_m < min_modelo_cm:
                     continue
                 # No contorno de placa
                 if dx > 0.80 * (maxx - minx) and dy > 0.80 * (maxy - miny):
                     continue
+                # Slot real: el lado menor del bbox es el Ø de las tapas.
+                # Una ventana con radio de esquina tiene el lado mucho mayor
+                # que 2·R y no es un diámetro de barreno.
+                if radios:
+                    cap = 2.0 * sorted(radios)[len(radios) // 2]
+                    if cap > _EPS and min(dx, dy) > cap * 1.75:
+                        continue
                 cx = 0.5 * (x0 + x1)
                 cy = 0.5 * (y0 + y1)
                 m = max(0.02, 0.005 * span)
@@ -1144,6 +1203,10 @@ def _centros_barrenos(vista, tg) -> list[dict]:
         # SIEMPRE fusionar óvalos HLR: aportan rx/ry reales (borde cobre).
         if n_hlr > n_modelo + 1 and not solo_flat:
             fused = _fusionar_centros(modelo_circ_oval, hlr_circ, ovals)
+        elif n_oval_modelo > 0:
+            # El flat ya trae el slot completo. Un óvalo HLR suelto
+            # suele ser el empareje de dos tapas de slots vecinos.
+            fused = _fusionar_centros(modelo_circ_oval)
         else:
             fused = _fusionar_centros(modelo_circ_oval, [], ovals)
         n_oval = sum(1 for b in fused if str(b.get("tipo") or "") == "oval")
@@ -1424,6 +1487,8 @@ def _dibujar_cota_centro_sketch(
             mcx, mcy = float(m["cx"]), float(m["cy"])
         except Exception:
             continue
+        marca_cx = float(m.get("marca_cx", mcx))
+        marca_cy = float(m.get("marca_cy", mcy))
         miembros.append(
             {
                 "valor": nivel,
@@ -1434,6 +1499,8 @@ def _dibujar_cota_centro_sketch(
                     "maxx": mcx,
                     "miny": mcy,
                     "maxy": mcy,
+                    "marca_cx": marca_cx,
+                    "marca_cy": marca_cy,
                     "barreno": True,
                     "tamaño": float(m.get("tamaño") or 0.2),
                 },
@@ -1737,6 +1804,10 @@ def _dibujar_cota_tramo_sketch(
     return ok
 
 
+# Tope de tamaños CUT distintos por pieza (evita saturar matrices grandes).
+_MAX_CUT_SIZE_GROUPS = 2
+
+
 def _emitir_tamanos_corte(
     plano,
     hoja,
@@ -1748,13 +1819,19 @@ def _emitir_tamanos_corte(
     creadas_nombres: list,
 ):
     """
-    Por cada hueco rectangular: hojas CUT_WIDTH (dx) y CUT_LENGTH (dy).
+    Ancho×largo de cortes: **una hoja por tamaño distinto**, no por hueco.
+
+    - Mismo (dx, dy) en ≥2 huecos → ``CUT_WIDTH_TYP`` / ``CUT_LENGTH_TYP``
+    - Un solo hueco con ese tamaño → sin TYP
+    - Máx. ``_MAX_CUT_SIZE_GROUPS`` tamaños (prioridad: más frecuentes)
     """
     cortes = [b for b in barrenos if str(b.get("tipo") or "") == "corte"]
     if not cortes:
         return
-    vistos = set()
-    for idx, c in enumerate(cortes, start=1):
+    tol = float(_tol_coincidencia_hoja(vista, cortes))
+    # Agrupar por tamaño (dx, dy), no por posición.
+    grupos: list[dict] = []
+    for c in cortes:
         try:
             x0, y0 = float(c["xmin"]), float(c["ymin"])
             x1, y1 = float(c["xmax"]), float(c["ymax"])
@@ -1764,14 +1841,68 @@ def _emitir_tamanos_corte(
         dy = abs(y1 - y0)
         if dx < _MIN_DIST_HOJA or dy < _MIN_DIST_HOJA:
             continue
-        clave = (round(x0, 2), round(y0, 2), round(dx, 2), round(dy, 2))
-        if clave in vistos:
-            continue
-        vistos.add(clave)
-        suf = "" if len(cortes) <= 1 else f"_{idx:02d}"
-        for etiqueta, eje, a0, b0, a1, b1 in (
-            (f"CUT_WIDTH{suf}", "X", x0, y0, x1, y0),
-            (f"CUT_LENGTH{suf}", "Y", x0, y0, x0, y1),
+        placed = False
+        for g in grupos:
+            if abs(g["dx"] - dx) <= tol and abs(g["dy"] - dy) <= tol:
+                g["n"] += 1
+                g["miembros"].append(c)
+                # Representante = inicio más cercano a origen (primera aparición)
+                try:
+                    gx0, gy0 = float(g["x0"]), float(g["y0"])
+                    if (x0 * x0 + y0 * y0) < (gx0 * gx0 + gy0 * gy0):
+                        g["x0"], g["y0"], g["x1"], g["y1"] = x0, y0, x1, y1
+                        g["dx"], g["dy"] = dx, dy
+                except Exception:
+                    pass
+                placed = True
+                break
+        if not placed:
+            grupos.append(
+                {
+                    "dx": dx,
+                    "dy": dy,
+                    "x0": x0,
+                    "y0": y0,
+                    "x1": x1,
+                    "y1": y1,
+                    "n": 1,
+                    "miembros": [c],
+                }
+            )
+
+    if not grupos:
+        return
+    grupos.sort(key=lambda g: (-int(g["n"]), float(g["dx"]), float(g["dy"])))
+    if len(grupos) > _MAX_CUT_SIZE_GROUPS:
+        omit = len(grupos) - _MAX_CUT_SIZE_GROUPS
+        print(
+            f"    CUT tamaños: {len(grupos)} distintos → emito "
+            f"{_MAX_CUT_SIZE_GROUPS} (omitidos {omit} menos frecuentes)"
+        )
+        grupos = grupos[:_MAX_CUT_SIZE_GROUPS]
+    else:
+        print(
+            f"    CUT tamaños distintos: {len(grupos)} "
+            f"(huecos={sum(int(g['n']) for g in grupos)})"
+        )
+
+    multi_tam = len(grupos) > 1
+    for gi, g in enumerate(grupos, start=1):
+        x0, y0 = float(g["x0"]), float(g["y0"])
+        x1, y1 = float(g["x1"]), float(g["y1"])
+        es_typ = int(g["n"]) >= 2
+        if es_typ and not multi_tam:
+            suf = "_TYP"
+        elif es_typ and multi_tam:
+            suf = f"_TYP_{gi:02d}"
+        elif multi_tam:
+            suf = f"_{gi:02d}"
+        else:
+            suf = ""
+
+        for etiqueta, eje in (
+            (f"CUT_WIDTH{suf}", "X"),
+            (f"CUT_LENGTH{suf}", "Y"),
         ):
             nombre_nueva = f"{base_nombre}_{etiqueta}"
             _borrar_hojas_prefijo(plano, nombre_nueva)
@@ -1793,7 +1924,8 @@ def _emitir_tamanos_corte(
             vista_n = nueva.DrawingViews.Item(1)
             _forzar_vista_lista(inv_app, nueva, vista_n)
             _limpiar_dims_y_sketches(nueva)
-            # Reproyectar bbox del mismo corte
+            # Reproyectar bbox del representante
+            rx0, ry0, rx1, ry1 = x0, y0, x1, y1
             try:
                 cortes_n = [
                     b
@@ -1807,7 +1939,11 @@ def _emitir_tamanos_corte(
             for bn in cortes_n:
                 try:
                     bx0, by0 = float(bn["xmin"]), float(bn["ymin"])
+                    bx1, by1 = float(bn["xmax"]), float(bn["ymax"])
+                    bdx, bdy = abs(bx1 - bx0), abs(by1 - by0)
                 except Exception:
+                    continue
+                if abs(bdx - float(g["dx"])) > tol or abs(bdy - float(g["dy"])) > tol:
                     continue
                 d = (bx0 - x0) ** 2 + (by0 - y0) ** 2
                 if d < mejor_d:
@@ -1815,26 +1951,32 @@ def _emitir_tamanos_corte(
                     mejor = bn
             if mejor is not None:
                 try:
-                    x0 = float(mejor["xmin"])
-                    y0 = float(mejor["ymin"])
-                    x1 = float(mejor["xmax"])
-                    y1 = float(mejor["ymax"])
+                    rx0 = float(mejor["xmin"])
+                    ry0 = float(mejor["ymin"])
+                    rx1 = float(mejor["xmax"])
+                    ry1 = float(mejor["ymax"])
                 except Exception:
                     pass
             if eje == "X":
-                val_txt = _valor_desde_hoja(vista_n, nueva, x0, x1)
+                val_txt = _valor_desde_hoja(vista_n, nueva, rx0, rx1)
+                texto = asegurar_unidad_cota(
+                    f"{val_txt} TYP" if es_typ else str(val_txt)
+                )
                 ok = _dibujar_cota_tramo_sketch(
-                    nueva, vista_n, tg, inv_app, x0, y0, x1, y0, asegurar_unidad_cota(val_txt), "X"
+                    nueva, vista_n, tg, inv_app, rx0, ry0, rx1, ry0, texto, "X"
                 )
             else:
-                val_txt = _valor_desde_hoja(vista_n, nueva, y0, y1)
+                val_txt = _valor_desde_hoja(vista_n, nueva, ry0, ry1)
+                texto = asegurar_unidad_cota(
+                    f"{val_txt} TYP" if es_typ else str(val_txt)
+                )
                 ok = _dibujar_cota_tramo_sketch(
-                    nueva, vista_n, tg, inv_app, x0, y0, x0, y1, asegurar_unidad_cota(val_txt), "Y"
+                    nueva, vista_n, tg, inv_app, rx0, ry0, rx0, ry1, texto, "Y"
                 )
             try:
                 nota = nueva.DrawingNotes.GeneralNotes.AddFitted(
                     tg.CreatePoint2d(0.4, 0.4),
-                    f"CUT={val_txt}",
+                    f"CUT={val_txt}" + (" TYP" if es_typ else ""),
                 )
                 try:
                     nota.Visible = False
@@ -1844,7 +1986,8 @@ def _emitir_tamanos_corte(
                 pass
             if ok:
                 kind = "WIDTH" if "WIDTH" in etiqueta.upper() else "LENGTH"
-                print(f"✅ {nombre_nueva}: {kind}={val_txt} [cut]")
+                tag = f"TYP n={g['n']}" if es_typ else "1"
+                print(f"✅ {nombre_nueva}: {kind}={val_txt} [{tag}]")
             else:
                 print(f"⚠️ {nombre_nueva}: sketch cut falló (hoja conservada)")
             creadas_nombres.append(str(nueva.Name).rsplit(":", 1)[0])
@@ -1857,8 +2000,8 @@ def _base_despliegue_desde_frente(nombre_hoja: str) -> str:
 
 def acotar_barrenos_xy_despliegue(nombres_frente_ok=None):
     """
-    Hojas ``*_DESPLIEGUE_XCENTRO[_TYP]`` / ``*_YCENTRO[_TYP]``
-    midiendo al centro de cada circunferencia desde esquina IL.
+    Hojas ``*_DESPLIEGUE_XMIN|XMAX|YMIN|YMAX[_TYP]`` (borde / inicio corte)
+    + ``CUT_WIDTH`` / ``CUT_LENGTH`` para huecos rectangulares.
     """
     # Flat GIGA: mm siempre (cota_estilo default histórico = in de tanques)
     if os.environ.get("SOLO_FLAT_CORTE", "").strip().lower() in (
@@ -1875,6 +2018,8 @@ def acotar_barrenos_xy_despliegue(nombres_frente_ok=None):
         "barrenos_xy_despliegue: centros de circulo -> X/Y + TYP "
         "(metodo subensamble / sketch)..."
     )
+    global LAST_XY_N
+    LAST_XY_N = {}
     inv_app = conectar_inventor()
     try:
         plano = win32com.client.CastTo(inv_app.ActiveDocument, "DrawingDocument")
@@ -1888,21 +2033,44 @@ def acotar_barrenos_xy_despliegue(nombres_frente_ok=None):
         objetivo = {str(h).upper().rsplit(":", 1)[0] for h in nombres_frente_ok}
 
     creadas_nombres: list[str] = []
+    # Snapshot de bases ANTES de CopyTo: insertar hojas durante un
+    # ``range(1, Count)`` desplaza índices y salta DESPLIEGUE_FRENTE_1
+    # (p.ej. Board1 lote1: 108/165 tras 118; 104/703 tras 102).
+    bases_frente: list[str] = []
+    vistos_base: set[str] = set()
     for i in range(1, plano.Sheets.Count + 1):
         try:
-            hoja = plano.Sheets.Item(i)
+            hoja0 = plano.Sheets.Item(i)
         except Exception:
             continue
+        nombre0 = str(hoja0.Name)
+        nombre0_up = nombre0.upper()
+        if "_DESPLIEGUE_FRENTE_1" not in nombre0_up:
+            continue
+        if "_LADO" in nombre0_up or "_THK" in nombre0_up:
+            continue
+        base0 = nombre0_up.rsplit(":", 1)[0]
+        if base0 in vistos_base:
+            continue
+        if objetivo is not None and base0 not in objetivo:
+            continue
+        vistos_base.add(base0)
+        bases_frente.append(base0)
+
+    for base_cmp in bases_frente:
+        hoja = None
+        for j in range(1, plano.Sheets.Count + 1):
+            try:
+                cand = plano.Sheets.Item(j)
+            except Exception:
+                continue
+            if str(cand.Name).upper().rsplit(":", 1)[0] == base_cmp:
+                hoja = cand
+                break
+        if hoja is None:
+            print(f"  ⚠️ {base_cmp}: hoja ya no está (omitida)")
+            continue
         nombre = str(hoja.Name)
-        nombre_up = nombre.upper()
-        if "_DESPLIEGUE_FRENTE_1" not in nombre_up:
-            continue
-        # Nunca acotar barrenos en LADO/THK (canto).
-        if "_LADO" in nombre_up or "_THK" in nombre_up:
-            continue
-        base_cmp = nombre_up.rsplit(":", 1)[0]
-        if objetivo is not None and base_cmp not in objetivo:
-            continue
         if hoja.DrawingViews.Count < 1:
             continue
 
@@ -1974,11 +2142,10 @@ def acotar_barrenos_xy_despliegue(nombres_frente_ok=None):
             continue
 
         # TANQUE + iProp Corte: NUNCA flat/barrenos/cortes internos
-        # (DEBER_SER_COTAS_FLUJOS §3.1).
-        # BOARD/GIGA: barrenos XY solo busbar nesting (catálogo cobre).
+        # (DEBER_SER_COTAS_FLUJOS §3.1). En BOARD sí: cobrey acero con
+        # XMIN/YMIN + CUT_* en huecos rectangulares.
         try:
             from creador_vistas import producto_flujo_actual, _es_pieza_corte
-            from piezas_cobre import es_pieza_cobre
 
             pieza = _pieza_desde_hoja_despliegue(nombre)
             prod = producto_flujo_actual()
@@ -1986,12 +2153,6 @@ def acotar_barrenos_xy_despliegue(nombres_frente_ok=None):
                 print(
                     f"  {nombre.rsplit(':',1)[0]}: TANQUE/Corte → omitido "
                     f"XY/CUT/HOLE (sin flat ni cortes internos)"
-                )
-                continue
-            if prod == "BOARD" and not es_pieza_cobre(pieza):
-                print(
-                    f"  {nombre.rsplit(':',1)[0]}: BOARD no-busbar → "
-                    f"omitido XY (corte normal, sin barrenos)"
                 )
                 continue
         except Exception:
@@ -2003,7 +2164,6 @@ def acotar_barrenos_xy_despliegue(nombres_frente_ok=None):
             f"({fuente}), origen=({origen_x:.2f},{origen_y:.2f})"
         )
 
-        es_cobre = _es_cobre_hoja(nombre)
         mems_x, mems_y = [], []
         for b in barrenos:
             cx, cy = float(b["cx"]), float(b["cy"])
@@ -2011,11 +2171,10 @@ def acotar_barrenos_xy_despliegue(nombres_frente_ok=None):
             ejes = tuple(b.get("ejes") or ("X", "Y"))
             tipo_b = str(b.get("tipo") or "")
             medida_b = str(b.get("medida") or "centro")
-            # Cobre: barrenos circulares/oval → borde hacia 0 (no centro).
+            # Circulo/ovalo (cobre y acero): borde hacia 0 → XMIN/YMIN.
             # Cortes rectangulares ya traen medida=inicio (bbox).
             usar_borde = (
-                es_cobre
-                and medida_b != "inicio"
+                medida_b != "inicio"
                 and tipo_b != "corte"
             )
             rx_b = ry_b = 0.0
@@ -2136,20 +2295,19 @@ def acotar_barrenos_xy_despliegue(nombres_frente_ok=None):
             continue
         print(
             f"    coincidencias estrictas: X={len(grupos_x)} Y={len(grupos_y)} "
-            f"(tol≈{_tol_coincidencia_hoja(vista, barrenos):.4f} cm hoja)"
-            + (" [cobre=borde]" if es_cobre else "")
+            f"(tol≈{_tol_coincidencia_hoja(vista, barrenos):.4f} cm hoja) "
+            f"[borde XMIN/YMIN]"
         )
 
         letras_prev = typ_letras_habilitadas()
-        if es_cobre:
-            # Cobre/busbar: TYP sin nomenclatura A/B/C.
-            set_typ_letras_habilitadas(False)
+        # BOARD/GIGA: TYP sin nomenclatura A/B/C (cobre y acero).
+        set_typ_letras_habilitadas(False)
 
         def _emitir(eje: str, grupos: list[dict]) -> None:
             nonlocal creadas_nombres
             for idx, grupo in enumerate(grupos, start=1):
                 miembros_g = list(grupo.get("miembros") or [])
-                # Cortes / borde cobre → XMIN/YMIN (o XMAX/YMAX); metal → CENTRO
+                # Cortes / borde → XMIN/YMIN (o XMAX/YMAX); nunca CENTRO.
                 es_inicio = any(
                     str(m.get("medida") or "") in ("inicio", "borde")
                     or str(m.get("tipo") or "") == "corte"
@@ -2170,7 +2328,7 @@ def acotar_barrenos_xy_despliegue(nombres_frente_ok=None):
                             ) < 1e-6:
                                 if str(b.get("tipo") or "") == "corte" or str(
                                     b.get("medida") or ""
-                                ) == "inicio":
+                                ) in ("inicio", "borde"):
                                     es_inicio = True
                                 break
                         except Exception:
@@ -2178,17 +2336,16 @@ def acotar_barrenos_xy_despliegue(nombres_frente_ok=None):
                 if etiqueta_miembro:
                     etiqueta = etiqueta_miembro
                 else:
-                    etiqueta = f"{eje}MIN" if es_inicio else f"{eje}CENTRO"
+                    # Siempre borde/inicio (MIN). MAX solo si _ancla_borde lo marcó.
+                    etiqueta = f"{eje}MIN"
                 suf = f"{etiqueta}_TYP" if grupo["typ"] else etiqueta
                 nombre_nueva = (
                     f"{base_nombre}_{suf}"
                     if len(grupos) <= 1
                     else f"{base_nombre}_{suf}_{idx:02d}"
                 )
-                # Calidad: primeras 2 posiciones de borde (MIN/MAX) en cobre.
-                if es_cobre and idx <= 2 and (
-                    "MIN" in etiqueta or "MAX" in etiqueta
-                ):
+                # Calidad: primeras 2 posiciones de borde (MIN/MAX).
+                if idx <= 2 and ("MIN" in etiqueta or "MAX" in etiqueta):
                     print(
                         f"    Seleccionadas(calidad): {nombre_nueva} "
                         f"({eje}#{idx} borde desde 0,0)"
@@ -2262,30 +2419,26 @@ def acotar_barrenos_xy_despliegue(nombres_frente_ok=None):
                     continue
                 cx, cy = float(mejor["cx"]), float(mejor["cy"])
 
-                # Ancla de dibujo: borde (cobre) o centro (metal/corte bbox).
-                medida_g = "borde" if (
-                    es_cobre and "CENTRO" not in etiqueta
-                    and str(mejor.get("tipo") or "") != "corte"
-                    and not any(
+                # Ancla de dibujo: borde (circulo/ovalo) o inicio bbox (corte).
+                es_corte = (
+                    str(mejor.get("tipo") or "") == "corte"
+                    or any(
                         str(m.get("medida") or "") == "inicio"
+                        or str(m.get("tipo") or "") == "corte"
                         for m in miembros_g
                     )
-                ) else (
-                    "inicio" if es_inicio and "CENTRO" not in etiqueta else "centro"
                 )
+                medida_g = "inicio" if es_corte else "borde"
                 if medida_g == "borde":
                     ax, ay, _eti = _ancla_borde_barreno(mejor, ox, oy, eje)
-                elif medida_g == "inicio":
-                    # Corte rectangular: el grupo ya trae xmin/ymin en cx/cy
-                    # (``_cortes_internos_inicio`` guarda inicio en cx/cy).
+                else:
+                    # Corte rectangular: inicio = xmin/ymin del bbox.
                     ax, ay = cx, cy
                     try:
                         ax = float(mejor.get("xmin", cx))
                         ay = float(mejor.get("ymin", cy))
                     except Exception:
                         pass
-                else:
-                    ax, ay = cx, cy
 
                 # Miembros TYP: misma distancia de ANCLA en ESTA hoja.
                 miembros_n = [mejor]
@@ -2353,6 +2506,8 @@ def acotar_barrenos_xy_despliegue(nombres_frente_ok=None):
                             except Exception:
                                 continue
                             md = dict(bn)
+                            md["marca_cx"] = float(bn["cx"])
+                            md["marca_cy"] = float(bn["cy"])
                             md["cx"] = float(bax)
                             md["cy"] = float(bay)
                             miembros_draw.append(md)
@@ -2391,6 +2546,10 @@ def acotar_barrenos_xy_despliegue(nombres_frente_ok=None):
                         f"✅ {nombre_nueva}: {eje}{kind}={val_txt} "
                         f"({tag}, n={len(miembros_n)}) [sketch]"
                     )
+                    LAST_XY_N[str(nombre_nueva).upper()] = {
+                        "n": int(len(miembros_n)),
+                        "valor": str(val_txt),
+                    }
 
                 # Nota con el valor: el exportador lee números de notas si no hay dim
                 try:
@@ -2420,8 +2579,7 @@ def acotar_barrenos_xy_despliegue(nombres_frente_ok=None):
             _emitir("X", grupos_x)
             _emitir("Y", grupos_y)
         finally:
-            if es_cobre:
-                set_typ_letras_habilitadas(letras_prev)
+            set_typ_letras_habilitadas(letras_prev)
 
     print(
         f"✅ barrenos_xy_despliegue: {len(creadas_nombres)} hojas X/Y creadas"

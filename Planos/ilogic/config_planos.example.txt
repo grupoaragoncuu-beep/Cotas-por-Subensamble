@@ -7,3 +7,4 @@
 
 PLANOS_DIR=C:\ruta\al\repo\Planos
 PYTHON_EXE=C:\ruta\a\python.exe
+MACHOTE=C:\ruta\al\repo\Planos\MACHOTE PLANOS.dwg

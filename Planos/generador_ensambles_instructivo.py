@@ -10,8 +10,11 @@ HW solo posición. TYP misma familia. 6 vistas ViewCube. ``--limpiar``.
 Salida (bajo PIEZAS_ACOTADAS)::
 
     Corte/Maquinado/Accesorios Sueltos/<kit>/<VISTA>/*.jpg
-    Corte/Maquinado/Inspeccion Visual/<kit>/*.jpg
+    Corte/Maquinado/Inspeccion Visual/<kit|ipt_suelta>/*.jpg
     Corte/Maquinado/Accesorios Sueltos por pieza/<pieza>/*.jpg
+
+Inspeccion Visual = ISO del kit completo + IPT sueltas de 1er nivel.
+NO isométrica de hijas .ipt de cada kit.
 
 Regla iLogic: ``COTAS_ENSAMBLES_INDEPENDIENTES``.
 Colorimetría: ``Clasificación = Ensambles Individuales`` en .iam.
@@ -1294,6 +1297,37 @@ def _cotas_de_vista(vista, tg, hijos, ancla_preferida=None):
     return None
 
 
+def _activar_design_view_colorimetria(doc) -> None:
+    """
+    Reactiva la Design View donde vive la colorimetría Norman.
+
+    En OTC 62223 los overrides (Cyan/Orange-Red/…) están en ``Por defecto``,
+    no en ``[Principal]`` (ese queda vacío / Semi-Polished).
+    Fail-soft.
+    """
+    if doc is None:
+        return
+    try:
+        rm = doc.ComponentDefinition.RepresentationsManager
+        reps = rm.DesignViewRepresentations
+        actual = str(rm.ActiveDesignViewRepresentation.Name or "")
+        if actual.casefold() in {"por defecto", "default", "master"}:
+            return
+        target = None
+        for i in range(1, int(reps.Count) + 1):
+            r = reps.Item(i)
+            nom = str(r.Name or "")
+            if nom.casefold() in {"por defecto", "default", "master"}:
+                target = r
+                break
+        if target is None:
+            return
+        target.Activate()
+        _log(f"  Design View colorimetría: {actual!r} → {target.Name!r}")
+    except Exception:
+        return
+
+
 def _rutas_corte_maquinado(carpeta_tanque):
     """Raíz PIEZAS_ACOTADAS/Corte/Maquinado y subcarpetas del proceso."""
     from generador_tanque_completo import (
@@ -1338,7 +1372,11 @@ def _camara_isometrica_kit(asm_doc, tg, to):
 
 def _exportar_jpg_hoja(inv_app, plano, hoja, ruta_jpg):
     """Exporta la hoja activa a JPG (sin cotas / Inspección Visual)."""
-    from generador_vistas import ANCHO_EXPORTACION, ALTO_EXPORTACION
+    from generador_vistas import (
+        ALTO_EXPORTACION,
+        ANCHO_EXPORTACION,
+        _recortar_exportacion_jpg,
+    )
 
     os.makedirs(os.path.dirname(ruta_jpg) or ".", exist_ok=True)
     try:
@@ -1355,18 +1393,34 @@ def _exportar_jpg_hoja(inv_app, plano, hoja, ruta_jpg):
         white = inv_app.TransientObjects.CreateColor(255, 255, 255)
     except Exception:
         pass
+    temporal = ruta_jpg + ".__tmp.jpg"
     try:
-        plano.SaveAsBitmap(
-            ruta_jpg,
+        # DrawingDocument early-bound no tiene SaveAsBitmap; misma vía
+        # que el instructivo / Abigail: Camera de ActiveView.
+        inv_app.ActiveView.Camera.SaveAsBitmap(
+            temporal,
             ANCHO_EXPORTACION,
             ALTO_EXPORTACION,
             white,
-            white,
         )
+        time.sleep(0.12)
+        _recortar_exportacion_jpg(hoja, temporal, ruta_jpg)
         return os.path.isfile(ruta_jpg)
     except Exception as exc:
         _log(f"  AVISO export JPG Inspeccion Visual: {exc}")
+        try:
+            if os.path.isfile(temporal) and not os.path.isfile(ruta_jpg):
+                os.replace(temporal, ruta_jpg)
+                return True
+        except OSError:
+            pass
         return False
+    finally:
+        try:
+            if os.path.isfile(temporal):
+                os.remove(temporal)
+        except OSError:
+            pass
 
 
 def _procesar_inspeccion_visual(
@@ -1691,7 +1745,10 @@ def ejecutar(solo="", max_n=0, listar=False, limpiar=False, ruta_seleccion=""):
             _obtener_ensamble_principal,
             _obtener_plano_activo,
         )
-        from ensambles_independientes import recolectar_ensambles_independientes
+        from ensambles_independientes import (
+            recolectar_ensambles_independientes,
+            recolectar_ipt_sueltas_root,
+        )
         from nomenclatura_capturas import nombre_job_desde_ensamble
         from generador_tanque_completo import _nombre_carpeta_pieza
 
@@ -1810,6 +1867,24 @@ def ejecutar(solo="", max_n=0, listar=False, limpiar=False, ruta_seleccion=""):
                 _log(f"ERROR Inspeccion Visual {nombre}: {exc}")
                 _log(traceback.format_exc())
 
+        sueltas = recolectar_ipt_sueltas_root(
+            ensamble, exclusiones_extra=exclusiones
+        )
+        for part_doc, nombre_ipt in sueltas:
+            try:
+                total_insp += _procesar_inspeccion_visual(
+                    inv_app,
+                    plano,
+                    base_sheet,
+                    part_doc,
+                    nombre_ipt,
+                    rutas["inspeccion"],
+                    job,
+                )
+            except Exception as exc:
+                _log(f"ERROR Inspeccion Visual IPT {nombre_ipt}: {exc}")
+                _log(traceback.format_exc())
+
         nombres_piezas = _nombres_piezas_de_kits(lista)
         total_por_pieza = 0
         try:
@@ -1846,12 +1921,40 @@ def ejecutar(solo="", max_n=0, listar=False, limpiar=False, ruta_seleccion=""):
                 from generador_caras_tanque import (
                     _encontrar_hoja_machote,
                     _obtener_plano_activo,
+                    _obtener_ensamble_principal,
                 )
 
                 plano = _obtener_plano_activo(inv_app)
                 hoja = _encontrar_hoja_machote(plano)
                 if hoja is not None:
                     hoja.Activate()
+                # AddBaseView / ISO pueden cambiar la Design View activa.
+                # En este OTC la colorimetría Norman vive en «Por defecto».
+                try:
+                    ens = _obtener_ensamble_principal(inv_app)
+                    _activar_design_view_colorimetria(ens)
+                    try:
+                        for i in range(
+                            1, int(ens.ComponentDefinition.Occurrences.Count) + 1
+                        ):
+                            occ = ens.ComponentDefinition.Occurrences.Item(i)
+                            try:
+                                if int(occ.DefinitionDocumentType) != 12291:
+                                    continue
+                                sub = occ.Definition.Document
+                                from ensambles_independientes import (
+                                    _nombre_doc as _nd,
+                                    _es_estructura_cara_otc,
+                                )
+
+                                if _es_estructura_cara_otc(_nd(sub)):
+                                    _activar_design_view_colorimetria(sub)
+                            except Exception:
+                                continue
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
             except Exception:
                 pass
         pythoncom.CoUninitialize()

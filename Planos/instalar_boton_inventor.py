@@ -46,11 +46,14 @@ def _detectar_python():
 
 def _escribir_config(planos_dir, python_exe):
     cfg_path = os.path.join(_carpeta_ilogic(planos_dir), "config_planos.txt")
+    machote = os.path.join(planos_dir, "MACHOTE PLANOS.dwg")
+    linea_machote = f"MACHOTE={machote}\n" if os.path.isfile(machote) else ""
     contenido = (
         "# Generado por instalar_boton_inventor.py — NO editar a mano salvo\n"
         "# que sepas lo que haces. Este archivo es local a cada PC.\n"
         f"PLANOS_DIR={planos_dir}\n"
         f"PYTHON_EXE={python_exe}\n"
+        f"{linea_machote}"
     )
     with open(cfg_path, "w", encoding="utf-8") as f:
         f.write(contenido)

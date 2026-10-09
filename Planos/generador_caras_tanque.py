@@ -4912,6 +4912,7 @@ def _marcas_typ_en_accesorios(
                 x, y = float(gx), cy
             else:
                 x, y = cx, float(gy)
+        # El anillo TYP marca el punto de la cota (la orilla), no el centro del barreno.
         puntos.append((float(x), float(y)))
 
     # Orden de letras = cerca→lejos del origen (por centro de marca).

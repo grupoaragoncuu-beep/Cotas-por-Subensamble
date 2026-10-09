@@ -315,6 +315,9 @@ def _hoja(plano, base, nombre):
     _respirar(0.8)
     nueva = base.CopyTo(plano)
     nueva.Name = nombre
+    from creador_vistas import _limpiar_border_y_titleblock
+
+    _limpiar_border_y_titleblock(nueva)
     return nueva
 
 
@@ -912,7 +915,7 @@ def _lineal(hoja, tg, a, b, tx, ty, orient, lado_a, lado_b, cerca_x=None):
         return None
 
 
-def _buscar_par(hoja, tg, inv, pool_a, pool_b, target, orient, texto, tx, ty, lado_a, lado_b, tol=1.2, vertical=False, separacion=0.0, cerca_x=None):
+def _buscar_par(hoja, tg, inv, pool_a, pool_b, target, orient, texto, tx, ty, lado_a, lado_b, tol=1.2, vertical=False, separacion=0.0, cerca_x=None, plano=False):
     mejor = None
     peor = None
     esperado = float(target) * _ESCALA / 10.0
@@ -956,6 +959,23 @@ def _buscar_par(hoja, tg, inv, pool_a, pool_b, target, orient, texto, tx, ty, la
         )
         return None
     _linea_solida(mejor[2], inv)
+    if plano:
+        try:
+            mejor[2].HideValue = True
+            mejor[2].Text.FormattedText = " "
+        except Exception:
+            pass
+        # Mismo texto que la ordenada: perpendicular a la línea, en gris.
+        if separacion < 0:
+            _nota_color(
+                hoja, tg, tx + separacion, ty, texto, (68, 68, 68), ancla="derecha",
+            )
+        else:
+            _nota_color(
+                hoja, tg, tx + separacion, ty, texto, (68, 68, 68), ancla="izquierda",
+            )
+        print("  COTA", texto, round(mejor[1], 2))
+        return mejor[2]
     _capturar_extensiones(mejor[2])
     if vertical:
         mejor[2].HideValue = True
@@ -993,6 +1013,8 @@ def _mover_nota(nota, tg, x, y, ancla="centro"):
             cx, cy = minx + _font() * 0.45, miny
         elif ancla == "derecha":
             cx, cy = maxx, (miny + maxy) / 2.0
+        elif ancla == "izquierda":
+            cx, cy = minx, (miny + maxy) / 2.0
         else:
             cx, cy = (minx + maxx) / 2.0, (miny + maxy) / 2.0
         pos = nota.Position
@@ -1853,7 +1875,7 @@ def _letras_paneles(paneles):
     return paneles
 
 
-def _cota_ancho_local(hoja, vista, tg, inv, horiz, tramo, texto, x_cota, sep):
+def _cota_ancho_local(hoja, vista, tg, inv, horiz, tramo, texto, x_cota, sep, plano=False):
     sx, sy_a = _sheet(vista, tg, tramo["x"], tramo["y0"])
     _sx, sy_b = _sheet(vista, tg, tramo["x"], tramo["y1"])
     a = _cerca(horiz, sx, sy_a, arco=False, vertical=False, tope=1.2)
@@ -1864,7 +1886,7 @@ def _cota_ancho_local(hoja, vista, tg, inv, horiz, tramo, texto, x_cota, sep):
     return _buscar_par(
         hoja, tg, inv, [a], [b], tramo["ancho"], K_VER, texto,
         x_cota, (sy_a + sy_b) / 2.0, "inf", "sup",
-        tol=2.5, vertical=True, separacion=sep,
+        tol=2.5, vertical=True, separacion=sep, plano=plano,
     )
 
 
@@ -1927,6 +1949,23 @@ def _intent_centro_ranura(hoja, curvas, sx, sy):
 
 def _ancho_texto(texto):
     return max(0.45, len(texto) * _font() * 0.80)
+
+
+def _repartir_sin_montar(items, indice, holgura):
+    """Filas cuya coordenada queda separada, para que el texto no se monte."""
+    filas = []
+    for item in items:
+        pos = item[indice]
+        destino = None
+        for fila in filas:
+            if all(abs(pos - otro[indice]) >= holgura for otro in fila):
+                destino = fila
+                break
+        if destino is None:
+            filas.append([item])
+        else:
+            destino.append(item)
+    return filas
 
 
 def _etiqueta_recta(hoja, tg, inv, x, y, texto):
@@ -2178,29 +2217,21 @@ def _acotar_corte(hoja, vista, tg, inv, huecos, fr, grupos, thk, fp=None, origen
     if al_centro and items_x:
         origen = items_x[0]
         resto = items_x[1:]
-        largo_item = None
-        if resto and str(resto[-1][1]).startswith("LENGTH"):
-            largo_item = resto.pop()
-        cerca, lejos = [], []
-        grupo = []
-        for item in resto:
-            if grupo and abs(item[2] - grupo[-1][2]) > 8.0:
-                cerca.append(grupo[0])
-                if len(grupo) > 1:
-                    lejos.append(grupo[1])
-                grupo = [item]
-            else:
-                grupo.append(item)
-        if grupo:
-            cerca.append(grupo[0])
-            if len(grupo) > 1:
-                lejos.append(grupo[1])
-        _juego_ordenado(hoja, tg, inv, [origen, *cerca] + ([largo_item] if largo_item else []), K_HOR, sx0, fila_x)
-        if lejos:
-            _juego_ordenado(
-                hoja, tg, inv, [origen, *lejos], K_HOR, sx0, fila_x - 2.05,
-                nota_origen=False,
-            )
+        # Un juego por cota. Si dos centros cercanos comparten juego, Inventor
+        # quiebra la extensión y el texto deja de caer sobre esa X.
+        # 0.50 cm es el ancho de la letra vertical: más cerca, baja a otra fila.
+        filas_x = _repartir_sin_montar(resto, 3, 0.50)
+        y_fila = fila_x
+        nota = True
+        for fila in filas_x:
+            for item in fila:
+                _juego_ordenado(
+                    hoja, tg, inv, [origen, item], K_HOR, sx0, y_fila,
+                    nota_origen=nota,
+                )
+                nota = False
+            alto = max(_ancho_texto(it[1]) for it in fila)
+            y_fila = y_fila - alto - 0.40
     medidas_y = []
     for cx, cy, d, xmin, xmax, ymin, ymax in huecos:
         if al_centro:
@@ -2252,7 +2283,86 @@ def _acotar_corte(hoja, vista, tg, inv, huecos, fr, grupos, thk, fp=None, origen
                 col_y,
                 sy1,
             ))
-        _juego_ordenado(hoja, tg, inv, items_y, K_VER, col_y, sy0)
+        elif local:
+            # El ancho que nace en el origen entra en la misma ordenada.
+            # El desfasado se acota solo, más abajo, también en ordenada.
+            for tramo in extremos:
+                sx_t = _sheet(vista, tg, tramo["x"], (tramo["y0"] + tramo["y1"]) / 2.0)[0]
+                tramo["lado"] = "izq" if abs(sx_t - sx0) <= abs(sx_t - sx1) else "der"
+            orden_w = [t for lado in ("izq", "der") for t in extremos if t["lado"] == lado]
+            for i, tramo in enumerate(orden_w, start=1):
+                tramo["n"] = i
+                y_top = tramo["y1"] if abs(tramo["y1"] - oy) >= abs(tramo["y0"] - oy) else tramo["y0"]
+                tramo["en_origen"] = abs(min(tramo["y0"], tramo["y1"]) - oy) < 4.0
+                if not tramo["en_origen"]:
+                    continue
+                sx_e, sy_e = _sheet(vista, tg, tramo["x"], y_top)
+                curva = _cerca(horiz, sx_e, sy_e, arco=False, vertical=False, tope=1.4)
+                if curva is None:
+                    print("  SIN ancho", round(tramo["ancho"], 2))
+                    continue
+                items_y.append((
+                    _intent_linea(hoja, curva, "izq"),
+                    f"WIDTH {i}={tramo['ancho']:.2f} mm",
+                    abs(y_top - oy),
+                    col_y,
+                    sy_e,
+                ))
+            if borde_sup is not None and all(abs(ancho - u) > 3.0 for u in distintos):
+                items_y.append((
+                    _intent_linea(hoja, borde_sup, "izq"),
+                    f"WIDTH TOTAL={ancho:.2f} mm",
+                    ancho,
+                    col_y,
+                    sy1,
+                ))
+        origen_y = items_y[0]
+        # Igual que en X: un juego por cota, para que la línea no se quiebre.
+        columnas = _repartir_sin_montar(items_y[1:], 4, 0.48)
+        x_col = col_y
+        nota = True
+        for columna in columnas:
+            for item in columna:
+                intent, texto, valor, _ax, ay = item
+                _juego_ordenado(
+                    hoja, tg, inv,
+                    [origen_y, (intent, texto, valor, x_col, ay)],
+                    K_VER, x_col, sy0,
+                    nota_origen=nota,
+                )
+                nota = False
+            ancho_txt = max(_ancho_texto(it[1]) for it in columna)
+            x_col = x_col - ancho_txt - 0.30
+        for tramo in extremos if local else []:
+            if not tramo.get("en_origen"):
+                y_top = tramo["y1"] if abs(tramo["y1"] - oy) >= abs(tramo["y0"] - oy) else tramo["y0"]
+                y_bot = tramo["y0"] if y_top == tramo["y1"] else tramo["y1"]
+                sx_b, sy_b = _sheet(vista, tg, tramo["x"], y_bot)
+                sx_t, sy_t = _sheet(vista, tg, tramo["x"], y_top)
+                curva_b = _cerca(horiz, sx_b, sy_b, arco=False, vertical=False, tope=1.4)
+                curva_t = _cerca(horiz, sx_t, sy_t, arco=False, vertical=False, tope=1.4)
+                if curva_b is None or curva_t is None:
+                    print("  SIN ancho", round(tramo["ancho"], 2))
+                    continue
+                texto_w = f"WIDTH {tramo['n']}={tramo['ancho']:.2f} mm"
+                if tramo["lado"] == "der":
+                    x_w = sx1 + _ancho_texto(texto_w) + 0.55
+                else:
+                    x_w = x_col - _ancho_texto(texto_w) - 0.4
+                _juego_ordenado(
+                    hoja, tg, inv,
+                    [
+                        (_intent_linea(hoja, curva_b, "izq"), "0.00", 0.0, x_w, sy_b),
+                        (
+                            _intent_linea(hoja, curva_t, "izq"),
+                            texto_w,
+                            tramo["ancho"],
+                            x_w,
+                            sy_t,
+                        ),
+                    ],
+                    K_VER, x_w, sy_b, nota_origen=False,
+                )
         filas = []
     izq, der = [], []
     anterior_izq = None
@@ -2315,7 +2425,7 @@ def _acotar_corte(hoja, vista, tg, inv, huecos, fr, grupos, thk, fp=None, origen
     x_width = sx1 + 1.05 + n_der * paso_der + 1.15
     if x_width > sx1 + 3.35:
         x_width = sx1 + 3.35
-    if local:
+    if local and not al_centro:
         for tramo in extremos:
             sx_t = _sheet(vista, tg, tramo["x"], (tramo["y0"] + tramo["y1"]) / 2.0)[0]
             tramo["lado"] = "izq" if abs(sx_t - sx0) <= abs(sx_t - sx1) else "der"
@@ -2323,29 +2433,56 @@ def _acotar_corte(hoja, vista, tg, inv, huecos, fr, grupos, thk, fp=None, origen
         paso_izq = min(1.15, 2.3 / len(izq)) if izq else 0.0
         fuera_izq = 1.15 + max(len(izq) - 1, 0) * paso_izq
         if al_centro:
-            fuera_izq = max(fuera_izq, 4.4)
+            # La columna Y ya ocupa este tramo. Las WIDTH salen más afuera,
+            # con el texto horizontal para que quepa junto a esa columna.
+            fuera_izq = max(fuera_izq, 1.7 + 2.5)
         fuera_der = 1.05 + max(n_der - 1, 0) * paso_der
-        x_w1 = sx0 - (fuera_izq + 1.6)
-        x_w2 = sx1 + (fuera_der + 1.6)
-        x_total = x_w1 - 1.7
-        for i, tramo in enumerate(orden, start=1):
-            texto_w = f"WIDTH {i}={tramo['ancho']:.2f} mm"
-            if tramo["lado"] == "izq":
-                _cota_ancho_local(
-                    hoja, vista, tg, inv, horiz, tramo, texto_w,
-                    x_w1, -0.55,
+        if al_centro:
+            x_izq = sx0 - fuera_izq - 0.35
+            x_der = sx1 + fuera_der + 0.45
+            for i, tramo in enumerate(orden, start=1):
+                texto_w = f"WIDTH {i}={tramo['ancho']:.2f} mm"
+                if tramo["lado"] == "izq":
+                    _cota_ancho_local(
+                        hoja, vista, tg, inv, horiz, tramo, texto_w,
+                        x_izq, -0.08, plano=True,
+                    )
+                    x_izq -= _ancho_texto(texto_w) + 0.45
+                else:
+                    _cota_ancho_local(
+                        hoja, vista, tg, inv, horiz, tramo, texto_w,
+                        x_der, 0.08, plano=True,
+                    )
+                    x_der += _ancho_texto(texto_w) + 0.45
+            if borde_y and borde_sup and all(abs(ancho - u) > 3.0 for u in distintos):
+                texto_total = f"WIDTH TOTAL={ancho:.2f} mm"
+                _buscar_par(
+                    hoja, tg, inv, [borde_y], [borde_sup], ancho, K_VER,
+                    texto_total, x_izq, (sy0 + sy1) / 2.0,
+                    "inf", "sup", tol=2.0, separacion=-0.08, plano=True,
                 )
-            else:
-                _cota_ancho_local(
-                    hoja, vista, tg, inv, horiz, tramo, texto_w,
-                    x_w2, 0.5,
+        else:
+            x_w1 = sx0 - (fuera_izq + 1.6)
+            x_w2 = sx1 + (fuera_der + 1.6)
+            x_total = x_w1 - 1.7
+            for i, tramo in enumerate(orden, start=1):
+                texto_w = f"WIDTH {i}={tramo['ancho']:.2f} mm"
+                if tramo["lado"] == "izq":
+                    _cota_ancho_local(
+                        hoja, vista, tg, inv, horiz, tramo, texto_w,
+                        x_w1, -0.55,
+                    )
+                else:
+                    _cota_ancho_local(
+                        hoja, vista, tg, inv, horiz, tramo, texto_w,
+                        x_w2, 0.5,
+                    )
+            if borde_y and borde_sup and all(abs(ancho - u) > 3.0 for u in distintos):
+                _buscar_par(
+                    hoja, tg, inv, [borde_y], [borde_sup], ancho, K_VER,
+                    f"WIDTH TOTAL={ancho:.2f} mm", x_total, (sy0 + sy1) / 2.0,
+                    "inf", "sup", tol=2.0, vertical=True, separacion=-0.55,
                 )
-        if borde_y and borde_sup and all(abs(ancho - u) > 3.0 for u in distintos):
-            _buscar_par(
-                hoja, tg, inv, [borde_y], [borde_sup], ancho, K_VER,
-                f"WIDTH TOTAL={ancho:.2f} mm", x_total, (sy0 + sy1) / 2.0,
-                "inf", "sup", tol=2.0, vertical=True, separacion=-0.55,
-            )
     elif borde_y and borde_sup and not al_centro:
         _buscar_par(
             hoja, tg, inv, [borde_y], [borde_sup], ancho, K_VER,
@@ -2401,14 +2538,15 @@ def _acotar_corte(hoja, vista, tg, inv, huecos, fr, grupos, thk, fp=None, origen
         typ = " TYP" if len(miembros) >= 2 else ""
         texto = f"{letra}=Ø{diam:.2f}{typ} mm"
         tope = _borde_ranura(curvas, sx, sy) if al_centro else None
+        if al_centro and tope is None:
+            try:
+                radio = float(arco["c"].ModelGeometry.Radius) * float(_ESCALA)
+                tope = float(arco["c"].CenterPoint.Y) + radio
+            except Exception:
+                tope = sy
         try:
-            if al_centro and tope is not None:
+            if al_centro:
                 ptx, pty = sx, sy1 + 0.55
-            elif al_centro:
-                if abs(sx - sx0) <= abs(sx - sx1):
-                    ptx, pty = sx + 0.15, sy1 + 0.85
-                else:
-                    ptx, pty = sx - 2.4, sy1 + 0.85
             else:
                 ptx = sx0 + (i + 1) * (sx1 - sx0) / (len(por_diam) + 1)
                 pty = sy1 + 1.8 + (i % 2) * 0.7
@@ -2417,7 +2555,7 @@ def _acotar_corte(hoja, vista, tg, inv, huecos, fr, grupos, thk, fp=None, origen
             print("  diam", texto, exc)
             continue
         medido = _mm(dim)
-        if al_centro and tope is not None:
+        if al_centro:
             try:
                 dim.Delete()
             except Exception as exc:
@@ -2427,15 +2565,7 @@ def _acotar_corte(hoja, vista, tg, inv, huecos, fr, grupos, thk, fp=None, origen
             _nota_color(hoja, tg, sx, y_nota, texto, (68, 68, 68), ancla="centro")
             print("  COTA", texto, round(medido or 0, 2))
             continue
-        if al_centro:
-            try:
-                dim.HideValue = True
-                dim.Text.FormattedText = " "
-            except Exception:
-                pass
-            _nota_color(hoja, tg, ptx, pty, texto, (68, 68, 68), ancla="centro")
-        else:
-            _texto(dim, inv, texto, diametro=True)
+        _texto(dim, inv, texto, diametro=True)
         _linea_solida(dim, inv)
         print("  COTA", texto, round(medido or 0, 2))
     _zonas_flat(hoja, vista, tg, huecos, fp)

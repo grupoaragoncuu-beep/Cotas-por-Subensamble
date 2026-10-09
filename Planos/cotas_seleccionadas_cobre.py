@@ -1,14 +1,16 @@
 """
-Calidad cobre/busbar: flag ``Seleccionadas`` (sí/no) sobre cotas XY de barrenos.
+Flag ``Seleccionadas`` (sí/no) sobre capturas JPG.
 
-Regla (GIGA / Abigail cobre):
-  - Solo piezas ``es_pieza_cobre`` (ABB / GENE / RLG…).
-  - Cotas al BORDE del barreno (XMIN/XMAX/YMIN/YMAX). También acepta
-    XCENTRO/YCENTRO legado.
-  - ``sí`` = las 2 primeras posiciones distintas en X y las 2 primeras en Y
-    desde (0,0) (valores numéricos del nombre de captura, ascendente).
-  - El resto de cotas de esa pieza → ``no``.
-  - Piezas no-cobre → siempre ``no``.
+Reglas GIGA / Abigail:
+  - **Metal (no cobre/busbar):** todas las cotas → ``sí``.
+  - **Cobre/busbar:**
+      - Medidas generales → ``sí``:
+        LENGTH / WIDTH* (incl. WIDTH_TOTAL, WIDTH1..N) / THK / HEIGHT /
+        LEG / WING / OD / ID / HOLE* (diámetros).
+      - Barrenos XY (XMIN/XMAX/YMIN/YMAX/XCENTRO/YCENTRO ± TYP):
+        ``sí`` = las 2 primeras posiciones distintas en X y las 2 en Y;
+        el resto XY → ``no``.
+      - CUT_* / otras no listadas → ``no``.
 """
 
 from __future__ import annotations
@@ -16,20 +18,46 @@ from __future__ import annotations
 import os
 import re
 
-from piezas_cobre import es_pieza_cobre
-
 try:
     from nomenclatura_capturas import SEP as _SEP
 except Exception:
     _SEP = "__"
 
-# Medida final: XMIN/XMAX/XCENTRO[_TYP]_{valor}[mm|in] (idem Y)
+# Medida XY: XMIN/XMAX/XCENTRO[_TYP]_{valor}[mm|in] (idem Y)
 _RE_MEDIDA_XY = re.compile(
     r"^(?P<eje>X|Y)(?:MIN|MAX|CENTRO)(?:_TYP)?_(?P<val>-?\d+(?:\.\d+)?)(?:mm|in)?$",
     re.IGNORECASE,
 )
 
+# Medidas generales de pieza (siempre sí en cobre; en metal ya va todo sí).
+# Incluye Ø HOLE01..nn; la segregación cobre queda solo en XY.
+_RE_MEDIDA_GENERAL = re.compile(
+    r"^(?:"
+    r"LENGTH|WIDTH(?:_TOTAL|[1-9])?|BROAD|THK|HEIGHT|LEG|WING\d{2}|ANGLE\d{2}|OD|ID|"
+    r"HOLE\d{2}|"
+    r"ANCHO|LARGO|ALTO|LADO|FRENTE_[12]|"
+    r"DIAMETRO_(?:EXTERIOR|INTERIOR|H\d{2})"
+    r")(?:_SIN_COTA)?_"
+    r"-?\d+(?:\.\d+)?(?:mm|in|deg)?$",
+    re.IGNORECASE,
+)
+
 _VAL_TOL = 1e-4
+
+
+def _parts_captura(nombre_archivo: str) -> tuple[str, str] | None:
+    """``(item, medida)`` desde ``JOB__ITEM__MEDIDA_val.jpg``."""
+    base = os.path.splitext(os.path.basename(str(nombre_archivo or "")))[0]
+    if not base or _SEP not in base:
+        return None
+    parts = base.split(_SEP)
+    if len(parts) < 3:
+        return None
+    item = parts[1].strip()
+    medida = parts[2].strip()
+    if not item or not medida:
+        return None
+    return item, medida
 
 
 def parse_xycentro_captura(nombre_archivo: str) -> tuple[str, str, float] | None:
@@ -37,30 +65,36 @@ def parse_xycentro_captura(nombre_archivo: str) -> tuple[str, str, float] | None
     Devuelve ``(item, 'X'|'Y', valor)`` si el JPG es cota XY de barreno
     (MIN/MAX/CENTRO).
     """
-    base = os.path.splitext(os.path.basename(str(nombre_archivo or "")))[0]
-    if not base:
+    parsed = _parts_captura(nombre_archivo)
+    if parsed is None:
         return None
-    partes = base.split(_SEP)
-    if len(partes) < 2:
-        return None
-    # {JOB}__{ITEM}__{MEDIDA_VALOR}  o  {ITEM}__{MEDIDA_VALOR}
-    if len(partes) >= 3:
-        item = str(partes[1] or "").strip()
-        medida = str(partes[-1] or "").strip()
-    else:
-        item = str(partes[0] or "").strip()
-        medida = str(partes[1] or "").strip()
+    item, medida = parsed
     m = _RE_MEDIDA_XY.match(medida)
     if not m:
-        return None
-    eje = str(m.group("eje") or "").upper()
-    if not item or eje not in ("X", "Y"):
         return None
     try:
         val = float(m.group("val"))
     except Exception:
         return None
-    return item, eje, val
+    return item, m.group("eje").upper(), val
+
+
+def es_medida_general(nombre_archivo: str) -> bool:
+    parsed = _parts_captura(nombre_archivo)
+    if parsed is None:
+        return False
+    return bool(_RE_MEDIDA_GENERAL.match(parsed[1]))
+
+
+def _es_metal_item(item: str) -> bool:
+    """True si la pieza NO es cobre/busbar (todo SI)."""
+    try:
+        from piezas_cobre import es_pieza_cobre
+
+        return not bool(es_pieza_cobre(item))
+    except Exception:
+        # Sin catálogo: no asumir metal (conservador → lógica cobre)
+        return False
 
 
 def _vals_cercanos(a: float, b: float) -> bool:
@@ -72,23 +106,41 @@ def mapa_seleccionadas(nombres_archivo: list[str] | tuple[str, ...]) -> dict[str
     ``{basename_jpg: 'si'|'no'}`` para el conjunto dado (misma pieza o carpeta).
     """
     out: dict[str, str] = {}
-    por_item: dict[str, dict[str, list[tuple[float, str]]]] = {}
+    # Cobre: acumular XY por item para elegir primeras 2 X / 2 Y
+    por_item_xy: dict[str, dict[str, list[tuple[float, str]]]] = {}
 
     for raw in nombres_archivo or []:
         bn = os.path.basename(str(raw or ""))
         if not bn:
             continue
-        parsed = parse_xycentro_captura(bn)
-        if parsed is None:
+        parts = _parts_captura(bn)
+        if parts is None:
             out[bn] = "no"
             continue
-        item, eje, val = parsed
-        if not es_pieza_cobre(item):
-            out[bn] = "no"
-            continue
-        por_item.setdefault(item, {}).setdefault(eje, []).append((val, bn))
+        item, _medida = parts
 
-    for item, ejes in por_item.items():
+        # Metal: todas las cotas SI
+        if _es_metal_item(item):
+            out[bn] = "si"
+            continue
+
+        # Cobre — medidas generales siempre SI
+        if es_medida_general(bn):
+            out[bn] = "si"
+            continue
+
+        # Cobre — XY: diferir a agrupación
+        parsed_xy = parse_xycentro_captura(bn)
+        if parsed_xy is not None:
+            _item, eje, val = parsed_xy
+            por_item_xy.setdefault(item, {}).setdefault(eje, []).append((val, bn))
+            continue
+
+        # Cobre — HOLE / CUT / resto
+        # (HOLE ya entró como medida general; CUT y desconocidos → no)
+        out[bn] = "no"
+
+    for item, ejes in por_item_xy.items():
         elegidos: set[tuple[str, float]] = set()
         for eje in ("X", "Y"):
             vals = sorted({v for v, _ in ejes.get(eje, [])})
@@ -111,14 +163,37 @@ def seleccionada_para_captura(
     """
     ``'si'`` / ``'no'`` para una captura.
 
-    Si ``hermanos`` es None, solo puede marcar ``sí`` con lógica incompleta
-    (sin hermanos → ``no`` salvo que se pase lista). Preferir pasar todos los
-    JPG de la pieza/carpeta.
+    Preferir pasar todos los JPG de la pieza/carpeta como ``hermanos``
+    (necesario para segregación XY en cobre).
     """
     bn = os.path.basename(str(nombre_archivo or ""))
     if not bn:
         return "no"
+    # Metal / medida general: no hace falta hermanos
+    parts = _parts_captura(bn)
+    if parts is not None:
+        item, _ = parts
+        if _es_metal_item(item) or es_medida_general(bn):
+            return "si"
     lista = list(hermanos) if hermanos is not None else [bn]
     if bn not in {os.path.basename(x) for x in lista}:
         lista.append(bn)
     return mapa_seleccionadas(lista).get(bn, "no")
+
+
+def hermanos_en_carpeta(ruta_jpg_o_dir: str) -> list[str]:
+    """Basenames JPG en la misma carpeta que ``ruta_jpg_o_dir``."""
+    p = str(ruta_jpg_o_dir or "")
+    if not p:
+        return []
+    carpeta = p if os.path.isdir(p) else os.path.dirname(os.path.abspath(p))
+    if not carpeta or not os.path.isdir(carpeta):
+        return []
+    out: list[str] = []
+    try:
+        for fn in os.listdir(carpeta):
+            if fn.lower().endswith((".jpg", ".jpeg", ".png")):
+                out.append(fn)
+    except OSError:
+        return []
+    return sorted(out)

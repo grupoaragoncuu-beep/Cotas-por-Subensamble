@@ -91,12 +91,17 @@ def get_cota_sufijo_font_cm(font_cm=None) -> float:
     return max(0.12, base * float(COTA_SUFIJO_FONT_FACTOR))
 
 
-def armar_formatted_texto_cota(texto, font_cm=None, bold=True, vertical=False) -> str:
+def armar_formatted_texto_cota(
+    texto, font_cm=None, bold=True, vertical=False, simbolo_diametro=False
+) -> str:
     """
     HTML Inventor: número a tamaño normal; ``TYP`` y ``mm``/``in`` ~15 % más chicos.
 
     Usa StyleOverride **en secuencia** (no anidados): Inventor suele ignorar
     el FontSize interior si va dentro de otro StyleOverride.
+
+    ``simbolo_diametro=True`` antepone Ø al número (HOLE de barreno / slot).
+    El resto de cotas lineales no lo llevan.
     """
     t = _SIMBOLOS_TEXTO.sub("", str(texto or "")).strip()
     if not t:
@@ -127,6 +132,7 @@ def armar_formatted_texto_cota(texto, font_cm=None, bold=True, vertical=False) -
         return _num(t)
 
     parts = []
+    puso_diam = False
     for i, tok in enumerate(tokens):
         sep = " " if i > 0 else ""
         up = tok.upper()
@@ -134,7 +140,15 @@ def armar_formatted_texto_cota(texto, font_cm=None, bold=True, vertical=False) -
             out = "TYP" if up == "TYP" else tok.lower()
             parts.append(_suf(f"{sep}{out}"))
         else:
-            parts.append(_num(f"{sep}{tok}" if i > 0 else tok))
+            show = tok
+            if (
+                simbolo_diametro
+                and not puso_diam
+                and re.match(r"-?\d", tok)
+            ):
+                show = "Ø" + tok
+                puso_diam = True
+            parts.append(_num(f"{sep}{show}" if i > 0 else show))
     return "".join(parts)
 
 

@@ -24,8 +24,8 @@ SEP = "__"
 # Token del valor en el nombre: enteros o decimales (82, 0.5, 3.536).
 _RE_VALOR_NOMBRE = r"\d+(?:\.\d+)?"
 # Sufijo de unidad en el nombre (opcional en parsers legacy).
-_RE_UNIDAD_NOMBRE = r"(?:mm|in)"
-_RE_UNIDAD_NOMBRE_OPT = r"(?P<unidad>mm|in)?"
+_RE_UNIDAD_NOMBRE = r"(?:mm|in|deg)"
+_RE_UNIDAD_NOMBRE_OPT = r"(?P<unidad>mm|in|deg)?"
 
 # Orden: compuestos antes que simples.
 _TIPOS_HOJA_A_EXPORT = (
@@ -46,6 +46,8 @@ _TIPOS_HOJA_A_EXPORT = (
     ("DESPLIEGUE_YMIN", "YMIN"),
     ("DESPLIEGUE_XMAX", "XMAX"),
     ("DESPLIEGUE_YMAX", "YMAX"),
+    ("DESPLIEGUE_CUT_LENGTH_TYP", "CUT_LENGTH_TYP"),
+    ("DESPLIEGUE_CUT_WIDTH_TYP", "CUT_WIDTH_TYP"),
     ("DESPLIEGUE_CUT_LENGTH", "CUT_LENGTH"),
     ("DESPLIEGUE_CUT_WIDTH", "CUT_WIDTH"),
     ("XCENTRO_TYP", "XCENTRO_TYP"),
@@ -60,6 +62,8 @@ _TIPOS_HOJA_A_EXPORT = (
     ("YMIN", "YMIN"),
     ("XMAX", "XMAX"),
     ("YMAX", "YMAX"),
+    ("CUT_LENGTH_TYP", "CUT_LENGTH_TYP"),
+    ("CUT_WIDTH_TYP", "CUT_WIDTH_TYP"),
     ("CUT_LENGTH", "CUT_LENGTH"),
     ("CUT_WIDTH", "CUT_WIDTH"),
     # Cobre irregular (zapato): TOTAL = span máximo; WIDTH1..N = tramos desde 0
@@ -122,6 +126,17 @@ _TIPOS_PIEZA_CORE = (
     "THK",
     "HEIGHT",
     "LEG",
+    "WING01",
+    "WING02",
+    "ANGLE01",
+    "ANGLE02",
+    "ANGLE03",
+    "ANGLE04",
+    "ANGLE05",
+    "ANGLE06",
+    "ANGLE07",
+    "ANGLE08",
+    "ANGLE09",
     "OD",
     "ID",
     "XCENTRO_TYP",
@@ -136,6 +151,8 @@ _TIPOS_PIEZA_CORE = (
     "YMIN",
     "XMAX",
     "YMAX",
+    "CUT_LENGTH_TYP",
+    "CUT_WIDTH_TYP",
     "CUT_LENGTH",
     "CUT_WIDTH",
     "DIAMETRO_EXTERIOR",

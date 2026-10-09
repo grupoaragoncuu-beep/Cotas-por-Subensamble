@@ -38,11 +38,59 @@ from typing import Any
 _TRUE = ("1", "true", "yes", "on", "si", "sí")
 _NOMBRE_DOSSIER_FILES = "DOSSIER FILES"
 _NOMBRE_JPGS = "JPGS"
+# Árbol acordado bajo JPGS (DEBER_SER). Sin Almacén ni staging.
+_RAMAS_DOSSIER_JPGS = (
+    r"COTAS_POR_REFERENCIA\SEGM1",
+    r"COTAS_POR_REFERENCIA\SEGM2",
+    r"COTAS_POR_REFERENCIA\SEGM3",
+    r"COTAS_POR_REFERENCIA\SEGM4",
+    r"COTAS_POR_REFERENCIA\TOP",
+    r"COTAS_POR_REFERENCIA\BASE",
+    r"PIEZAS_ACOTADAS\Corte\Plasma y Laser\Corte metal",
+    r"PIEZAS_ACOTADAS\Corte\Plasma y Laser\Corte Busbar",
+    r"PIEZAS_ACOTADAS\Corte\Maquinado\Maquinados metal",
+    r"PIEZAS_ACOTADAS\Corte\Maquinado\Corte Busbar",
+    r"PIEZAS_ACOTADAS\Corte\Maquinado\Piezas Soldadas",
+    r"PIEZAS_ACOTADAS\Corte\Maquinado\Accesorios Sueltos",
+    r"PIEZAS_ACOTADAS\Corte\Maquinado\Inspeccion Visual",
+    r"PIEZAS_ACOTADAS\Corte\Maquinado\Accesorios Sueltos por pieza",
+    r"PIEZAS_ACOTADAS\Doblado\Metal",
+    r"PIEZAS_ACOTADAS\Doblado\Busbar",
+    r"PIEZAS_ACOTADAS\Estañado Busbar",
+    r"PIEZAS_ACOTADAS\SIN CLASIFICACION",
+)
 # UNC típico del share corporativo (picker / initialdir).
 _UNC_CORPORATE_DEFAULT = (
     r"\\192.168.2.80\Users\Administrator\Desktop\Grupo Arga Metals"
     r"\ARGA METALS CORPORATE SYSTEM"
 )
+
+
+def canonizar_ruta_servidor(ruta: str) -> str:
+    """
+    Ruta de evidencia en DB: UNC del servidor, no unidad de esta PC.
+
+    ``Y:\\ARGA METALS CORPORATE SYSTEM\\...`` y cualquier disco local que
+    apunte al mismo árbol pasan a
+    ``\\\\192.168.2.80\\Users\\Administrator\\Desktop\\Grupo Arga Metals\\...``.
+    Si el UNC no existe, se conserva la ruta original.
+    """
+    raw = str(ruta or "").strip().replace("/", "\\")
+    if not raw:
+        return ""
+    marker = "ARGA METALS CORPORATE SYSTEM"
+    idx = raw.upper().find(marker)
+    if idx < 0:
+        return raw
+    if raw.upper().startswith("\\\\192.168.2.80\\"):
+        return raw
+    resto = raw[idx + len(marker) :].lstrip("\\")
+    unc = _UNC_CORPORATE_DEFAULT.rstrip("\\")
+    if resto:
+        unc = unc + "\\" + resto
+    if os.path.isfile(unc) or os.path.isdir(unc):
+        return unc
+    return raw
 
 
 def dossier_habilitado() -> bool:
@@ -219,9 +267,28 @@ def _ruta_accesible(ruta: str) -> bool:
         return False
 
 
+def armar_arbol_dossier_jpgs(dossier_jpgs: str) -> int:
+    """
+    Crea el árbol acordado bajo ``DOSSIER FILES\\JPGS``.
+
+    No borra carpetas ni piezas que ya existan. No crea Almacén ni staging.
+    """
+    raiz = str(dossier_jpgs or "").strip()
+    if not raiz:
+        return 0
+    os.makedirs(raiz, exist_ok=True)
+    n = 0
+    for rel in _RAMAS_DOSSIER_JPGS:
+        destino = os.path.join(raiz, rel)
+        os.makedirs(destino, exist_ok=True)
+        n += 1
+    return n
+
+
 def asegurar_estructura_dossier_jpgs(job_root: str) -> str:
     """
-    Crea ``<job>\\DOSSIER FILES\\JPGS`` si hace falta. Fail-soft → ``\"\"``.
+    Crea ``<job>\\DOSSIER FILES\\JPGS`` y el árbol de procesos.
+    Fail-soft → ``\"\"``.
     """
     try:
         info = normalizar_ruta_dossier(job_root)
@@ -229,7 +296,7 @@ def asegurar_estructura_dossier_jpgs(job_root: str) -> str:
         jpgs = info.get("dossier_jpgs") or ""
         if not root or not jpgs:
             return ""
-        os.makedirs(jpgs, exist_ok=True)
+        armar_arbol_dossier_jpgs(jpgs)
         return jpgs if _ruta_accesible(jpgs) else ""
     except Exception as exc:
         print(f"AVISO dossier: no se pudo crear JPGS ({exc})")
@@ -446,33 +513,108 @@ def producto_cliente_desde_job_root(ruta_job: str) -> tuple[str, str]:
         return "", ""
 
 
-def _local_path_vsm_a_windows(local_path: str) -> str:
-    """
-    ``/mnt/server_data/ARGA METALS…`` → ``X:\\ARGA METALS…`` si existe,
-    o UNC configurable.
-    """
+def _cola_arga_desde_vsm(local_path: str) -> str:
+    """``/mnt/server_data/ARGA METALS…/JOB`` → ``ARGA METALS…\\JOB``."""
     raw = str(local_path or "").strip().replace("/", "\\")
     if not raw:
         return ""
-    # Quitar prefijo linux del mount VSM.
-    markers = (
-        "\\mnt\\server_data\\",
-        "/mnt/server_data/",
-    )
-    raw_cmp = raw.replace("/", "\\")
-    for pref in markers:
-        pref_n = pref.replace("/", "\\")
-        if raw_cmp.lower().startswith(pref_n.lower()):
-            raw = raw_cmp[len(pref_n) :]
-            break
+    marker = "ARGA METALS CORPORATE SYSTEM"
+    idx = raw.upper().find(marker)
+    if idx >= 0:
+        return raw[idx:].lstrip("\\")
+    for pref in ("\\mnt\\server_data\\",):
+        if raw.lower().startswith(pref.lower()):
+            return raw[len(pref) :].lstrip("\\")
+    return raw.lstrip("\\")
+
+
+def _local_path_vsm_a_windows(local_path: str) -> str:
+    """
+    Ruta Windows del job VSM.
+
+    Prueba la unidad configurada, luego ``Y:`` y ``X:``, y el UNC del
+    servidor. Devuelve la primera que existe. Si ninguna existe todavía,
+    deja el UNC para que la base no apunte a un disco de esta PC.
+    """
+    cola = _cola_arga_desde_vsm(local_path)
+    if not cola:
+        return ""
+    candidatos: list[str] = []
+    drive = _env("COTAS_VSM_DRIVE", "")
+    if drive:
+        if not drive.endswith(":"):
+            drive = drive.rstrip("\\") + ":"
+        candidatos.append(drive + "\\" + cola)
+    for letra in ("Y:", "X:"):
+        candidatos.append(letra + "\\" + cola)
+    unc_root = _UNC_CORPORATE_DEFAULT.rstrip("\\")
+    marker = "ARGA METALS CORPORATE SYSTEM"
+    if cola.upper().startswith(marker):
+        resto = cola[len(marker) :].lstrip("\\")
+        unc = unc_root if not resto else unc_root + "\\" + resto
     else:
-        raw = raw_cmp
-    raw = raw.lstrip("\\/")
-    drive = _env("COTAS_VSM_DRIVE", "X:")
-    if not drive.endswith(":"):
-        drive = drive.rstrip("\\") + ":"
-    win = drive + "\\" + raw.replace("/", "\\")
-    return os.path.normpath(win)
+        unc = unc_root + "\\" + cola
+    for cand in candidatos:
+        ruta = os.path.normpath(cand)
+        if os.path.isdir(ruta):
+            return ruta
+    if os.path.isdir(unc):
+        return os.path.normpath(unc)
+    return os.path.normpath(unc)
+
+
+def listar_jobs_vsm_activos() -> list[dict]:
+    """
+    Jobs que el VSM tiene en proceso (inventor, nesting, pending).
+
+    Cada uno trae la carpeta ya armada:
+    ``…\\JOB\\DOSSIER FILES\\JPGS``.
+    """
+    try:
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+    except ImportError:
+        return []
+    try:
+        with psycopg2.connect(**_db_vsm(), cursor_factory=RealDictCursor) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT job_number, client, product, status, local_path
+                    FROM public.jobs
+                    WHERE LOWER(COALESCE(status, '')) IN
+                          ('inventor', 'nesting', 'pending')
+                      AND COALESCE(local_path, '') <> ''
+                    ORDER BY
+                      CASE LOWER(status)
+                        WHEN 'inventor' THEN 0
+                        WHEN 'pending' THEN 1
+                        ELSE 2
+                      END,
+                      job_number
+                    """
+                )
+                rows = cur.fetchall()
+    except Exception as exc:
+        print(f"AVISO dossier: lista VSM ({exc})")
+        return []
+    out: list[dict] = []
+    for row in rows:
+        root = _local_path_vsm_a_windows(str(row.get("local_path") or ""))
+        if not root:
+            continue
+        jpgs = os.path.join(root, "DOSSIER FILES", "JPGS")
+        out.append(
+            {
+                "job_number": str(row.get("job_number") or "").strip(),
+                "client": str(row.get("client") or "").strip(),
+                "product": str(row.get("product") or "").strip(),
+                "status": str(row.get("status") or "").strip(),
+                "job_root": root,
+                "dossier_jpgs": jpgs,
+            }
+        )
+    return out
 
 
 @lru_cache(maxsize=32)
@@ -668,7 +810,7 @@ def asegurar_contexto_desde_job(job: str, job_root: str = "") -> dict:
 _RE_HOLE = re.compile(r"HOLE\d{2}", re.I)
 _RE_TYP = re.compile(r"(?:^|_)TYP(?:_|\d|$)|typ\+", re.I)
 _RE_MEDIDA = re.compile(
-    r"__(?P<med>LENGTH(?:_SIN_COTA)?|BROAD|WIDTH|THK|HEIGHT|LEG|OD|ID|"
+    r"__(?P<med>LENGTH(?:_SIN_COTA)?|BROAD|WIDTH|THK|HEIGHT|LEG|WING\d{2}|ANGLE\d{2}|OD|ID|"
     r"XCENTRO(?:_TYP)?|YCENTRO(?:_TYP)?|"
     r"HOLE\d{2}|FYP|TYP\+?)_",
     re.I,
@@ -757,14 +899,14 @@ def proceso_desde_ruta(ruta: str) -> str:
     """
     Extrae clasificación desde JPGS/<proceso>/[anidados]/...
 
-    Ejemplos (árbol acordado):
-      .../JPGS/Corte/Plasma y Laser/Corte metal/<pieza>/...
+    Ejemplos (árbol acordado Abigail / GIGA):
+      .../JPGS/PIEZAS_ACOTADAS/Corte/Plasma y Laser/Corte metal/<pieza>/...
         → Corte/Plasma y Laser/Corte metal
-      .../JPGS/Corte/Maquinado/Corte Busbar/<pieza>/...
+      .../JPGS/PIEZAS_ACOTADAS/Corte/Maquinado/Corte Busbar/<pieza>/...
         → Corte/Maquinado/Corte Busbar
-      .../JPGS/Doblado/Metal/<pieza>/... → Doblado/Metal
-      .../JPGS/Estañado Busbar/... → Estañado Busbar
-    Legacy: Corte/Corte, Corte/Doblado, Corte/Estañado.
+      .../JPGS/PIEZAS_ACOTADAS/Doblado/Metal/<pieza>/... → Doblado/Metal
+      .../JPGS/PIEZAS_ACOTADAS/Estañado Busbar/... → Estañado Busbar
+    Legacy (sin PIEZAS_ACOTADAS): Corte/Corte, Corte/Doblado, Corte/Estañado.
     """
     try:
         parts = [p for p in os.path.normpath(ruta).replace("/", "\\").split("\\") if p]
@@ -966,6 +1108,13 @@ def asegurar_tabla_cotas_dossier() -> bool:
                 )
                 cur.execute(
                     """
+                    ALTER TABLE public.cotas_dossier
+                        ADD COLUMN IF NOT EXISTS valores
+                            TEXT NOT NULL DEFAULT ''
+                    """
+                )
+                cur.execute(
+                    """
                     CREATE INDEX IF NOT EXISTS idx_cotas_dossier_job
                     ON public.cotas_dossier (job)
                     """
@@ -1025,6 +1174,7 @@ def insertar_evidencia(
     ruta: str,
     clasificacion: str = "",
     seleccionadas: str = "no",
+    valores: str | None = None,
 ) -> int | None:
     """
     INSERT o UPDATE y devuelve id, o None si falla.
@@ -1043,6 +1193,7 @@ def insertar_evidencia(
     if not clase:
         clase = proceso_desde_ruta(ruta) or ""
     sel = _norm_seleccionadas(seleccionadas)
+    valores_s = None if valores is None else str(valores)
     job_s = str(job or "")
     nombre_s = str(nombre_archivo or "")
     ruta_s = str(ruta or "")
@@ -1083,37 +1234,65 @@ def insertar_evidencia(
                         prev = (cand[0],)
                 if prev:
                     eid = int(prev[0])
-                    cur.execute(
-                        """
-                        UPDATE public.cotas_dossier
-                        SET cliente = %s,
-                            producto = %s,
-                            type = %s,
-                            cantidad_spoteos = %s,
-                            ruta = %s,
-                            clasificacion = %s,
-                            seleccionadas = %s
-                        WHERE id = %s
-                        """,
-                        (
-                            str(cliente or "SIN_CLIENTE"),
-                            str(producto or ""),
-                            str(type_ or "TYP"),
-                            max(0, int(cantidad_spoteos)),
-                            ruta_s,
-                            clase,
-                            sel,
-                            eid,
-                        ),
-                    )
+                    if valores_s is None:
+                        cur.execute(
+                            """
+                            UPDATE public.cotas_dossier
+                            SET cliente = %s,
+                                producto = %s,
+                                type = %s,
+                                cantidad_spoteos = %s,
+                                ruta = %s,
+                                clasificacion = %s,
+                                seleccionadas = %s
+                            WHERE id = %s
+                            """,
+                            (
+                                str(cliente or "SIN_CLIENTE"),
+                                str(producto or ""),
+                                str(type_ or "TYP"),
+                                max(0, int(cantidad_spoteos)),
+                                ruta_s,
+                                clase,
+                                sel,
+                                eid,
+                            ),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            UPDATE public.cotas_dossier
+                            SET cliente = %s,
+                                producto = %s,
+                                type = %s,
+                                cantidad_spoteos = %s,
+                                ruta = %s,
+                                clasificacion = %s,
+                                seleccionadas = %s,
+                                valores = %s
+                            WHERE id = %s
+                            """,
+                            (
+                                str(cliente or "SIN_CLIENTE"),
+                                str(producto or ""),
+                                str(type_ or "TYP"),
+                                max(0, int(cantidad_spoteos)),
+                                ruta_s,
+                                clase,
+                                sel,
+                                valores_s,
+                                eid,
+                            ),
+                        )
                     conn.commit()
                     return eid
                 cur.execute(
                     """
                     INSERT INTO public.cotas_dossier
                         (cliente, producto, job, type, cantidad_spoteos,
-                         nombre_archivo, ruta, clasificacion, seleccionadas)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         nombre_archivo, ruta, clasificacion, seleccionadas,
+                         valores)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                     """,
                     (
@@ -1126,6 +1305,7 @@ def insertar_evidencia(
                         ruta_s,
                         clase,
                         sel,
+                        valores_s or "",
                     ),
                 )
                 row = cur.fetchone()
@@ -1144,8 +1324,7 @@ def recalcular_seleccionadas_en_carpeta(
     """
     Recorre JPG de ``carpeta`` y actualiza ``seleccionadas`` (sí/no) por pieza.
 
-    Pensado para el final de cada exportación GIGA: con el set completo de
-    capturas por item cobre se marcan las 2 primeras XCENTRO y 2 YCENTRO.
+    Metal: todas ``sí``. Cobre: L/W/THK ``sí`` + 2 primeras X y 2 Y de barrenos.
     """
     if not dossier_habilitado():
         return 0
@@ -1182,14 +1361,21 @@ def recalcular_seleccionadas_en_carpeta(
                     marks = mapa_seleccionadas(names)
                     for fn, flag in marks.items():
                         sel = _norm_seleccionadas(flag)
+                        ruta_jpg = os.path.abspath(os.path.join(dirpath, fn))
+                        # Solo la fila de ESA ruta. Actualizar por nombre solo
+                        # reactivaba huérfanas (mismo JPG, ruta muerta) a "si".
+                        if not os.path.isfile(ruta_jpg):
+                            continue
                         if ctx_job:
                             cur.execute(
                                 """
                                 UPDATE public.cotas_dossier
                                 SET seleccionadas = %s
-                                WHERE job = %s AND nombre_archivo = %s
+                                WHERE job = %s
+                                  AND nombre_archivo = %s
+                                  AND ruta = %s
                                 """,
-                                (sel, ctx_job, fn),
+                                (sel, ctx_job, fn, ruta_jpg),
                             )
                         else:
                             cur.execute(
@@ -1197,8 +1383,9 @@ def recalcular_seleccionadas_en_carpeta(
                                 UPDATE public.cotas_dossier
                                 SET seleccionadas = %s
                                 WHERE nombre_archivo = %s
+                                  AND ruta = %s
                                 """,
-                                (sel, fn),
+                                (sel, fn, ruta_jpg),
                             )
                         n += int(cur.rowcount or 0)
             conn.commit()
@@ -1208,6 +1395,199 @@ def recalcular_seleccionadas_en_carpeta(
     if n:
         print(f"[dossier] seleccionadas actualizadas: {n} filas")
     return n
+
+
+def alinear_job_con_share(
+    job: str,
+    dossier_jpgs: str,
+    *,
+    min_jpg_share: int = 400,
+    max_fraccion_borrado: float = 0.40,
+) -> dict:
+    """
+    Deja ``job`` alineado al share UNC.
+
+    Borra filas cuyo JPG no está en el servidor (el escaneo las vuelve a
+    marcar ``si`` y el dossier muestra Evidence / 404). No corre si el
+    share se ve vacío: eso sería una caída del disco, no un dossier huérfano.
+    Una ruta ``Y:`` o ``C:`` se reescribe al UNC cuando el mismo archivo
+    está en el share. No copia fotos locales de vuelta al servidor.
+    """
+    try:
+        import psycopg2
+    except ImportError:
+        return {"abort": "sin psycopg2"}
+    try:
+        from cotas_seleccionadas_cobre import mapa_seleccionadas
+    except Exception as exc:
+        return {"abort": f"seleccionadas {exc}"}
+
+    root = os.path.abspath(str(dossier_jpgs or ""))
+    if not os.path.isdir(root):
+        return {"abort": "share no accesible"}
+
+    por_dir: dict[str, list[str]] = {}
+    share_por_nombre: dict[str, list[tuple[str, str]]] = {}
+    share_paths: set[str] = set()
+    for dirpath, _dirs, files in os.walk(root):
+        if any(p.casefold() in ("almacén", "almacen") for p in dirpath.split(os.sep)):
+            continue
+        nombres = []
+        for fn in files:
+            if not fn.lower().endswith((".jpg", ".jpeg", ".png")):
+                continue
+            ruta = os.path.normpath(os.path.join(dirpath, fn))
+            nombres.append(fn)
+            clase = proceso_desde_ruta(ruta) or ""
+            share_por_nombre.setdefault(fn.casefold(), []).append((ruta, clase))
+            share_paths.add(os.path.normcase(ruta))
+        if nombres:
+            por_dir[dirpath] = nombres
+    n_share = len(share_paths)
+    if n_share < int(min_jpg_share):
+        return {
+            "abort": f"share con {n_share} JPG (<{min_jpg_share}); no se borra nada",
+            "jpg_share": n_share,
+        }
+
+    sel_map: dict[str, str] = {}
+    for _d, names in por_dir.items():
+        sel_map.update(mapa_seleccionadas(names))
+
+    job_s = str(job or "").strip()
+    job_root = os.path.dirname(os.path.dirname(root))
+    prod, cli = producto_cliente_desde_job_root(job_root)
+    if not cli:
+        cli, prod = "GIGA", ""
+
+    with psycopg2.connect(**_db_nesting()) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, nombre_archivo, ruta, clasificacion, cantidad_spoteos
+                FROM public.cotas_dossier
+                WHERE job = %s
+                ORDER BY id
+                """,
+                (job_s,),
+            )
+            rows = cur.fetchall()
+        if not rows:
+            return {"abort": "job sin filas", "jpg_share": n_share}
+
+        def _destino(fn: str, clase: str, ruta: str) -> str:
+            ruta_s = str(ruta or "")
+            unc = canonizar_ruta_servidor(ruta_s)
+            for cand in (unc, ruta_s):
+                if cand and os.path.normcase(cand) in share_paths and os.path.isfile(cand):
+                    return os.path.normpath(cand)
+            cands = share_por_nombre.get(str(fn or "").casefold(), [])
+            misma = [p for p, c in cands if c == (clase or "")]
+            if len(misma) == 1:
+                return misma[0]
+            if len(cands) == 1:
+                return cands[0][0]
+            return ""
+
+        borrar: list[int] = []
+        reescribir: list[tuple[str, str, int]] = []
+        vistos: dict[str, int] = {}
+        for eid, fn, ruta, clase, _nspot in rows:
+            dest = _destino(str(fn or ""), str(clase or ""), str(ruta or ""))
+            if not dest:
+                borrar.append(int(eid))
+                continue
+            key = os.path.normcase(dest)
+            prev = vistos.get(key)
+            if prev is not None:
+                borrar.append(int(prev))
+            vistos[key] = int(eid)
+            sel = _norm_seleccionadas(sel_map.get(os.path.basename(dest), "no"))
+            if os.path.normcase(str(ruta or "")) != key or str(clase or "") != (
+                proceso_desde_ruta(dest) or ""
+            ):
+                reescribir.append((dest, sel, int(eid)))
+            else:
+                reescribir.append((dest, sel, int(eid)))
+
+        frac = len(borrar) / max(len(rows), 1)
+        if frac > float(max_fraccion_borrado):
+            return {
+                "abort": (
+                    f"se borrarían {len(borrar)}/{len(rows)} "
+                    f"({frac:.0%}); no se tocó la tabla"
+                ),
+                "jpg_share": n_share,
+            }
+
+        cubiertos = set(vistos)
+        faltan = [p for p in share_paths if p not in cubiertos]
+        # share_paths está en normcase; recuperar la ruta real.
+        real_de: dict[str, str] = {}
+        for lista in share_por_nombre.values():
+            for ruta, _c in lista:
+                real_de[os.path.normcase(ruta)] = ruta
+
+        with conn.cursor() as cur:
+            for eid in borrar:
+                cur.execute(
+                    "DELETE FROM public.cotas_dossier WHERE id = %s AND job = %s",
+                    (eid, job_s),
+                )
+            for dest, sel, eid in reescribir:
+                if eid in set(borrar):
+                    continue
+                clase = proceso_desde_ruta(dest) or ""
+                cur.execute(
+                    """
+                    UPDATE public.cotas_dossier
+                    SET ruta = %s,
+                        clasificacion = %s,
+                        seleccionadas = %s,
+                        cliente = %s,
+                        producto = %s,
+                        type = 'TYP'
+                    WHERE id = %s AND job = %s
+                    """,
+                    (dest, clase, sel, cli or "SIN_CLIENTE", prod or "", eid, job_s),
+                )
+            insertados = 0
+            for key in faltan:
+                dest = real_de.get(key) or ""
+                if not dest or not os.path.isfile(dest):
+                    continue
+                fn = os.path.basename(dest)
+                clase = proceso_desde_ruta(dest) or ""
+                sel = _norm_seleccionadas(sel_map.get(fn, "no"))
+                _tipo, n_spot = clasificar_type_y_spoteos(fn)
+                cur.execute(
+                    """
+                    INSERT INTO public.cotas_dossier
+                        (cliente, producto, job, type, cantidad_spoteos,
+                         nombre_archivo, ruta, clasificacion, seleccionadas)
+                    VALUES (%s, %s, %s, 'TYP', %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        cli or "SIN_CLIENTE",
+                        prod or "",
+                        job_s,
+                        n_spot,
+                        fn,
+                        dest,
+                        clase,
+                        sel,
+                    ),
+                )
+                insertados += 1
+        conn.commit()
+    return {
+        "abort": "",
+        "jpg_share": n_share,
+        "filas": len(rows),
+        "borradas": len(borrar),
+        "actualizadas": len([e for _d, _s, e in reescribir if e not in set(borrar)]),
+        "insertadas": insertados,
+    }
 
 
 def _ya_registrada(job: str, ruta: str, nombre: str) -> bool:
@@ -1497,6 +1877,45 @@ def publicar_arbol_jpgs(
         return "", n
 
 
+def publicar_pieza_carpeta(dir_local: str) -> tuple[str, int]:
+    """
+    Publica todos los JPG de una carpeta de pieza al dossier.
+
+    Returns ``(unc_dir, n_copiados)``. Fail-soft.
+    """
+    n = 0
+    unc_dir = ""
+    try:
+        if not os.path.isdir(dir_local):
+            return "", 0
+        for fn in os.listdir(dir_local):
+            if not fn.lower().endswith((".jpg", ".jpeg", ".png")):
+                continue
+            dst = publicar_jpg_a_dossier(os.path.join(dir_local, fn))
+            if dst:
+                n += 1
+                unc_dir = os.path.dirname(dst)
+    except Exception as exc:
+        print(f"AVISO dossier: publicar_pieza_carpeta ({exc})")
+    return unc_dir, n
+
+
+def sincronizar_lote_carpetas(
+    dirs: list[str],
+    *,
+    job: str | None = None,
+) -> int:
+    """Registra en DB los JPG de varias carpetas de pieza (un lote). Fail-soft."""
+    n = 0
+    try:
+        for d in dirs or []:
+            if d and os.path.isdir(d):
+                n += sincronizar_carpeta_jpgs(d, job=job, solo_nuevos=True)
+    except Exception as exc:
+        print(f"AVISO dossier: sincronizar_lote_carpetas ({exc})")
+    return n
+
+
 def publicar_y_sincronizar_dossier(
     carpeta_local: str,
     *,
@@ -1564,11 +1983,12 @@ def registrar_jpg(
             print(f"AVISO dossier: sin job para {nombre}")
             return False
 
-        # Preferir ruta corporativa en DB.
+        # Preferir UNC del servidor. Nunca dejar Y: ni C: si el archivo está en el share.
         ruta_db = ruta_local
         publicada = publicar_jpg_a_dossier(ruta_local)
         if publicada:
             ruta_db = publicada
+        ruta_db = canonizar_ruta_servidor(ruta_db) or ruta_db
 
         cli, prod, _src = resolver_cliente_producto(
             job_s, str(ctx.get("job_root") or "")

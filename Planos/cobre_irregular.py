@@ -10,7 +10,7 @@ Reglas (pizarrón):
   5. Origen = esquina inferior-izquierda REAL del contorno.
   6. Siempre diámetros (HOLE).
 
-Extra: WIDTH1 = cuello (tramo más estrecho); WIDTH2 = pad si aporta;
+Extra: WIDTH1 = cuello (tramo más estrecho); WIDTH2 = pad (extremo ancho);
 WIDTH_TOTAL = span máximo (FRENTE_2).
 """
 from __future__ import annotations
@@ -573,11 +573,272 @@ def orientar_vista_cobre(vista, tg, log=print) -> dict[str, Any]:
 orientar_vista_irregular = orientar_vista_cobre
 
 
+def _part_desde_vista(vista):
+    """PartDocument referenciado por la DrawingView (si hay)."""
+    try:
+        doc = vista.ReferencedDocumentDescriptor.ReferencedDocument
+        import win32com.client
+
+        return win32com.client.CastTo(doc, "PartDocument")
+    except Exception:
+        return None
+
+
+def _segs_contorno_flat_en_hoja(vista, tg) -> list[tuple[float, float, float, float]]:
+    """
+    Contorno Outer del FlatPattern proyectado a hoja (ModelToSheetSpace).
+
+    Más fiable que DrawingCurves cuando el escalón no sale bien en silueta 2D.
+    """
+    import win32com.client
+
+    part = _part_desde_vista(vista)
+    if part is None:
+        return []
+    try:
+        sm = win32com.client.CastTo(
+            part.ComponentDefinition, "SheetMetalComponentDefinition"
+        )
+    except Exception:
+        return []
+    try:
+        if not bool(sm.HasFlatPattern):
+            try:
+                sm.Unfold()
+            except Exception:
+                pass
+        if not bool(sm.HasFlatPattern):
+            return []
+        fp = sm.FlatPattern
+        body = fp.Body
+    except Exception:
+        return []
+
+    best = None
+    best_a = -1.0
+    try:
+        for i in range(1, body.Faces.Count + 1):
+            f = body.Faces.Item(i)
+            try:
+                a = float(f.Evaluator.Area)
+            except Exception:
+                continue
+            if a > best_a:
+                best_a = a
+                best = f
+    except Exception:
+        return []
+    if best is None:
+        return []
+
+    edges = None
+    try:
+        loops = best.EdgeLoops
+        outer = None
+        outer_score = -1
+        for li in range(1, loops.Count + 1):
+            lp = loops.Item(li)
+            try:
+                is_outer = bool(lp.IsOuterEdgeLoop)
+            except Exception:
+                is_outer = False
+            score = int(lp.Edges.Count) + (10000 if is_outer else 0)
+            if score > outer_score:
+                outer_score = score
+                outer = lp
+        if outer is not None:
+            edges = outer.Edges
+    except Exception:
+        edges = None
+    if edges is None:
+        try:
+            edges = best.Edges
+        except Exception:
+            return []
+
+    segs: list[tuple[float, float, float, float]] = []
+    for ei in range(1, int(edges.Count) + 1):
+        try:
+            e = edges.Item(ei)
+            sp = e.StartVertex.Point
+            ep = e.StopVertex.Point
+            # Sample mid for bent/curves
+            samples = [(float(sp.X), float(sp.Y), float(sp.Z))]
+            try:
+                mx = 0.5 * (float(sp.X) + float(ep.X))
+                my = 0.5 * (float(sp.Y) + float(ep.Y))
+                mz = 0.5 * (float(sp.Z) + float(ep.Z))
+                samples.append((mx, my, mz))
+            except Exception:
+                pass
+            samples.append((float(ep.X), float(ep.Y), float(ep.Z)))
+            sheet_pts = []
+            for x, y, z in samples:
+                p2 = vista.ModelToSheetSpace(tg.CreatePoint(x, y, z))
+                sheet_pts.append((float(p2.X), float(p2.Y)))
+            for i in range(len(sheet_pts) - 1):
+                x0, y0 = sheet_pts[i]
+                x1, y1 = sheet_pts[i + 1]
+                if abs(x1 - x0) < 1e-9 and abs(y1 - y0) < 1e-9:
+                    continue
+                segs.append((x0, y0, x1, y1))
+        except Exception:
+            continue
+    return segs
+
+
+def _anchos_por_banda_segs(
+    segs: list[tuple[float, float, float, float]], n_bandas: int = 16
+) -> list[tuple[float, float, float, float]]:
+    if len(segs) < 3:
+        return []
+    xs: list[float] = []
+    for x0, _y0, x1, _y1 in segs:
+        xs.extend((x0, x1))
+    minx, maxx = min(xs), max(xs)
+    span_x = maxx - minx
+    if span_x < _MIN_BANDA_CM:
+        return []
+    out: list[tuple[float, float, float, float]] = []
+    for i in range(n_bandas):
+        a = minx + span_x * (i / n_bandas)
+        b = minx + span_x * ((i + 1) / n_bandas)
+        x_mid = 0.5 * (a + b)
+        ys = _ys_en_x(segs, x_mid)
+        if len(ys) < 2:
+            continue
+        y_span = max(ys) - min(ys)
+        if y_span < _MIN_BANDA_CM:
+            continue
+        out.append((float(x_mid), float(y_span), float(a), float(b)))
+    return out
+
+
+def _span_local_ys(ys: list[float]) -> tuple[float, float] | None:
+    """
+    Ancho LOCAL del cobre en una vertical (no el envelope del Z/offset).
+
+    Con 2 hits → ese par. Con ≥3 (transición/Z): elige el tramo contiguo
+    de material más representativo (no min→max global).
+    """
+    if len(ys) < 2:
+        return None
+    ys_s = sorted(float(y) for y in ys)
+    if len(ys_s) == 2:
+        return ys_s[0], ys_s[1]
+    # Pares contiguos tras sort (= posibles espesores de brazo)
+    pares = [(ys_s[i], ys_s[i + 1]) for i in range(len(ys_s) - 1)]
+    spans = [(a, b, b - a) for a, b in pares if (b - a) >= _MIN_BANDA_CM]
+    if not spans:
+        return ys_s[0], ys_s[-1]
+    # Evitar el hueco del offset (suele ser el gap grande entre brazos):
+    # quedarse con el span contiguo más cercano a la mediana de spans chicos.
+    spans.sort(key=lambda t: t[2])
+    # Si hay un outlier enorme (>1.5× el menor), descartarlo (hueco Z)
+    base = spans[0][2]
+    buenos = [t for t in spans if t[2] <= max(base * 1.35, base + 0.5)]
+    if not buenos:
+        buenos = spans[:1]
+    # Entre buenos, el más ancho (= sección de barra, no ruido)
+    a, b, _ = max(buenos, key=lambda t: t[2])
+    return a, b
+
+
+def tramos_width_desde_flat(
+    vista, tg, log=print
+) -> list[dict[str, float]]:
+    """
+    Fallback: tramos WIDTH1/WIDTH2 = ancho LOCAL en cada extremo
+    (no envelope del Z). WIDTH_TOTAL se dibuja aparte como bbox.
+    """
+    segs = _segs_contorno_flat_en_hoja(vista, tg)
+    if len(segs) < 4:
+        log("  flat→hoja: sin segs contorno")
+        return []
+    bandas = _anchos_por_banda_segs(segs, n_bandas=24)
+    if len(bandas) < 4:
+        log(f"  flat→hoja: pocas bandas ({len(bandas)})")
+        return []
+
+    xs = [float(b[0]) for b in bandas]
+    minx, maxx = min(xs), max(xs)
+    span_x = max(maxx - minx, 1e-9)
+
+    # Recalcular cada banda con span LOCAL (anti-envelope Z)
+    locales: list[tuple[float, float, float, float]] = []
+    for x_mid, _old, a, b in bandas:
+        ys = _ys_en_x(segs, float(x_mid))
+        loc = _span_local_ys(ys)
+        if not loc:
+            continue
+        y0, y1 = loc
+        locales.append((float(x_mid), float(y1 - y0), float(a), float(b)))
+    if len(locales) < 4:
+        log(f"  flat→hoja: pocas bandas locales ({len(locales)})")
+        return []
+
+    # Extremos: 30% izq / 30% der (fuera de la transición del Z)
+    izq = [b for b in locales if b[0] <= minx + 0.30 * span_x]
+    der = [b for b in locales if b[0] >= minx + 0.70 * span_x]
+    if len(izq) < 1 or len(der) < 1:
+        mid = len(locales) // 2
+        izq = locales[: max(2, mid)]
+        der = locales[min(len(locales) - 2, mid) :]
+
+    def _tramo_mediano(grupo) -> dict[str, float]:
+        # Mediana de anchos locales (robusto a 1 banda mala)
+        orden = sorted(grupo, key=lambda x: float(x[1]))
+        b = orden[len(orden) // 2]
+        near = [
+            x
+            for x in grupo
+            if abs(float(x[1]) - float(b[1])) / max(float(b[1]), 1e-9) <= 0.12
+        ] or [b]
+        x0 = min(float(x[2]) for x in near)
+        x1 = max(float(x[3]) for x in near)
+        spans = sorted(float(x[1]) for x in near)
+        y_span = spans[len(spans) // 2]
+        return {
+            "x_mid": 0.5 * (x0 + x1),
+            "y_span": float(y_span),
+            "x0": float(x0),
+            "x1": float(x1),
+        }
+
+    t_izq = _tramo_mediano(izq)
+    t_der = _tramo_mediano(der)
+
+    # Envelope real (bbox) solo para decidir si hay offset/escalón útil
+    ys_all: list[float] = []
+    for x0, y0, x1, y1 in segs:
+        ys_all.extend((y0, y1))
+    env = max(ys_all) - min(ys_all) if ys_all else 0.0
+
+    w1 = float(t_der["y_span"])  # cuello/derecha por convención
+    w2 = float(t_izq["y_span"])  # pad/izquierda
+    # Si ambos extremos ≈ iguales pero env >> ancho → Z-offset: igual marcar lados
+    ratio_ext = abs(w2 - w1) / max(max(w1, w2), 1e-9)
+    ratio_env = (env - max(w1, w2)) / max(env, 1e-9) if env > 0 else 0.0
+    if ratio_ext < _RATIO_ESCALON and ratio_env < 0.08:
+        log(
+            f"  flat→hoja: rectángulo local "
+            f"Wizq={w2*10:.2f} Wder={w1*10:.2f} env={env*10:.2f}mm"
+        )
+        return []
+
+    log(
+        f"  flat→hoja: WIDTH1(der)={w1*10:.2f} WIDTH2(izq)={w2*10:.2f} "
+        f"env={env*10:.2f}mm ratio_ext={ratio_ext:.3f}"
+    )
+    # WIDTH1 = extremo derecho, WIDTH2 = extremo izquierdo (locales)
+    return [t_der, t_izq]
+
+
 def tramos_width_irregular(vista) -> list[dict[str, float]]:
     """
     Tramos WIDTH tras orientación pad-izquierda:
       WIDTH1 = cuello (tramo estrecho a la DERECHA)
-      WIDTH2 = pad solo si aporta y ≠ TOTAL (heel izquierdo)
+      WIDTH2 = pad (extremo ancho / heel izquierdo)
 
     Ignora bandas de transición (chaflán) donde el y_span no es estable.
     """
@@ -648,10 +909,10 @@ def tramos_width_irregular(vista) -> list[dict[str, float]]:
     ) < _RATIO_ESCALON:
         return []
 
-    out = [cuello]
-    # Solo cuello + WIDTH_TOTAL (FRENTE_2). El pad izquierdo ≈ envelope
-    # en zapatos offset; WIDTH2 generaba cotas basura (106.20 en chaflán).
-    return out
+    # WIDTH1 = cuello (extremo estrecho); WIDTH2 = pad (extremo ancho).
+    # WIDTH_TOTAL sigue siendo el span global (FRENTE_2). Aunque el pad
+    # numéricamente ≈ TOTAL, hay que marcar ambos extremos en la geometría.
+    return [cuello, pad]
 
 
 def aplicar_orientacion_cobre(
@@ -740,15 +1001,24 @@ def acotar_widths_tramos_irregular(
         if hoja.DrawingViews.Count < 1:
             continue
         vista = hoja.DrawingViews.Item(1)
-        if not es_cobre_irregular_vista(vista, pieza):
+        # Preferir Flat→hoja (ancho LOCAL anti-envelope Z). Silueta solo fallback.
+        tramos = tramos_width_desde_flat(vista, tg, log=log)
+        segs_medida = _segs_contorno_flat_en_hoja(vista, tg)
+        if not tramos:
+            tramos = tramos_width_irregular(vista)
+            if not segs_medida:
+                segs_medida = _segmentos_contorno(vista)
+        elif not segs_medida:
+            segs_medida = _segmentos_contorno(vista)
+        if not tramos:
+            # ¿Aún irregular por silueta? Solo TOTAL
+            if es_cobre_irregular_vista(vista, pieza):
+                piezas_irreg.add(pieza.upper())
+                log(f"  {base}: irregular sin tramos WIDTH distintos (solo TOTAL)")
             continue
         piezas_irreg.add(pieza.upper())
-        tramos = tramos_width_irregular(vista)
-        if not tramos:
-            log(f"  {base}: irregular sin tramos WIDTH distintos (solo TOTAL)")
-            continue
-        # WIDTH1 = cuello (ya ordenado por tramos_width_irregular)
-        segs = _segmentos_contorno(vista)
+        # WIDTH1 = cuello (ya ordenado por tramos_width_irregular / flat)
+        segs = segs_medida
         log(f"  {base}: WIDTH1=cuello..N irregular n={len(tramos)}")
         stem = base
         if "_DESPLIEGUE_FRENTE_1" in base.upper():
@@ -762,19 +1032,16 @@ def acotar_widths_tramos_irregular(
                 xa, xb = x0, x1
             x_mid = 0.5 * (xa + xb)
             spans = []
-            for t in (0.3, 0.5, 0.7):
+            for t in (0.25, 0.5, 0.75):
                 ys_i = _ys_en_x(segs, xa + t * (xb - xa))
-                if len(ys_i) >= 2:
-                    spans.append((min(ys_i), max(ys_i)))
+                loc = _span_local_ys(ys_i)
+                if loc:
+                    spans.append(loc)
             if not spans:
                 continue
-            # Mediana de alturas; descartar si hay mucha variación (transición)
+            # Mediana de anchos LOCALES (nunca min/max envelope del Z)
             spans.sort(key=lambda p: p[1] - p[0])
             y_bot, y_top = spans[len(spans) // 2]
-            h_vals = [p[1] - p[0] for p in spans]
-            if max(h_vals) - min(h_vals) > 0.12 * max(h_vals):
-                log(f"  skip WIDTH{idx}: banda inestable (chaflán)")
-                continue
             if abs(y_top - y_bot) < _MIN_BANDA_CM:
                 continue
             nombre_nueva = f"{stem}_DESPLIEGUE_WIDTH{idx}"
@@ -797,10 +1064,11 @@ def acotar_widths_tramos_irregular(
             vista_n = nueva.DrawingViews.Item(1)
             _forzar_vista_lista(inv, nueva, vista_n)
             _limpiar_dims_y_sketches(nueva)
-            segs_n = _segmentos_contorno(vista_n)
+            segs_n = segs
             ys_n = _ys_en_x(segs_n, x_mid)
-            if len(ys_n) >= 2:
-                y_bot, y_top = min(ys_n), max(ys_n)
+            loc_n = _span_local_ys(ys_n)
+            if loc_n:
+                y_bot, y_top = loc_n
             # Valor en cm de hoja → texto con unidad activa (mm)
             try:
                 from cota_estilo import texto_cota_dibujo, asegurar_unidad_cota
@@ -834,12 +1102,68 @@ def acotar_widths_tramos_irregular(
                     pass
                 continue
             creadas.append(nombre_nueva)
-            tag = "cuello" if idx == 1 else "pad"
+            tag = "cuello/der" if idx == 1 else "pad/izq"
             log(f"  ✅ {nombre_nueva}: WIDTH{idx}={texto} ({tag})")
 
-    # FRENTE_2 de piezas irregulares → export como WIDTH_TOTAL
+        # WIDTH_TOTAL = envelope Y global del contorno
+        try:
+            xs_all: list[float] = []
+            ys_all: list[float] = []
+            for x0, y0, x1, y1 in segs:
+                xs_all.extend((x0, x1))
+                ys_all.extend((y0, y1))
+            if len(xs_all) >= 2 and len(ys_all) >= 2:
+                y_bot_t, y_top_t = min(ys_all), max(ys_all)
+                # Colocar la cota en el extremo del pad (izq) sin “inventar” hits
+                x_tot = float(tramos[1]["x_mid"]) if len(tramos) >= 2 else (
+                    0.5 * (min(xs_all) + max(xs_all))
+                )
+                if abs(y_top_t - y_bot_t) >= _MIN_BANDA_CM:
+                    nombre_tot = f"{stem}_DESPLIEGUE_WIDTH_TOTAL"
+                    _borrar_hojas_prefijo(plano, nombre_tot)
+                    nueva_t = hoja.CopyTo(plano)
+                    try:
+                        nueva_t.Name = nombre_tot
+                    except Exception:
+                        pass
+                    if nueva_t.DrawingViews.Count >= 1:
+                        vista_t = nueva_t.DrawingViews.Item(1)
+                        _forzar_vista_lista(inv, nueva_t, vista_t)
+                        _limpiar_dims_y_sketches(nueva_t)
+                        try:
+                            from cota_estilo import (
+                                texto_cota_dibujo,
+                                asegurar_unidad_cota,
+                            )
+
+                            esc = abs(float(vista_t.Scale)) or 1.0
+                            dy_cm = abs(y_top_t - y_bot_t) / esc
+                            texto_t = texto_cota_dibujo(
+                                dy_cm, nueva_t
+                            ) or asegurar_unidad_cota(f"{dy_cm * 10.0:.2f}")
+                        except Exception:
+                            texto_t = f"{abs(y_top_t - y_bot_t):.3f}"
+                        _dibujar_cota_centro_sketch(
+                            nueva_t,
+                            vista_t,
+                            tg,
+                            inv,
+                            "Y",
+                            x_tot,
+                            y_bot_t,
+                            x_tot,
+                            y_top_t,
+                            texto_t,
+                        )
+                        creadas.append(nombre_tot)
+                        log(f"  ✅ {nombre_tot}: WIDTH_TOTAL={texto_t} (envelope)")
+        except Exception as exc:
+            log(f"  WARN WIDTH_TOTAL draw: {exc}")
+
+    # Compat: si quedó FRENTE_2 sin TOTAL dibujado, renombrar (legacy)
     if piezas_irreg:
         os.environ["COTAS_WIDTH_TOTAL"] = "1"
+        ya_tot = {c.upper() for c in creadas if "WIDTH_TOTAL" in c.upper()}
         for i in range(1, int(plano.Sheets.Count) + 1):
             try:
                 hoja = plano.Sheets.Item(i)
@@ -855,9 +1179,16 @@ def acotar_widths_tramos_irregular(
             if pieza.upper() not in piezas_irreg:
                 continue
             stem = nombre.rsplit(":", 1)[0]
+            # Si ya hay TOTAL dibujado para esta pieza, borrar FRENTE_2 residual
+            pieza_u = pieza.upper()
+            if any(pieza_u in yt and "WIDTH_TOTAL" in yt for yt in ya_tot):
+                try:
+                    hoja.Delete()
+                except Exception:
+                    pass
+                continue
             for tok in ("_DESPLIEGUE_FRENTE_2", "_DESPLIEGUE_ANCHO"):
                 if tok in stem.upper():
-                    # case-preserving replace via rfind
                     up = stem.upper()
                     idx = up.rfind(tok)
                     nuevo = stem[:idx] + "_DESPLIEGUE_WIDTH_TOTAL"
@@ -867,7 +1198,7 @@ def acotar_widths_tramos_irregular(
             try:
                 hoja.Name = nuevo
                 creadas.append(nuevo)
-                log(f"  ✅ {nuevo}: WIDTH_TOTAL (span global)")
+                log(f"  ✅ {nuevo}: WIDTH_TOTAL (rename legacy)")
             except Exception as exc:
                 log(f"  WARN rename WIDTH_TOTAL: {exc}")
 

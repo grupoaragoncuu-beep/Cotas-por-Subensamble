@@ -286,6 +286,8 @@ def _origen_il_pieza(vista):
        global que en jog/S flota a la izquierda del pad de abajo).
     4) Validar que el punto está cerca de un extremo real; si el AABB
        (minx,miny) no toca geometría, NUNCA usarlo.
+    5) Radio de esquina: X y Y vuelven al cruce de los cantos rectos,
+       no a la tangente del filete.
     """
     pts = _vertices_contorno_placa(vista)
     sil = _silueta_vista(vista, solo_lineas=True) or _silueta_vista(vista)
@@ -329,7 +331,90 @@ def _origen_il_pieza(vista):
             ]
             if cand:
                 ox, oy = min(cand, key=lambda p: (p[0], p[1]))
+    ox, oy = _origen_sin_filete_esquina(pts, float(ox), float(oy), span)
     return float(ox), float(oy)
+
+
+def _origen_sin_filete_esquina(pts, ox, oy, span):
+    """
+    Radio de esquina: el vértice elegido es una tangente, metida R hacia adentro.
+
+    Las dos tangentes de un filete de 90° están a la misma distancia R.
+    El cero queda en el cruce de los cantos rectos. Un jog grande no cumple
+    dx ≈ dy y no se mueve.
+    """
+    if not pts or span <= 0:
+        return ox, oy
+    r_max = max(0.4, 0.18 * float(span))
+    # Tangente vertical: oy está R arriba del canto de abajo.
+    mejor_y = None
+    for px, py in pts:
+        dx = float(px) - float(ox)
+        dy = float(oy) - float(py)
+        if dx < 0.02 or dy < 0.02 or dx > r_max or dy > r_max:
+            continue
+        if abs(dx - dy) > max(0.04, 0.2 * max(dx, dy)):
+            continue
+        sigue_h = any(
+            abs(qy - py) <= 0.05 and qx > px + 0.05 for qx, qy in pts
+        )
+        sigue_v = any(
+            abs(qx - ox) <= 0.05 and qy > oy + 0.05 for qx, qy in pts
+        )
+        if not sigue_h or not sigue_v:
+            continue
+        if mejor_y is None or dy < mejor_y[0]:
+            mejor_y = (dy, float(py))
+    if mejor_y is not None:
+        oy = mejor_y[1]
+    # Tangente horizontal: ox está R a la derecha del canto izquierdo.
+    mejor = None
+    for px, py in pts:
+        dx = float(ox) - float(px)
+        dy = float(py) - float(oy)
+        if dx < 0.02 or dy < 0.02 or dx > r_max or dy > r_max:
+            continue
+        if abs(dx - dy) > max(0.04, 0.2 * max(dx, dy)):
+            continue
+        sigue_v = any(
+            abs(qx - px) <= 0.05 and qy > py + 0.05 for qx, qy in pts
+        )
+        sigue_h = any(
+            abs(qy - oy) <= 0.05 and qx > ox + 0.05 for qx, qy in pts
+        )
+        if not sigue_v or not sigue_h:
+            continue
+        if mejor is None or dx < mejor[0]:
+            mejor = (dx, float(px))
+    if mejor is not None:
+        ox = mejor[1]
+    return float(ox), float(oy)
+
+
+def _es_esquina_fileteada(pts, ox, oy) -> bool:
+    """True si (ox, oy) es el cruce de dos cantos rectos unidos por un radio."""
+    if not pts:
+        return False
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    span = max(max(xs) - min(xs), max(ys) - min(ys), 1e-6)
+    r_max = max(0.4, 0.18 * span)
+    rvs = [
+        py - oy
+        for px, py in pts
+        if abs(px - ox) <= 0.06 and (py - oy) > 0.02
+    ]
+    rhs = [
+        px - ox
+        for px, py in pts
+        if abs(py - oy) <= 0.06 and (px - ox) > 0.02
+    ]
+    if not rvs or not rhs:
+        return False
+    rv, rh = min(rvs), min(rhs)
+    if rv > r_max or rh > r_max:
+        return False
+    return abs(rv - rh) <= max(0.04, 0.2 * max(rv, rh))
 
 
 def _origen_flota_en_vacio(vista, ox, oy) -> bool:
@@ -342,7 +427,9 @@ def _origen_flota_en_vacio(vista, ox, oy) -> bool:
     span = max(max(xs) - min(xs), max(ys) - min(ys), 1e-6)
     tol = max(0.06, 0.015 * span)
     dmin = min(((ox - px) ** 2 + (oy - py) ** 2) ** 0.5 for px, py in pts)
-    return dmin > tol
+    if dmin <= tol:
+        return False
+    return not _es_esquina_fileteada(pts, float(ox), float(oy))
 
 
 def _silueta_placa_vista(vista):
@@ -465,6 +552,254 @@ def _es_barreno_circular_interior(cx, cy, radio_hoja, sil) -> bool:
     if (cy - r) < (miny + holgura) or (cy + r) > (maxy - holgura):
         return False
     return True
+
+
+def _od_max_circulo_modelo_hoja_cm(vista):
+    """Ø del círculo más grande del modelo, proyectado a cm de hoja."""
+    try:
+        doc = vista.ReferencedDocumentDescriptor.ReferencedDocument
+    except Exception:
+        return None
+    try:
+        escala = abs(float(vista.Scale)) or 1.0
+    except Exception:
+        escala = 1.0
+    max_d_modelo = 0.0
+    try:
+        bodies = doc.ComponentDefinition.SurfaceBodies
+        n_b = int(bodies.Count)
+    except Exception:
+        return None
+    for bi in range(1, n_b + 1):
+        try:
+            body = bodies.Item(bi)
+            n_e = int(body.Edges.Count)
+        except Exception:
+            continue
+        for ei in range(1, n_e + 1):
+            try:
+                geom = body.Edges.Item(ei).Geometry
+                if geom is None or "CIRCLE" not in str(type(geom)).upper():
+                    continue
+                r = float(getattr(geom, "Radius", 0) or 0)
+                if r > 0:
+                    max_d_modelo = max(max_d_modelo, 2.0 * r)
+            except Exception:
+                continue
+    if max_d_modelo <= 0:
+        try:
+            rb = doc.ComponentDefinition.RangeBox
+            dx = abs(float(rb.MaxPoint.X) - float(rb.MinPoint.X))
+            dy = abs(float(rb.MaxPoint.Y) - float(rb.MinPoint.Y))
+            dz = abs(float(rb.MaxPoint.Z) - float(rb.MinPoint.Z))
+            dims = sorted([dx, dy, dz], reverse=True)
+            if dims[0] > 0 and abs(dims[0] - dims[1]) / dims[0] < 0.08:
+                max_d_modelo = 0.5 * (dims[0] + dims[1])
+            else:
+                max_d_modelo = dims[0]
+        except Exception:
+            return None
+    else:
+        # Disco/brida: el borde exterior a veces NO es Edge CIRCLE (sale
+        # menor el max círculo = escalón). Si el AABB XY es claramente
+        # mayor, ese es el Ø real (P14: círculo 22.62 vs bbox 25.37).
+        try:
+            rb = doc.ComponentDefinition.RangeBox
+            dx = abs(float(rb.MaxPoint.X) - float(rb.MinPoint.X))
+            dy = abs(float(rb.MaxPoint.Y) - float(rb.MinPoint.Y))
+            dz = abs(float(rb.MaxPoint.Z) - float(rb.MinPoint.Z))
+            dims = sorted([dx, dy, dz], reverse=True)
+            if (
+                dims[0] > 0
+                and abs(dims[0] - dims[1]) / dims[0] < 0.08
+                and dims[0] > max_d_modelo * 1.04
+            ):
+                max_d_modelo = 0.5 * (dims[0] + dims[1])
+        except Exception:
+            pass
+    if max_d_modelo <= 0:
+        return None
+    return float(max_d_modelo) * escala
+
+
+def _anillo_por_curvas_cerca_od(vista, od_hoja_cm, tol_frac=0.12):
+    """Escaneo agresivo de DrawingCurves para el borde Ø exterior."""
+    if not od_hoja_cm or od_hoja_cm <= 0:
+        return None
+    mejor = None
+    mejor_err = 1e9
+    try:
+        n = int(vista.DrawingCurves.Count)
+    except Exception:
+        return None
+    for j in range(1, n + 1):
+        try:
+            curva = vista.DrawingCurves.Item(j)
+            caja = curva.Evaluator2D.RangeBox
+            ancho = abs(float(caja.MaxPoint.X) - float(caja.MinPoint.X))
+            alto = abs(float(caja.MaxPoint.Y) - float(caja.MinPoint.Y))
+            if ancho < 0.05 or alto < 0.05:
+                continue
+            if abs(ancho - alto) > max(ancho, alto) * 0.25:
+                continue
+            tam = 0.5 * (ancho + alto)
+            err = abs(tam - od_hoja_cm) / od_hoja_cm
+            if err > tol_frac:
+                continue
+            if err < mejor_err:
+                mejor_err = err
+                mejor = {
+                    "curva": curva,
+                    "cx": 0.5 * (float(caja.MaxPoint.X) + float(caja.MinPoint.X)),
+                    "cy": 0.5 * (float(caja.MaxPoint.Y) + float(caja.MinPoint.Y)),
+                    "tamaño": tam,
+                    "tipo": "circulo",
+                    "fuente": "scan_od",
+                }
+        except Exception:
+            continue
+    return mejor
+
+
+def _elegir_anillo_exterior(vista, anillos):
+    """Ø EXTERIOR por modelo — no un escalón/ID intermedio del HLR."""
+    od_esp = _od_max_circulo_modelo_hoja_cm(vista)
+    candidatos = [a for a in (anillos or []) if float(a.get("tamaño") or 0) > 0.08]
+
+    if od_esp and candidatos:
+        buenos = [
+            a
+            for a in candidatos
+            if abs(float(a["tamaño"]) - od_esp) <= max(0.08, od_esp * 0.12)
+        ]
+        if buenos:
+            return max(buenos, key=lambda x: float(x["tamaño"]))
+        rescue = _anillo_por_curvas_cerca_od(vista, od_esp, tol_frac=0.14)
+        if rescue is not None:
+            print(
+                f"  OD exterior rescatado (modelo Ø {od_esp:.2f} cm hoja "
+                f"→ curva {rescue['tamaño']:.2f})"
+            )
+            return rescue
+        sil = _silueta_placa_vista(vista) or _silueta_vista(vista)
+        if sil:
+            minx, maxx, miny, maxy, _sp = sil
+            od_sil = min(abs(maxx - minx), abs(maxy - miny))
+            if od_sil > 0:
+                rescue2 = _anillo_por_curvas_cerca_od(vista, od_sil, tol_frac=0.16)
+                if rescue2 is not None:
+                    print(f"  OD exterior rescatado por silueta (Ø {od_sil:.2f})")
+                    return rescue2
+        print(
+            f"  AVISO: sin curva Ø exterior (~{od_esp:.2f} cm hoja); "
+            f"max HLR={max(float(a['tamaño']) for a in candidatos):.2f}"
+        )
+        return None
+    if candidatos:
+        return max(candidatos, key=lambda x: float(x["tamaño"]))
+    if od_esp:
+        return _anillo_por_curvas_cerca_od(vista, od_esp, tol_frac=0.16)
+    return None
+
+
+def _diametros_circulo_modelo_hoja_cm(vista):
+    """Lista de Ø únicos (cm hoja) de círculos del modelo, mayor→menor."""
+    try:
+        doc = vista.ReferencedDocumentDescriptor.ReferencedDocument
+        escala = abs(float(vista.Scale)) or 1.0
+    except Exception:
+        return []
+    vals = []
+    try:
+        bodies = doc.ComponentDefinition.SurfaceBodies
+        for bi in range(1, int(bodies.Count) + 1):
+            body = bodies.Item(bi)
+            for ei in range(1, int(body.Edges.Count) + 1):
+                try:
+                    geom = body.Edges.Item(ei).Geometry
+                    if geom is None or "CIRCLE" not in str(type(geom)).upper():
+                        continue
+                    r = float(getattr(geom, "Radius", 0) or 0)
+                    if r > 0:
+                        vals.append(2.0 * r * escala)
+                except Exception:
+                    continue
+    except Exception:
+        return []
+    # únicos con tol 1%
+    vals = sorted(vals, reverse=True)
+    uniq = []
+    for v in vals:
+        if not uniq or abs(v - uniq[-1]) > max(0.05, uniq[-1] * 0.01):
+            uniq.append(v)
+    return uniq
+
+
+def _elegir_anillo_interior(vista, anillos):
+    """
+    Ø INTERIOR (bore) de brida/disco.
+
+    No usar min(HLR): a menudo el HLR no trae el ID y se borraba FRENTE_2
+    como «sólida» (SP-741 / SP-767). Guía por círculos del modelo: el mayor
+    Ø estrictamente menor que el OD (y >~25% OD para no coger barrenos).
+    """
+    diams = _diametros_circulo_modelo_hoja_cm(vista)
+    od_esp = _od_max_circulo_modelo_hoja_cm(vista)
+    if od_esp is None and diams:
+        od_esp = diams[0]
+    id_esp = None
+    if od_esp and diams:
+        for d in diams:
+            if d < od_esp * 0.95 and d >= od_esp * 0.22:
+                id_esp = d
+                break
+    # Si el modelo no trae Edge CIRCLE del bore (SP-767), buscar en hoja
+    # cualquier curva casi-circular entre 30–90% del OD.
+    if id_esp is None and od_esp:
+        for frac in (0.55, 0.45, 0.65, 0.35, 0.75):
+            cand = _anillo_por_curvas_cerca_od(vista, od_esp * frac, tol_frac=0.18)
+            if cand is not None:
+                tam = float(cand["tamaño"])
+                if od_esp * 0.28 <= tam <= od_esp * 0.92:
+                    id_esp = tam
+                    print(
+                        f"  ID interior por scan hoja "
+                        f"(~{frac:.0%} OD → Ø {tam:.2f} cm)"
+                    )
+                    return cand
+    if id_esp:
+        rescue = _anillo_por_curvas_cerca_od(vista, id_esp, tol_frac=0.14)
+        if rescue is not None:
+            print(
+                f"  ID interior rescatado (modelo Ø {id_esp:.2f} cm hoja "
+                f"→ curva {rescue['tamaño']:.2f})"
+            )
+            return rescue
+        for a in sorted(anillos or [], key=lambda x: -float(x.get("tamaño") or 0)):
+            tam = float(a.get("tamaño") or 0)
+            if abs(tam - id_esp) <= max(0.08, id_esp * 0.12):
+                return a
+        print(f"  AVISO: sin curva ID (~{id_esp:.2f} cm hoja)")
+        return None
+
+    # Fallback HLR: mayor interior concéntrico al exterior (bore, no barreno)
+    if not anillos:
+        return None
+    ext = max(anillos, key=lambda x: float(x.get("tamaño") or 0))
+    tol = max(0.15, float(ext["tamaño"]) * 0.05)
+    ints = []
+    for a in anillos:
+        if a is ext:
+            continue
+        if abs(float(a["cx"]) - float(ext["cx"])) > tol:
+            continue
+        if abs(float(a["cy"]) - float(ext["cy"])) > tol:
+            continue
+        if float(a["tamaño"]) < float(ext["tamaño"]) * 0.95:
+            ints.append(a)
+    if not ints:
+        return None
+    return max(ints, key=lambda x: float(x["tamaño"]))
 
 
 def _anillos_en_vista(vista, min_tam=None, max_frac=0.55, solo_interiores=True):
@@ -733,8 +1068,12 @@ def _adjuntar_curvas_a_centros(vista, centros):
             d = (
                 (float(a["cx"]) - cx) ** 2 + (float(a["cy"]) - cy) ** 2
             ) ** 0.5
-            # Centro cercano y Ø compatible (tol holgada: flat scale varia).
-            if d < best_d and d <= max(0.25, tam * 0.6):
+            # El centro del slot está a media longitud de la tapa.
+            # Un óvalo largo no cae en la tolerancia de un círculo.
+            tol_d = max(0.25, tam * 0.6)
+            if str(m.get("tipo") or "") == "oval":
+                tol_d = max(tol_d, tam * 3.0)
+            if d < best_d and d <= tol_d:
                 if abs(float(a["tamaño"]) - tam) <= max(0.08, tam * 0.45):
                     best_d = d
                     best = a
@@ -744,7 +1083,11 @@ def _adjuntar_curvas_a_centros(vista, centros):
                 d = (
                     (float(a["cx"]) - cx) ** 2 + (float(a["cy"]) - cy) ** 2
                 ) ** 0.5
-                if d < best_d and d <= max(0.35, tam * 0.8):
+                if d < best_d and d <= (
+                max(0.35, tam * 3.0)
+                if str(m.get("tipo") or "") == "oval"
+                else max(0.35, tam * 0.8)
+            ):
                     best_d = d
                     best = a
         if best is not None:
@@ -845,6 +1188,62 @@ def _agrupar_diametros_grupos(anillos, tol_frac=0.03, max_grupos=12):
     return grupos
 
 
+def _filtrar_grupos_hole_no_id_perfil(grupos, vista):
+    """
+    Quita del paquete HOLE los Ø que son el bore/ID (o OD) de brida/disco.
+
+    El FlatPattern marca el agujero central como EdgeLoop interior → entraba
+    como HOLE## con el mismo valor que ID/OD (SP-707 6.62, SP-711 10.5,
+    P14 22.62, etc.). Reglas:
+      - 1 ocurrencia, cerca del centro de silueta, Ø ≥ 28% del span → ID
+      - envelope casi circular y Ø ≥ 40% del span → perfil, no perno
+    """
+    if not grupos:
+        return grupos
+    try:
+        sil = _silueta_placa_vista(vista) or _silueta_vista(vista)
+    except Exception:
+        sil = _silueta_vista(vista)
+    if not sil:
+        return grupos
+    minx, maxx, miny, maxy, span = sil
+    if span <= 1e-9:
+        return grupos
+    cx_s = 0.5 * (float(minx) + float(maxx))
+    cy_s = 0.5 * (float(miny) + float(maxy))
+    dx = abs(float(maxx) - float(minx))
+    dy = abs(float(maxy) - float(miny))
+    es_disco = abs(dx - dy) / span < 0.18
+    out = []
+    omitidos = 0
+    for g in grupos:
+        anillo = max(g, key=lambda x: float(x.get("tamaño") or 0))
+        try:
+            tam = float(anillo["tamaño"])
+            cx = float(anillo["cx"])
+            cy = float(anillo["cy"])
+        except Exception:
+            out.append(g)
+            continue
+        dist = ((cx - cx_s) ** 2 + (cy - cy_s) ** 2) ** 0.5
+        es_bore_central = (
+            len(g) == 1
+            and tam >= 0.28 * span
+            and dist <= 0.12 * span
+        )
+        es_perfil_disco = es_disco and tam >= 0.40 * span
+        if es_bore_central or es_perfil_disco:
+            omitidos += 1
+            continue
+        out.append(g)
+    if omitidos:
+        print(
+            f"  HOLE: omitidos {omitidos} Ø de perfil/ID "
+            f"(no barrenos de perno)"
+        )
+    return out
+
+
 def _marcar_barrenos_azules(hoja, vista, anillos_grupo, tg, inv_app):
     """
     Círculos azules (estilo TYP) sobre cada barreno del mismo Ø en la hoja HOLE.
@@ -895,6 +1294,9 @@ def _marcar_barrenos_azules(hoja, vista, anillos_grupo, tg, inv_app):
         pass
 
 
+LAST_HOLE_N: dict[str, int] = {}
+
+
 def acotar_barrenos_placas(nombres_frente_ok=None):
     """
     Crea hojas ``*_DIAMETRO_Hnn`` — UNA por cada tamaño distinto de barreno
@@ -906,6 +1308,8 @@ def acotar_barrenos_placas(nombres_frente_ok=None):
     Acepta FRENTE doblado y DESPLIEGUE_FRENTE_* (flat Corte).
     """
     print("diametro.py: barrenos por TIPO de tamaño (circulos + ovalos)...")
+    global LAST_HOLE_N
+    LAST_HOLE_N = {}
     inv_app = conectar_inventor()
     try:
         plano = win32com.client.CastTo(inv_app.ActiveDocument, "DrawingDocument")
@@ -944,10 +1348,9 @@ def acotar_barrenos_placas(nombres_frente_ok=None):
         if objetivo is not None and base_cmp not in objetivo:
             continue
         # TANQUE + iProp Corte: omitir barrenos (flat y doblado).
-        # BOARD/GIGA: HOLE solo busbar nesting (catálogo cobre AutoDXF).
+        # BOARD/GIGA: HOLE en cobre Y metal (no filtrar por busbar).
         try:
             from creador_vistas import producto_flujo_actual, _es_pieza_corte
-            from piezas_cobre import es_pieza_cobre
 
             pieza_hoja = re.sub(
                 r"_(?:DESPLIEGUE_)?FRENTE_[12]$",
@@ -962,18 +1365,13 @@ def acotar_barrenos_placas(nombres_frente_ok=None):
                     f"(sin flat / barrenos / cortes internos)"
                 )
                 continue
-            if prod == "BOARD" and not es_pieza_cobre(pieza_hoja):
-                print(
-                    f"  {base_cmp}: BOARD no-busbar → omitido HOLE "
-                    f"(corte normal, sin barrenos)"
-                )
-                continue
         except Exception:
             pass
         if hoja.DrawingViews.Count < 1:
             continue
         vista = hoja.DrawingViews.Item(1)
         grupos = _agrupar_diametros_grupos(_barrenos_en_vista(vista))
+        grupos = _filtrar_grupos_hole_no_id_perfil(grupos, vista)
         if not grupos:
             continue
 
@@ -1079,7 +1477,10 @@ def acotar_barrenos_placas(nombres_frente_ok=None):
                     if str(a.get("tipo") or "") == "oval"
                 ]
                 if ovals:
-                    objetivo_a = max(ovals, key=lambda x: x["tamaño"])
+                    con_curva = [a for a in ovals if a.get("curva") is not None]
+                    objetivo_a = max(
+                        con_curva or ovals, key=lambda x: x["tamaño"]
+                    )
             dim = None
             e_diam = None
             try:
@@ -1182,6 +1583,7 @@ def acotar_barrenos_placas(nombres_frente_ok=None):
                             txt,
                             font_cm=get_cota_font_size_cm(),
                             bold=COTA_BOLD,
+                            simbolo_diametro=True,
                         )
                 except Exception:
                     pass
@@ -1206,7 +1608,9 @@ def acotar_barrenos_placas(nombres_frente_ok=None):
                 tag = "oval" if tipo == "oval" else "Ø"
                 print(f"✅ {nombre_nueva}: barreno {tag} {txt_d}")
                 creadas += 1
-                creadas_nombres.append(str(nueva.Name).rsplit(":", 1)[0])
+                nom_ok = str(nueva.Name).rsplit(":", 1)[0]
+                creadas_nombres.append(nom_ok)
+                LAST_HOLE_N[nom_ok.upper()] = int(len(grupo_n))
             except Exception as e:
                 print(f"⚠️ {nombre_nueva}: estilo/export barreno falló ({e})")
                 try:
@@ -1288,45 +1692,24 @@ def acotar_diametros(hojas_pendientes=None):
                 anillos_validos = list(anillos)
 
             if "_FRENTE_1" in nombre_hoja:
-                if anillos_validos:
-                    anillo_objetivo = max(anillos_validos, key=lambda x: x['tamaño'])
+                anillo_objetivo = _elegir_anillo_exterior(vista, anillos_validos)
+                if anillo_objetivo is not None:
                     etiqueta = "EXTERIOR"
 
             elif "_FRENTE_2" in nombre_hoja:
-                if anillos_validos:
-                    anillo_exterior = max(anillos_validos, key=lambda x: x['tamaño'])
-
-                    tolerancia_centro = max(0.15, anillo_exterior['tamaño'] * 0.05)
-
-                    interiores_concentricos = []
-                    for a in anillos_validos:
-                        if a is anillo_exterior:
-                            continue
-
-                        dx_c = abs(a['cx'] - anillo_exterior['cx'])
-                        dy_c = abs(a['cy'] - anillo_exterior['cy'])
-
-                        if dx_c <= tolerancia_centro and dy_c <= tolerancia_centro and a['tamaño'] < anillo_exterior['tamaño']:
-                            interiores_concentricos.append(a)
-
-                    if interiores_concentricos:
-                        # Para _FRENTE_2 queremos el círculo MÁS PEQUEÑO
-                        # del mismo centro, o sea el límite interior real.
-                        anillo_objetivo = min(interiores_concentricos, key=lambda x: x['tamaño'])
-                        etiqueta = "INTERIOR"
-                    else:
-                        # Sin interior concéntrico → pieza cilíndrica SÓLIDA
-                        # (barra, pin, stud). No tiene diámetro interior,
-                        # así que eliminamos la hoja para que no aparezca un
-                        # JPG mudo con solo el contorno exterior.
-                        print(
-                            f"🗑️ {nombre_hoja}: pieza cilíndrica sólida sin "
-                            f"interior concéntrico; se elimina la hoja "
-                            f"_FRENTE_2 (no aplica DIAMETRO_INTERIOR)."
-                        )
-                        hojas_a_eliminar.append(nombre_hoja_original)
-                        procesadas_nombres.add(nombre_hoja)
-                        continue
+                anillo_objetivo = _elegir_anillo_interior(vista, anillos_validos)
+                if anillo_objetivo is not None:
+                    etiqueta = "INTERIOR"
+                else:
+                    # Sin interior → pieza cilíndrica SÓLIDA (barra/pin/stud).
+                    print(
+                        f"🗑️ {nombre_hoja}: pieza cilíndrica sólida sin "
+                        f"interior concéntrico; se elimina la hoja "
+                        f"_FRENTE_2 (no aplica DIAMETRO_INTERIOR)."
+                    )
+                    hojas_a_eliminar.append(nombre_hoja_original)
+                    procesadas_nombres.add(nombre_hoja)
+                    continue
 
             if anillo_objetivo:
                 intencion = hoja.CreateGeometryIntent(anillo_objetivo['curva'])

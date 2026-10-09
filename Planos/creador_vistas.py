@@ -100,12 +100,31 @@ def _sm_tiene_barrenos_o_cortes(part_doc) -> bool:
     """
     True si el sólido tiene loops interiores (barrenos / recortes).
 
-    No Unfold (rápido sobre modelo doblado).
+    Prueba modelo doblado y, si hay FlatPattern, también el flat
+    (p.ej. ACUCT: huecos solo visibles en desarrollo).
     """
+    cuerpos = []
+    cdef = None
     try:
         cdef = part_doc.ComponentDefinition
         for i in range(1, int(cdef.SurfaceBodies.Count) + 1):
-            body = cdef.SurfaceBodies.Item(i)
+            cuerpos.append(cdef.SurfaceBodies.Item(i))
+    except Exception:
+        pass
+    if cdef is not None:
+        try:
+            import win32com.client
+
+            sm = win32com.client.CastTo(cdef, "SheetMetalComponentDefinition")
+            if bool(sm.HasFlatPattern):
+                try:
+                    cuerpos.append(sm.FlatPattern.Body)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    for body in cuerpos:
+        try:
             for j in range(1, int(body.Faces.Count) + 1):
                 face = body.Faces.Item(j)
                 try:
@@ -113,8 +132,8 @@ def _sm_tiene_barrenos_o_cortes(part_doc) -> bool:
                         return True
                 except Exception:
                     continue
-    except Exception:
-        return False
+        except Exception:
+            continue
     return False
 
 
@@ -765,9 +784,18 @@ def crear_vistas_lote(
             # --- Flat DESPLIEGUE ---
             # BOARD: Corte o chapa con huecos.
             # TANQUE: Corte omitido; Doblado + huecos → flat (holes/cortes).
+            # SOLO_ISO_DOBLADO: no tocar flat (ya entregado en Corte Busbar).
+            solo_iso_doblado = os.environ.get(
+                "SOLO_ISO_DOBLADO", ""
+            ).strip().lower() in ("1", "true", "yes", "si", "on")
             es_corte = _es_pieza_corte(part_name)
             es_doblado = _es_pieza_doblado(part_name)
-            if _debe_crear_despliegue(part_name, part_doc, is_sm):
+            if solo_iso_doblado:
+                _log(
+                    f"  {part_name}: SOLO_ISO_DOBLADO → sin DESPLIEGUE "
+                    f"(solo FRENTE/LADO + ESTANIADO)"
+                )
+            elif _debe_crear_despliegue(part_name, part_doc, is_sm):
                 if producto_flujo_actual() == "TANQUE" and es_doblado:
                     _log(
                         f"  {part_name}: TANQUE/Doblado con barrenos/cortes → "
@@ -907,7 +935,46 @@ def preparar_geometria_flat(part_doc, is_sm, to):
                 sm_def.Unfold()
             except Exception as exc_u:
                 _log(f"  AVISO Unfold flat: {exc_u}")
-                return None
+            # Fallback Unfold2(cara) cuando Unfold() falla (FB-10-10-A, etc.)
+            if not sm_def.HasFlatPattern:
+                try:
+                    caras_pl = []
+                    for bi in range(1, int(sm_def.SurfaceBodies.Count) + 1):
+                        body = sm_def.SurfaceBodies.Item(bi)
+                        for fi in range(1, int(body.Faces.Count) + 1):
+                            face = body.Faces.Item(fi)
+                            try:
+                                st = int(face.SurfaceType)
+                            except Exception:
+                                continue
+                            if st not in (5890, 17921):
+                                continue
+                            try:
+                                area = float(face.Evaluator.Area)
+                            except Exception:
+                                area = 0.0
+                            caras_pl.append((area, face))
+                    caras_pl.sort(key=lambda x: -x[0])
+                    for _a, cara in caras_pl[:20]:
+                        try:
+                            if sm_def.HasFlatPattern:
+                                break
+                            sm_def.Unfold2(cara)
+                            if sm_def.HasFlatPattern:
+                                try:
+                                    sm_def.FlatPattern.ExitEdit()
+                                except Exception:
+                                    pass
+                                _log("  Flat vía Unfold2(cara)")
+                                break
+                        except Exception:
+                            try:
+                                if sm_def.HasFlatPattern:
+                                    sm_def.FlatPattern.Delete()
+                            except Exception:
+                                pass
+                except Exception as exc_u2:
+                    _log(f"  AVISO Unfold2 flat: {exc_u2}")
         if not sm_def.HasFlatPattern:
             return None
         fp = sm_def.FlatPattern
@@ -1322,10 +1389,23 @@ def _crear_vista_base(new_sheet, part_doc, tg, to, px, py, cam, use_flat_pattern
 
 def _grosor_3d_pieza(part_doc):
     """
-    Devuelve el lado MÁS PEQUEÑO del bbox 3D de la pieza (en cm de Inventor).
-    Se usa como referencia para validar que la vista LADO efectivamente está
-    mostrando el canto delgado y no la cara grande.
+    Grosor real para validar vista LADO de canto.
+
+    Prioridad:
+      1) Sheet Metal Thickness (canónico)
+      2) Menor del bbox 3D (fallback no-chapa)
     """
+    try:
+        import win32com.client
+
+        sm = win32com.client.CastTo(
+            part_doc.ComponentDefinition, "SheetMetalComponentDefinition"
+        )
+        thk = float(sm.Thickness.Value)
+        if thk > 1e-6:
+            return thk
+    except Exception:
+        pass
     try:
         rb = part_doc.ComponentDefinition.RangeBox
         dims = [
@@ -1384,7 +1464,8 @@ def _borrar_todas_las_vistas(sheet):
 
 
 def _crear_vista_lado_con_reintentos(
-    new_sheet, part_doc, tg, to, px, py, cx, cy, cz, eye_dir, up_hint
+    new_sheet, part_doc, tg, to, px, py, cx, cy, cz, eye_dir, up_hint,
+    use_flat_pattern_view=False,
 ):
     """
     Intenta varias cámaras para LADO. Nunca cae a DefaultViewOrientation
@@ -1434,7 +1515,14 @@ def _crear_vista_lado_con_reintentos(
         try:
             cam = crear_camara(part_doc, tg, to, cx, cy, cz, eye, up)
             vista_actual = _crear_vista_base(
-                new_sheet, part_doc, tg, to, px, py, cam, use_flat_pattern_view=False
+                new_sheet,
+                part_doc,
+                tg,
+                to,
+                px,
+                py,
+                cam,
+                use_flat_pattern_view=bool(use_flat_pattern_view),
             )
         except Exception as exc:
             ultimo_error = exc
@@ -1765,17 +1853,19 @@ def _crear_vistas_despliegue_corte(
         view = None
         try:
             if is_side:
-                cam = crear_camara(
-                    part_doc, tg, to, cx, cy, cz, v_lado, v_frente
-                )
-                view = _crear_vista_base(
+                # DESPLIEGUE_LADO = CANTO del flat (espesor), no la cara T.
+                view = _crear_vista_lado_con_reintentos(
                     new_sheet,
                     part_doc,
                     tg,
                     to,
                     px,
                     py,
-                    cam,
+                    cx,
+                    cy,
+                    cz,
+                    v_lado,
+                    v_frente,
                     use_flat_pattern_view=True,
                 )
             else:
@@ -1973,11 +2063,9 @@ def escalar_vista(doc, view, tg, px, py, ancho_util=None, alto_util=None, modo_c
     Escala y centra la vista de forma que la PIEZA + espacio para cotas
     quede DENTRO del sheet físico.
 
-    - ``modo_cobre=True``: la escala la define el **tamaño real** de la
-      pieza (llena ~78–85 % del área útil con reserva justa de cota).
-      Piezas largas → escala menor; piezas chicas → escala mayor.
-      Mejora resolución percibida sin fijar 1/4 a ciegas.
-    - Resto: escala discreta más grande que quepa (comportamiento clásico).
+    Escala por **tamaño real** (llena ~78–85 % del útil, reserva justa).
+    Aplica a **todas** las cotas (cobre y acero). ``modo_cobre`` queda
+    solo por compatibilidad de llamadas.
     """
     try:
         doc.Update()
@@ -1996,13 +2084,10 @@ def escalar_vista(doc, view, tg, px, py, ancho_util=None, alto_util=None, modo_c
         if alto_util is None or alto_util <= 0:
             alto_util = 20.0
 
-        if modo_cobre:
-            # Escala por tamaño: reserva justa + alto fill del útil.
-            reserva_cotas = 1.8
-            fill = 0.82
-        else:
-            reserva_cotas = 3.5
-            fill = 0.60
+        # Zoom compacto general (antes solo con modo_cobre=True).
+        _ = bool(modo_cobre)
+        reserva_cotas = 1.8
+        fill = 0.82
 
         max_ancho_pieza = max(1e-3, ancho_util - 2.0 * reserva_cotas)
         max_alto_pieza = max(1e-3, alto_util - 2.0 * reserva_cotas)
@@ -2023,7 +2108,6 @@ def escalar_vista(doc, view, tg, px, py, ancho_util=None, alto_util=None, modo_c
             )
 
         # Escala = f(tamaño pieza): la mayor discreta que cabe en el útil.
-        # real_w/real_h ya vienen del modelo → piezas grandes bajan escala.
         indice_inicial = len(escalas) - 1
         for idx, e_val in enumerate(escalas):
             if _cabe(e_val):
@@ -2067,8 +2151,7 @@ def escalar_vista(doc, view, tg, px, py, ancho_util=None, alto_util=None, modo_c
             right = left + width
             bottom = top - height
 
-            # Margen al borde: cobre más justo (cota cabe en reserva_cotas).
-            margen = 1.5 if modo_cobre else 2.0
+            margen = 1.5
             fits = (
                 left >= margen
                 and right <= sheet_w - margen

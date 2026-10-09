@@ -396,6 +396,91 @@ def _fusionar_resultados(*dicts):
     return out
 
 
+_RE_HW_SUELTA = re.compile(
+    r"(^HW[-_])|(^DIN\d)|(^ISO\d)|"
+    r"(WASHER|NUT|BOLT|SCREW|RIVET|HEX[\s_-]?NUT)",
+    re.IGNORECASE,
+)
+
+
+# Clasificaciones de fab / almacén: NO son "ensamble individual".
+# Solo IPT root sin esas clases (o marcadas a propósito) van a Inspeccion.
+_CLASIF_FAB_O_ALMACEN = {
+    "almacén",
+    "corte",
+    "maquinado",
+    "doblado",
+    "plasma",
+    "plasma doblado",
+    "piezas soldadas",
+}
+
+
+def recolectar_ipt_sueltas_root(ensamble_raiz, exclusiones_extra=None):
+    """
+    IPT de **1er nivel** del tanque para Inspeccion Visual.
+
+    NO incluye hijas de kit ni piezas ya clasificadas en fab
+    (Corte/Doblado/Maquinado/Plasma/…) ni Almacén/HW.
+    Esas ya van a su proceso; no son "ensamble individual".
+    """
+    from generador_caras_tanque import _leer_clasificacion_de_doc
+
+    resultados = {}
+    excl = {str(x).upper() for x in (exclusiones_extra or []) if x}
+    try:
+        occs = ensamble_raiz.ComponentDefinition.Occurrences
+        total = int(occs.Count)
+    except Exception as exc:
+        _log(f"AVISO ipt sueltas: no se leyeron occs: {exc}")
+        return []
+
+    for i in range(1, total + 1):
+        try:
+            occ = occs.Item(i)
+            if occ.Suppressed:
+                continue
+        except Exception:
+            continue
+        try:
+            if int(occ.DefinitionDocumentType) != TIPO_DOCUMENTO_PIEZA:
+                continue
+            part_doc = occ.Definition.Document
+        except Exception:
+            continue
+        try:
+            nombre = _nombre_doc(part_doc)
+        except Exception:
+            nombre = str(getattr(occ, "Name", "PIEZA")).split(":")[0]
+        if _RE_HW_SUELTA.search(nombre or ""):
+            continue
+        if _nombre_en_exclusiones(nombre, part_doc, occ, excl):
+            continue
+        try:
+            clas = _leer_clasificacion_de_doc(part_doc)
+        except Exception:
+            clas = None
+        if clas and str(clas).strip().casefold() in _CLASIF_FAB_O_ALMACEN:
+            continue
+        try:
+            ruta = str(part_doc.FullFileName or "")
+        except Exception:
+            ruta = ""
+        clave = ruta.upper() if ruta else nombre.upper()
+        if clave in resultados:
+            continue
+        resultados[clave] = (part_doc, nombre)
+
+    lista = sorted(resultados.values(), key=lambda t: t[1].upper())
+    if lista:
+        _log(f"IPT sueltas root (Inspeccion Visual): {len(lista)}")
+        for _d, nom in lista:
+            _log(f"  - {nom}")
+    else:
+        _log("IPT sueltas root (Inspeccion Visual): 0 (fab/Almacén excluidas)")
+    return lista
+
+
 def recolectar_ensambles_independientes(ensamble_raiz, exclusiones_extra=None):
     """
     Lista única de ``(asm_doc, nombre_base, qty_instancias, hijos)``.

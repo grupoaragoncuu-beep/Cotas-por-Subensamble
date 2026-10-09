@@ -1,0 +1,991 @@
+' COTAS ABIGAIL - Interfaz de los 3 procesos
+' Misma ventana que Interfaz.iLogicVb (STEP): borde redondo, arrastre, Iniciar.
+'
+' Asignacion, en orden de importacion:
+'   Cotas por piezas           -> COTAS_ILOGIC_ABIGAIL.iLogicVb
+'   Cotas por subensamble      -> COTAS_POR_SUBENSAMBLE.iLogicVb
+'   Ensambles independientes   -> COTAS_ENSAMBLES_INDEPENDIENTES.iLogicVb
+'
+' Las reglas se buscan en la carpeta iLogic (ExternalRuleDirectories
+' o COTAS_ABIGAIL_DIR\ilogic). No se fija una unidad de esta PC.
+'
+' El plano machote no tiene que estar abierto. Si ya lo esta, se usa.
+' Si no, se abre desde MACHOTE en ilogic\config_planos.txt, o desde
+' Planos\MACHOTE PLANOS.dwg. El usuario deja el ensamble abierto y,
+' en tanque, solo escoge TOP, segmentos y BASE.
+
+AddReference "System.Windows.Forms"
+AddReference "System.Drawing"
+Imports System.Windows.Forms
+Imports System.Drawing
+Imports System.Drawing.Drawing2D
+Imports System.Diagnostics
+Imports Inventor
+Imports DrawingPoint = System.Drawing.Point
+
+Public Class CotasProcessForm
+    Inherits Form
+
+    Private btnSubensamble, btnPiezas, btnEnsambles, btnClose, btnRutaEspecial As Button
+    Private cboJobs As ComboBox
+    Private lblJob As New Label()
+    Private lblRuta As New Label()
+    Private rutaEspecialRaiz As String = ""
+    Private rutaEspecialJpgs As String = ""
+    Private clienteEspecial As String = ""
+    Private productoEspecial As String = ""
+    Private ignorarCambioJob As Boolean = False
+    Private lblTitle As New Label()
+    Private titlePanel As New Panel()
+    Private invApp As Inventor.Application
+    Private invDoc As Inventor.Document
+    Private jobsVsm As New System.Collections.Generic.List(Of String())
+
+    Private isDragging As Boolean = False
+    Private dragCursor As DrawingPoint
+    Private dragForm As DrawingPoint
+
+    Public Sub New(app As Inventor.Application, doc As Inventor.Document)
+        invApp = app
+        invDoc = doc
+
+        Me.FormBorderStyle = FormBorderStyle.None
+        Me.StartPosition = FormStartPosition.CenterScreen
+        Me.ClientSize = New Size(400, 470)
+        Me.BackColor = System.Drawing.ColorTranslator.FromHtml("#1e2a38")
+        Me.Opacity = 0.85
+        Me.DoubleBuffered = True
+        Me.TopMost = True
+        Me.Region = New Region(CreateRoundedRectanglePath(New Rectangle(0, 0, Me.Width, Me.Height), 25))
+
+        AddHandler Me.MouseDown, AddressOf DragMouseDown
+        AddHandler Me.MouseMove, AddressOf DragMouseMove
+        AddHandler Me.MouseUp, AddressOf DragMouseUp
+
+        titlePanel.Width = 280
+        titlePanel.Height = 50
+        titlePanel.Location = New System.Drawing.Point(60, 20)
+        titlePanel.BackColor = System.Drawing.ColorTranslator.FromHtml("#2a3b4c")
+        titlePanel.Region = New Region(CreateRoundedRectanglePath(New Rectangle(0, 0, titlePanel.Width, titlePanel.Height), 20))
+        Me.Controls.Add(titlePanel)
+
+        lblTitle.Text = "COTAS ABIGAIL"
+        lblTitle.Font = New Font("Segoe UI", 14, FontStyle.Bold)
+        lblTitle.ForeColor = System.Drawing.Color.White
+        lblTitle.Dock = DockStyle.Fill
+        lblTitle.TextAlign = ContentAlignment.MiddleCenter
+        titlePanel.Controls.Add(lblTitle)
+
+        AddHandler titlePanel.MouseDown, AddressOf DragMouseDown
+        AddHandler titlePanel.MouseMove, AddressOf DragMouseMove
+        AddHandler titlePanel.MouseUp, AddressOf DragMouseUp
+        AddHandler lblTitle.MouseDown, AddressOf DragMouseDown
+        AddHandler lblTitle.MouseMove, AddressOf DragMouseMove
+        AddHandler lblTitle.MouseUp, AddressOf DragMouseUp
+
+        btnClose = New Button()
+        btnClose.Text = "X"
+        btnClose.Font = New Font("Segoe UI", 9, FontStyle.Bold)
+        btnClose.ForeColor = System.Drawing.Color.White
+        btnClose.BackColor = System.Drawing.ColorTranslator.FromHtml("#444")
+        btnClose.FlatStyle = FlatStyle.Flat
+        btnClose.FlatAppearance.BorderSize = 0
+        btnClose.Size = New Size(30, 30)
+        btnClose.Location = New System.Drawing.Point(Me.Width - 40, 10)
+        AddHandler btnClose.Click, Sub() Me.Close()
+        Me.Controls.Add(btnClose)
+
+        Dim buttonFont As New Font("Segoe UI", 10, FontStyle.Bold)
+        Dim buttonColor As System.Drawing.Color = System.Drawing.ColorTranslator.FromHtml("#007bff")
+        Dim buttonHoverColor As System.Drawing.Color = System.Drawing.ColorTranslator.FromHtml("#3399ff")
+
+        btnPiezas = CrearBoton("Cotas por piezas", New System.Drawing.Point(60, 228), buttonFont, buttonColor, buttonHoverColor)
+        AddHandler btnPiezas.Click, Sub() AbrirSubProceso(
+            "Cotas por piezas",
+            "Medidas de fabricacion de cada pieza: largo, ancho, espesor, altura, pata y angulo. Omite Almacen. En BOARD el cobre marca solo las dos primeras X y las dos primeras Y.")
+
+        btnSubensamble = CrearBoton("Cotas por subensamble", New System.Drawing.Point(60, 278), buttonFont, buttonColor, buttonHoverColor)
+        AddHandler btnSubensamble.Click, Sub() AbrirSubProceso(
+            "Cotas por subensamble",
+            "Ubicacion de cada pieza respecto al (0,0) de la cara. En tanque pide TOP, SEGM1 a SEGM4 y BASE. En tablero BOARD no pide caras: genera las vistas del kit.")
+
+        btnEnsambles = CrearBoton("Ensambles independientes", New System.Drawing.Point(60, 328), buttonFont, buttonColor, buttonHoverColor)
+        AddHandler btnEnsambles.Click, Sub() AbrirSubProceso(
+            "Ensambles independientes",
+            "Kits que no son el casco ni el TOP. Seis vistas, inspeccion visual sin cotas y accesorios sueltos por pieza.")
+
+        Me.Controls.AddRange({btnPiezas, btnSubensamble, btnEnsambles})
+        ArmarListaJobs()
+        CargarJobsVsm()
+    End Sub
+
+    Private Function CrearBoton(texto As String, posicion As System.Drawing.Point, font As Font,
+                                baseColor As System.Drawing.Color, hoverColor As System.Drawing.Color) As Button
+        Dim btn As New Button()
+        btn.Text = texto
+        btn.Size = New Size(280, 40)
+        btn.Location = posicion
+        btn.FlatStyle = FlatStyle.Flat
+        btn.FlatAppearance.BorderSize = 0
+        btn.BackColor = baseColor
+        btn.ForeColor = System.Drawing.Color.White
+        btn.Font = font
+        btn.Region = New Region(CreateRoundedRectanglePath(New Rectangle(0, 0, btn.Width, btn.Height), 20))
+        AddHandler btn.MouseEnter, Sub() btn.BackColor = hoverColor
+        AddHandler btn.MouseLeave, Sub() btn.BackColor = baseColor
+        Return btn
+    End Function
+
+    Private Sub AbrirSubProceso(titulo As String, descripcion As String)
+        If Not HayDestino() Then
+            MessageBox.Show("Selecciona el job del VSM o una ruta especial.")
+            Return
+        End If
+        Dim ventana As New SubProcessForm(titulo, descripcion, AddressOf EjecutarProcesoYReiniciar)
+        ventana.Owner = Me
+        ventana.ShowDialog()
+    End Sub
+
+    Private Sub EjecutarProcesoYReiniciar(proceso As String)
+        Me.Invoke(Sub() Me.Close())
+        Dim hilo As New Threading.Thread(Sub()
+                                             System.Threading.Thread.Sleep(200)
+                                             EjecutarProceso(proceso)
+                                             Try
+                                                 Dim newForm As New CotasProcessForm(invApp, invDoc)
+                                                 newForm.TopMost = True
+                                                 AddHandler newForm.Shown, Sub()
+                                                                              newForm.Activate()
+                                                                              newForm.BringToFront()
+                                                                          End Sub
+                                                 newForm.ShowDialog()
+                                             Catch ex As Exception
+                                                 MessageBox.Show("Error al relanzar la interfaz: " & ex.Message)
+                                             End Try
+                                         End Sub)
+        hilo.SetApartmentState(Threading.ApartmentState.STA)
+        hilo.Start()
+    End Sub
+
+    Private Sub EjecutarProceso(proceso As String)
+        If Not HayEnsambleAbierto() Then
+            MessageBox.Show("Abre el ensamble (.iam) y vuelve a iniciar el proceso." & vbCrLf &
+                            "El plano machote se abre solo.")
+            Return
+        End If
+
+        If Not AplicarJobVsm() Then Return
+
+        Dim plano As Document = AsegurarMachote()
+        If plano Is Nothing Then Return
+        invDoc = plano
+
+        Dim iLogicAutomation As Object = GetiLogicAutomation(invApp)
+        If iLogicAutomation Is Nothing Then
+            MessageBox.Show("No se pudo obtener iLogic.")
+            Return
+        End If
+
+        Dim nombreRegla As String = ""
+        Select Case proceso
+            Case "Cotas por subensamble"
+                nombreRegla = "COTAS_POR_SUBENSAMBLE.iLogicVb"
+            Case "Cotas por piezas"
+                nombreRegla = "COTAS_ILOGIC_ABIGAIL.iLogicVb"
+            Case "Ensambles independientes"
+                nombreRegla = "COTAS_ENSAMBLES_INDEPENDIENTES.iLogicVb"
+            Case Else
+                MessageBox.Show("Proceso no reconocido: " & proceso)
+                Return
+        End Select
+
+        Dim rutaCompleta As String = ResolverRutaRegla(nombreRegla)
+        If rutaCompleta <> "" AndAlso System.IO.File.Exists(rutaCompleta) Then
+            Try
+                plano.Activate()
+            Catch
+            End Try
+            iLogicAutomation.RunExternalRule(plano, rutaCompleta)
+        Else
+            MessageBox.Show("No se encontro la regla " & nombreRegla & " en la carpeta iLogic.")
+        End If
+    End Sub
+
+    Private Function ResolverRutaRegla(nombreRegla As String) As String
+        Dim candidatos As New System.Collections.Generic.List(Of String)
+        Try
+            Dim env As String = System.Environment.GetEnvironmentVariable("COTAS_ABIGAIL_DIR")
+            If Not String.IsNullOrWhiteSpace(env) Then
+                candidatos.Add(System.IO.Path.Combine(env, "ilogic", nombreRegla))
+            End If
+        Catch
+        End Try
+        Try
+            Dim addIn As ApplicationAddIn =
+                invApp.ApplicationAddIns.ItemById("{3bdd8d79-2179-4b11-8a5a-257b1c0263ac}")
+            If Not addIn.Activated Then addIn.Activate()
+            Dim dirs As Object = addIn.Automation.FileOptions.ExternalRuleDirectories
+            If dirs IsNot Nothing Then
+                For Each d As String In dirs
+                    If String.IsNullOrWhiteSpace(d) Then Continue For
+                    candidatos.Add(System.IO.Path.Combine(d, nombreRegla))
+                    candidatos.Add(System.IO.Path.Combine(d, "ilogic", nombreRegla))
+                Next
+            End If
+        Catch
+        End Try
+        For Each ruta As String In candidatos
+            If System.IO.File.Exists(ruta) Then Return ruta
+        Next
+        Return ""
+    End Function
+
+    Private Sub ArmarListaJobs()
+        lblJob.Text = "Job en proceso (VSM)"
+        lblJob.Font = New Font("Segoe UI", 9, FontStyle.Bold)
+        lblJob.ForeColor = System.Drawing.Color.LightGray
+        lblJob.Location = New System.Drawing.Point(60, 82)
+        lblJob.Size = New Size(280, 18)
+        Me.Controls.Add(lblJob)
+
+        cboJobs = New ComboBox()
+        cboJobs.DropDownStyle = ComboBoxStyle.DropDownList
+        cboJobs.Font = New Font("Segoe UI", 9, FontStyle.Bold)
+        cboJobs.BackColor = System.Drawing.ColorTranslator.FromHtml("#2a3b4c")
+        cboJobs.ForeColor = System.Drawing.Color.White
+        cboJobs.FlatStyle = FlatStyle.Flat
+        cboJobs.Size = New Size(280, 28)
+        cboJobs.Location = New System.Drawing.Point(60, 104)
+        Me.Controls.Add(cboJobs)
+        AddHandler cboJobs.SelectedIndexChanged, AddressOf JobSeleccionado
+
+        btnRutaEspecial = New Button()
+        btnRutaEspecial.Text = "Ruta especial"
+        btnRutaEspecial.Font = New Font("Segoe UI", 8, FontStyle.Bold)
+        btnRutaEspecial.Size = New Size(280, 26)
+        btnRutaEspecial.Location = New System.Drawing.Point(60, 136)
+        btnRutaEspecial.FlatStyle = FlatStyle.Flat
+        btnRutaEspecial.FlatAppearance.BorderSize = 0
+        btnRutaEspecial.BackColor = System.Drawing.ColorTranslator.FromHtml("#3d5166")
+        btnRutaEspecial.ForeColor = System.Drawing.Color.White
+        btnRutaEspecial.Region = New Region(CreateRoundedRectanglePath(New Rectangle(0, 0, btnRutaEspecial.Width, btnRutaEspecial.Height), 12))
+        AddHandler btnRutaEspecial.Click, AddressOf ElegirRutaEspecial
+        Me.Controls.Add(btnRutaEspecial)
+
+        lblRuta.Font = New Font("Segoe UI", 7.5, FontStyle.Regular)
+        lblRuta.ForeColor = System.Drawing.Color.Gainsboro
+        lblRuta.Location = New System.Drawing.Point(60, 166)
+        lblRuta.Size = New Size(280, 56)
+        Me.Controls.Add(lblRuta)
+    End Sub
+
+    Private Sub JobSeleccionado(sender As Object, e As EventArgs)
+        If ignorarCambioJob Then Return
+        rutaEspecialRaiz = ""
+        rutaEspecialJpgs = ""
+        clienteEspecial = ""
+        productoEspecial = ""
+        If cboJobs.SelectedIndex < 0 OrElse cboJobs.SelectedIndex >= jobsVsm.Count Then
+            If String.IsNullOrWhiteSpace(lblRuta.Text) Then
+                lblRuta.Text = "Selecciona el job de destino."
+            End If
+            ActualizarCandado()
+            Return
+        End If
+        lblRuta.Text = jobsVsm(cboJobs.SelectedIndex)(5)
+        ActualizarCandado()
+    End Sub
+
+    Private Sub ElegirRutaEspecial(sender As Object, e As EventArgs)
+        Dim inicio As String = "Y:\ARGA METALS CORPORATE SYSTEM"
+        If Not String.IsNullOrWhiteSpace(rutaEspecialRaiz) AndAlso System.IO.Directory.Exists(rutaEspecialRaiz) Then
+            inicio = rutaEspecialRaiz
+        End If
+        Dim elegida As String = ElegirCarpeta("Carpeta del job, o DOSSIER FILES\JPGS. Ahí se arma el árbol de cotas.", inicio)
+        If elegida = "" Then Return
+        Dim raiz As String = ""
+        Dim jpgs As String = ""
+        Dim cliente As String = ""
+        Dim producto As String = ""
+        If Not PartirRutaEspecial(elegida, raiz, jpgs, cliente, producto) Then
+            MessageBox.Show("Esa carpeta no sirve como destino de las cotas.")
+            Return
+        End If
+        rutaEspecialRaiz = raiz
+        rutaEspecialJpgs = jpgs
+        clienteEspecial = cliente
+        productoEspecial = producto
+        ignorarCambioJob = True
+        cboJobs.SelectedIndex = -1
+        ignorarCambioJob = False
+        lblRuta.Text = jpgs
+        ActualizarCandado()
+    End Sub
+
+    Private Function ElegirCarpeta(titulo As String, inicio As String) As String
+        Try
+            Dim shell As Object = CreateObject("Shell.Application")
+            Dim carpeta As Object = shell.BrowseForFolder(0, titulo, 0, inicio)
+            If carpeta Is Nothing Then Return ""
+            Return CStr(carpeta.Self.Path)
+        Catch
+            Return ""
+        End Try
+    End Function
+
+    Private Function PartirRutaEspecial(elegida As String, ByRef raiz As String, ByRef jpgs As String, ByRef cliente As String, ByRef producto As String) As Boolean
+        raiz = ""
+        jpgs = ""
+        cliente = ""
+        producto = ""
+        Dim cruda As String = If(elegida, "").Trim().Replace("/", "\")
+        If cruda = "" Then Return False
+        Dim unc As Boolean = cruda.StartsWith("\\")
+        Dim partes As New System.Collections.Generic.List(Of String)
+        Dim trozo As String
+        For Each trozo In cruda.Split("\"c)
+            If trozo <> "" Then partes.Add(trozo)
+        Next
+        Do While partes.Count > 0
+            Dim ultimo As String = partes(partes.Count - 1).ToUpperInvariant()
+            If ultimo = "JPGS" OrElse ultimo = "DOSSIER FILES" Then
+                partes.RemoveAt(partes.Count - 1)
+            Else
+                Exit Do
+            End If
+        Loop
+        If partes.Count = 0 Then Return False
+        If unc Then
+            raiz = "\\" & String.Join("\", partes)
+        Else
+            raiz = String.Join("\", partes)
+        End If
+        jpgs = System.IO.Path.Combine(raiz, "DOSSIER FILES", "JPGS")
+        Dim marca As Integer = -1
+        Dim i As Integer
+        For i = 0 To partes.Count - 1
+            If partes(i).ToUpperInvariant() = "ARGA METALS CORPORATE SYSTEM" Then marca = i
+        Next
+        If marca >= 0 AndAlso partes.Count >= marca + 4 Then
+            producto = partes(marca + 1)
+            cliente = partes(marca + 2)
+        End If
+        Return True
+    End Function
+
+    Private Function HayDestino() As Boolean
+        If Not String.IsNullOrWhiteSpace(rutaEspecialJpgs) Then Return True
+        Return cboJobs IsNot Nothing AndAlso cboJobs.SelectedIndex >= 0 AndAlso cboJobs.SelectedIndex < jobsVsm.Count
+    End Function
+
+    Private Sub ActualizarCandado()
+        Dim ok As Boolean = HayDestino()
+        PintarProceso(btnPiezas, ok)
+        PintarProceso(btnSubensamble, ok)
+        PintarProceso(btnEnsambles, ok)
+    End Sub
+
+    Private Sub PintarProceso(btn As Button, activo As Boolean)
+        If btn Is Nothing Then Return
+        btn.Enabled = activo
+        If activo Then
+            btn.BackColor = System.Drawing.ColorTranslator.FromHtml("#007bff")
+        Else
+            btn.BackColor = System.Drawing.ColorTranslator.FromHtml("#5c6b7a")
+        End If
+    End Sub
+
+    Private Sub CargarJobsVsm()
+        jobsVsm.Clear()
+        cboJobs.Items.Clear()
+        Dim py As String = LeerValorConfig(BuscarConfigPlanos(), "PYTHON_EXE")
+        If String.IsNullOrWhiteSpace(py) Then py = "python"
+        Dim planosDir As String = LeerValorConfig(BuscarConfigPlanos(), "PLANOS_DIR")
+        If String.IsNullOrWhiteSpace(planosDir) Then
+            Try
+                planosDir = System.Environment.GetEnvironmentVariable("COTAS_ABIGAIL_DIR")
+            Catch
+                planosDir = ""
+            End Try
+        End If
+        If String.IsNullOrWhiteSpace(planosDir) Then
+            cboJobs.Items.Add("Sin carpeta Planos")
+            Return
+        End If
+        Dim script As String = System.IO.Path.Combine(planosDir, "listar_jobs_vsm.py")
+        If Not System.IO.File.Exists(script) Then
+            cboJobs.Items.Add("Falta listar_jobs_vsm.py")
+            Return
+        End If
+        Try
+            Dim psi As New ProcessStartInfo()
+            psi.FileName = py
+            psi.Arguments = """" & script & """"
+            psi.WorkingDirectory = planosDir
+            psi.UseShellExecute = False
+            psi.RedirectStandardOutput = True
+            psi.RedirectStandardError = True
+            psi.CreateNoWindow = True
+            psi.StandardOutputEncoding = System.Text.Encoding.UTF8
+            psi.EnvironmentVariables("PYTHONIOENCODING") = "utf-8"
+            Dim proc As Process = Process.Start(psi)
+            Dim texto As String = proc.StandardOutput.ReadToEnd()
+            proc.WaitForExit(20000)
+            For Each linea As String In texto.Split({vbCrLf, vbLf}, StringSplitOptions.RemoveEmptyEntries)
+                Dim partes As String() = linea.Split(ChrW(9))
+                If partes.Length < 6 Then Continue For
+                jobsVsm.Add(partes)
+                cboJobs.Items.Add(partes(0) & "  ·  " & partes(1) & "  ·  " & partes(3))
+            Next
+        Catch ex As Exception
+            cboJobs.Items.Add("VSM no disponible")
+        End Try
+        If cboJobs.Items.Count = 0 Then
+            cboJobs.Items.Add("Sin jobs en proceso")
+            cboJobs.SelectedIndex = -1
+            lblRuta.Text = "Selecciona el job de destino."
+            ActualizarCandado()
+            Return
+        End If
+        SeleccionarJobPorEnsamble()
+    End Sub
+
+    Private Sub SeleccionarJobPorEnsamble()
+        cboJobs.SelectedIndex = -1
+        Dim token As String = NormalizarJob(NombreEnsambleActivo())
+        If token = "" Then
+            lblRuta.Text = "Abre el ensamble del job. Sin coincidencia, elige el destino."
+            ActualizarCandado()
+            Return
+        End If
+        Dim exactos As New System.Collections.Generic.List(Of Integer)
+        Dim i As Integer
+        For i = 0 To jobsVsm.Count - 1
+            If NormalizarJob(jobsVsm(i)(0)) = token Then exactos.Add(i)
+        Next
+        If exactos.Count = 1 Then
+            cboJobs.SelectedIndex = exactos(0)
+            Return
+        End If
+        If exactos.Count > 1 Then
+            lblRuta.Text = "Varios jobs coinciden con el ensamble. Elige el destino."
+            ActualizarCandado()
+            Return
+        End If
+        Dim nombre As String = NombreEnsambleActivo()
+        Dim mejor As Integer = 0
+        Dim referencias As New System.Collections.Generic.List(Of Integer)
+        For i = 0 To jobsVsm.Count - 1
+            If Not JobEstaEnEnsamble(jobsVsm(i)(0), nombre) Then Continue For
+            Dim nTok As Integer = TokensDe(jobsVsm(i)(0)).Count
+            If nTok > mejor Then
+                mejor = nTok
+                referencias.Clear()
+                referencias.Add(i)
+            ElseIf nTok = mejor Then
+                referencias.Add(i)
+            End If
+        Next
+        If referencias.Count = 1 Then
+            cboJobs.SelectedIndex = referencias(0)
+            Return
+        End If
+        If referencias.Count > 1 Then
+            lblRuta.Text = "Varios jobs coinciden con el ensamble. Elige el destino."
+            ActualizarCandado()
+            Return
+        End If
+        lblRuta.Text = "El ensamble no coincide con un job del VSM. Elige el destino."
+        ActualizarCandado()
+    End Sub
+
+    Private Function JobEstaEnEnsamble(job As String, ensamble As String) As Boolean
+        Dim delJob As System.Collections.Generic.List(Of String) = TokensDe(job)
+        Dim delEnsamble As System.Collections.Generic.List(Of String) = TokensDe(ensamble)
+        If delJob.Count = 0 OrElse delEnsamble.Count < delJob.Count Then Return False
+        Dim inicio As Integer
+        For inicio = 0 To delEnsamble.Count - delJob.Count
+            Dim coincide As Boolean = True
+            Dim k As Integer
+            For k = 0 To delJob.Count - 1
+                If delEnsamble(inicio + k) <> delJob(k) Then
+                    coincide = False
+                    Exit For
+                End If
+            Next
+            If coincide Then Return True
+        Next
+        Return False
+    End Function
+
+    Private Function TokensDe(texto As String) As System.Collections.Generic.List(Of String)
+        Dim lista As New System.Collections.Generic.List(Of String)
+        Dim actual As New System.Text.StringBuilder()
+        Dim ch As Char
+        For Each ch In If(texto, "").ToUpperInvariant()
+            If Char.IsLetterOrDigit(ch) Then
+                actual.Append(ch)
+            ElseIf actual.Length > 0 Then
+                lista.Add(actual.ToString())
+                actual.Clear()
+            End If
+        Next
+        If actual.Length > 0 Then lista.Add(actual.ToString())
+        Return lista
+    End Function
+
+    Private Function NombreEnsambleActivo() As String
+        Const kEnsamble As Integer = 12291
+        Try
+            Dim activo As Document = invApp.ActiveDocument
+            If activo IsNot Nothing AndAlso activo.DocumentType = kEnsamble Then
+                Return TokenDocumento(activo)
+            End If
+        Catch
+        End Try
+        Dim hallados As New System.Collections.Generic.List(Of String)
+        Try
+            Dim i As Integer
+            For i = 1 To invApp.Documents.Count
+                Dim doc As Document = invApp.Documents.Item(i)
+                If doc.DocumentType <> kEnsamble Then Continue For
+                Dim token As String = TokenDocumento(doc)
+                If token <> "" AndAlso Not hallados.Contains(token) Then hallados.Add(token)
+            Next
+        Catch
+        End Try
+        If hallados.Count = 1 Then Return hallados(0)
+        Return ""
+    End Function
+
+    Private Function TokenDocumento(doc As Document) As String
+        Dim nombre As String = ""
+        Try
+            nombre = System.IO.Path.GetFileNameWithoutExtension(doc.FullFileName)
+        Catch
+            nombre = ""
+        End Try
+        If String.IsNullOrWhiteSpace(nombre) Then
+            Try
+                nombre = doc.DisplayName
+            Catch
+                nombre = ""
+            End Try
+        End If
+        Return nombre
+    End Function
+
+    Private Function NormalizarJob(texto As String) As String
+        Dim s As String = If(texto, "").ToUpperInvariant()
+        Dim sb As New System.Text.StringBuilder()
+        Dim ch As Char
+        For Each ch In s
+            If Char.IsLetterOrDigit(ch) Then sb.Append(ch)
+        Next
+        Return sb.ToString()
+    End Function
+
+    Private Function AplicarJobVsm() As Boolean
+        System.Environment.SetEnvironmentVariable("COTAS_DOSSIER_PICKER", "0")
+        System.Environment.SetEnvironmentVariable("COTAS_DOSSIER", "1")
+        If Not String.IsNullOrWhiteSpace(rutaEspecialJpgs) Then
+            System.Environment.SetEnvironmentVariable("COTAS_VSM_JOB_ROOT", rutaEspecialRaiz)
+            System.Environment.SetEnvironmentVariable("COTAS_DOSSIER_CLIENTE", clienteEspecial)
+            System.Environment.SetEnvironmentVariable("COTAS_DOSSIER_PRODUCTO", productoEspecial)
+            Return ArmarArbolJob(rutaEspecialJpgs)
+        End If
+        If cboJobs Is Nothing OrElse cboJobs.SelectedIndex < 0 OrElse cboJobs.SelectedIndex >= jobsVsm.Count Then
+            MessageBox.Show("Selecciona el job del VSM o una ruta especial.")
+            Return False
+        End If
+        Dim partes As String() = jobsVsm(cboJobs.SelectedIndex)
+        Dim jobRoot As String = partes(4)
+        System.Environment.SetEnvironmentVariable("COTAS_VSM_JOB_ROOT", jobRoot)
+        System.Environment.SetEnvironmentVariable("COTAS_DOSSIER_CLIENTE", partes(1))
+        System.Environment.SetEnvironmentVariable("COTAS_DOSSIER_PRODUCTO", partes(2))
+        GuardarUltimoJob(partes(0))
+        Return ArmarArbolJob(partes(5))
+    End Function
+
+    Private Function ArmarArbolJob(dossierJpgs As String) As Boolean
+        If String.IsNullOrWhiteSpace(dossierJpgs) Then
+            MessageBox.Show("El job no tiene carpeta DOSSIER FILES\JPGS.")
+            Return False
+        End If
+        Dim py As String = LeerValorConfig(BuscarConfigPlanos(), "PYTHON_EXE")
+        If String.IsNullOrWhiteSpace(py) Then py = "python"
+        Dim planosDir As String = LeerValorConfig(BuscarConfigPlanos(), "PLANOS_DIR")
+        If String.IsNullOrWhiteSpace(planosDir) Then
+            Try
+                planosDir = System.Environment.GetEnvironmentVariable("COTAS_ABIGAIL_DIR")
+            Catch
+                planosDir = ""
+            End Try
+        End If
+        Dim script As String = ""
+        If Not String.IsNullOrWhiteSpace(planosDir) Then
+            script = System.IO.Path.Combine(planosDir, "armar_arbol_dossier.py")
+        End If
+        If script = "" OrElse Not System.IO.File.Exists(script) Then
+            MessageBox.Show("No se encontro armar_arbol_dossier.py para crear las carpetas del job.")
+            Return False
+        End If
+        Try
+            Dim psi As New ProcessStartInfo()
+            psi.FileName = py
+            psi.Arguments = """" & script & """ """ & dossierJpgs & """"
+            psi.WorkingDirectory = planosDir
+            psi.UseShellExecute = False
+            psi.RedirectStandardOutput = True
+            psi.RedirectStandardError = True
+            psi.CreateNoWindow = True
+            Dim proc As Process = Process.Start(psi)
+            Dim errTxt As String = proc.StandardError.ReadToEnd()
+            proc.WaitForExit(60000)
+            If proc.ExitCode <> 0 Then
+                MessageBox.Show("No se pudo armar el arbol de carpetas." & vbCrLf & errTxt)
+                Return False
+            End If
+        Catch ex As Exception
+            MessageBox.Show("No se pudo armar el arbol de carpetas." & vbCrLf & ex.Message)
+            Return False
+        End Try
+        Return True
+    End Function
+
+    Private Function RutaUltimoJob() As String
+        Dim cfg As String = BuscarConfigPlanos()
+        If cfg = "" Then Return ""
+        Return System.IO.Path.Combine(System.IO.Path.GetDirectoryName(cfg), ".ultimo_job_vsm.txt")
+    End Function
+
+    Private Function LeerUltimoJob() As String
+        Try
+            Dim ruta As String = RutaUltimoJob()
+            If ruta <> "" AndAlso System.IO.File.Exists(ruta) Then
+                Return System.IO.File.ReadAllText(ruta).Trim()
+            End If
+        Catch
+        End Try
+        Return ""
+    End Function
+
+    Private Sub GuardarUltimoJob(job As String)
+        Try
+            Dim ruta As String = RutaUltimoJob()
+            If ruta = "" Then Return
+            System.IO.File.WriteAllText(ruta, job)
+        Catch
+        End Try
+    End Sub
+
+    Private Function HayEnsambleAbierto() As Boolean
+        Const kEnsamble As Integer = 12291
+        Try
+            Dim i As Integer
+            For i = 1 To invApp.Documents.Count
+                Dim doc As Document = invApp.Documents.Item(i)
+                If doc.DocumentType = kEnsamble Then Return True
+            Next
+        Catch
+        End Try
+        Return False
+    End Function
+
+    Private Function AsegurarMachote() As Document
+        Const kPlano As Integer = 12292
+        Dim ruta As String = ResolverRutaMachote()
+        Dim ya As Document = BuscarPlanoAbierto(ruta, kPlano)
+        If ya IsNot Nothing Then
+            Try
+                ya.Activate()
+            Catch
+            End Try
+            Return ya
+        End If
+
+        If ruta = "" OrElse Not System.IO.File.Exists(ruta) Then
+            MessageBox.Show(
+                "No encontre el plano machote." & vbCrLf &
+                "Pon la ruta en ilogic\config_planos.txt:" & vbCrLf &
+                "  MACHOTE=ruta\al\MACHOTE PLANOS.dwg" & vbCrLf &
+                "o deja el archivo en Planos\MACHOTE PLANOS.dwg.")
+            Return Nothing
+        End If
+
+        Try
+            Dim abierto As Document = invApp.Documents.Open(ruta, True)
+            abierto.Activate()
+            Return abierto
+        Catch ex As Exception
+            MessageBox.Show("No se pudo abrir el machote:" & vbCrLf & ruta & vbCrLf & ex.Message)
+            Return Nothing
+        End Try
+    End Function
+
+    Private Function BuscarPlanoAbierto(rutaMachote As String, kPlano As Integer) As Document
+        Dim objetivo As String = NormalizarRuta(rutaMachote)
+        Dim nombreObjetivo As String = ""
+        If objetivo <> "" Then
+            nombreObjetivo = System.IO.Path.GetFileName(objetivo)
+        End If
+        Try
+            Dim i As Integer
+            For i = 1 To invApp.Documents.Count
+                Dim doc As Document = invApp.Documents.Item(i)
+                If doc.DocumentType <> kPlano Then Continue For
+                Dim full As String = RutaDocumento(doc)
+                If full = "" Then Continue For
+                If objetivo <> "" AndAlso NormalizarRuta(full) = objetivo Then Return doc
+                If nombreObjetivo <> "" AndAlso
+                   String.Equals(System.IO.Path.GetFileName(full), nombreObjetivo, StringComparison.OrdinalIgnoreCase) Then
+                    Return doc
+                End If
+            Next
+        Catch
+        End Try
+        Return Nothing
+    End Function
+
+    Private Function RutaDocumento(doc As Document) As String
+        Try
+            Dim full As String = doc.FullFileName
+            If Not String.IsNullOrWhiteSpace(full) Then Return full
+        Catch
+        End Try
+        Try
+            Return doc.FullDocumentName
+        Catch
+            Return ""
+        End Try
+    End Function
+
+    Private Function NormalizarRuta(ruta As String) As String
+        Try
+            If String.IsNullOrWhiteSpace(ruta) Then Return ""
+            Return System.IO.Path.GetFullPath(ruta).Trim().ToUpperInvariant()
+        Catch
+            Return ""
+        End Try
+    End Function
+
+    Private Function ResolverRutaMachote() As String
+        Dim cfg As String = BuscarConfigPlanos()
+        Dim explicita As String = LeerValorConfig(cfg, "MACHOTE")
+        If explicita <> "" AndAlso System.IO.File.Exists(explicita) Then Return explicita
+
+        Dim planosDir As String = LeerValorConfig(cfg, "PLANOS_DIR")
+        If planosDir = "" Then
+            Try
+                planosDir = System.Environment.GetEnvironmentVariable("COTAS_ABIGAIL_DIR")
+            Catch
+                planosDir = ""
+            End Try
+        End If
+        If Not String.IsNullOrWhiteSpace(planosDir) Then
+            Dim candidata As String = System.IO.Path.Combine(planosDir, "MACHOTE PLANOS.dwg")
+            If System.IO.File.Exists(candidata) Then Return candidata
+        End If
+        Return explicita
+    End Function
+
+    Private Function BuscarConfigPlanos() As String
+        Dim candidatos As New System.Collections.Generic.List(Of String)
+        Try
+            Dim env As String = System.Environment.GetEnvironmentVariable("COTAS_ABIGAIL_DIR")
+            If Not String.IsNullOrWhiteSpace(env) Then
+                candidatos.Add(System.IO.Path.Combine(env, "ilogic", "config_planos.txt"))
+            End If
+        Catch
+        End Try
+        Try
+            Dim addIn As ApplicationAddIn =
+                invApp.ApplicationAddIns.ItemById("{3bdd8d79-2179-4b11-8a5a-257b1c0263ac}")
+            If Not addIn.Activated Then addIn.Activate()
+            Dim dirs As Object = addIn.Automation.FileOptions.ExternalRuleDirectories
+            If dirs IsNot Nothing Then
+                For Each d As String In dirs
+                    If String.IsNullOrWhiteSpace(d) Then Continue For
+                    candidatos.Add(System.IO.Path.Combine(d, "config_planos.txt"))
+                    Dim padre As String = System.IO.Path.GetDirectoryName(d)
+                    If Not String.IsNullOrWhiteSpace(padre) Then
+                        candidatos.Add(System.IO.Path.Combine(padre, "ilogic", "config_planos.txt"))
+                    End If
+                Next
+            End If
+        Catch
+        End Try
+        For Each ruta As String In candidatos
+            If System.IO.File.Exists(ruta) Then Return ruta
+        Next
+        Return ""
+    End Function
+
+    Private Function LeerValorConfig(cfgPath As String, clave As String) As String
+        Try
+            If String.IsNullOrWhiteSpace(cfgPath) OrElse Not System.IO.File.Exists(cfgPath) Then Return ""
+            Dim prefijo As String = clave & "="
+            For Each linea As String In System.IO.File.ReadAllLines(cfgPath)
+                If linea.StartsWith(prefijo, StringComparison.OrdinalIgnoreCase) Then
+                    Return linea.Substring(prefijo.Length).Trim()
+                End If
+            Next
+        Catch
+        End Try
+        Return ""
+    End Function
+
+    Private Function GetiLogicAutomation(app As Inventor.Application) As Object
+        Try
+            Dim addIn As ApplicationAddIn =
+                app.ApplicationAddIns.ItemById("{3bdd8d79-2179-4b11-8a5a-257b1c0263ac}")
+            If Not addIn.Activated Then addIn.Activate()
+            Return addIn.Automation
+        Catch ex As Exception
+            MessageBox.Show("Error al obtener iLogic: " & ex.Message)
+            Return Nothing
+        End Try
+    End Function
+
+    Private Function CreateRoundedRectanglePath(rect As Rectangle, radius As Integer) As GraphicsPath
+        Dim path As New GraphicsPath()
+        path.StartFigure()
+        path.AddArc(rect.X, rect.Y, radius, radius, 180, 90)
+        path.AddArc(rect.Right - radius, rect.Y, radius, radius, 270, 90)
+        path.AddArc(rect.Right - radius, rect.Bottom - radius, radius, radius, 0, 90)
+        path.AddArc(rect.X, rect.Bottom - radius, radius, radius, 90, 90)
+        path.CloseFigure()
+        Return path
+    End Function
+
+    Private Sub DragMouseDown(sender As Object, e As MouseEventArgs)
+        If e.Button = MouseButtons.Left Then
+            isDragging = True
+            dragCursor = Cursor.Position
+            dragForm = Me.Location
+        End If
+    End Sub
+
+    Private Sub DragMouseMove(sender As Object, e As MouseEventArgs)
+        If isDragging Then
+            Me.Location = New DrawingPoint(
+                dragForm.X + (Cursor.Position.X - dragCursor.X),
+                dragForm.Y + (Cursor.Position.Y - dragCursor.Y))
+        End If
+    End Sub
+
+    Private Sub DragMouseUp(sender As Object, e As MouseEventArgs)
+        isDragging = False
+    End Sub
+End Class
+
+
+Public Class SubProcessForm
+    Inherits Form
+
+    Private btnIniciar As New Button()
+    Private btnBack As New Button()
+    Private lblTitulo As New Label()
+    Private lblDescripcion As New Label()
+    Private procesoNombre As String
+    Private iniciarAccion As Action(Of String)
+
+    Private isDragging As Boolean = False
+    Private dragCursor As DrawingPoint
+    Private dragForm As DrawingPoint
+
+    Public Sub New(titulo As String, descripcion As String, accionIniciar As Action(Of String))
+        Me.FormBorderStyle = FormBorderStyle.None
+        Me.StartPosition = FormStartPosition.CenterScreen
+        Me.ClientSize = New Size(420, 400)
+        Me.BackColor = System.Drawing.ColorTranslator.FromHtml("#2a3b4c")
+        Me.Opacity = 0.85
+        Me.Region = New Region(CreateRoundedRectanglePath(New Rectangle(0, 0, Me.Width, Me.Height), 25))
+        Me.DoubleBuffered = True
+        Me.TopMost = True
+
+        AddHandler Me.MouseDown, AddressOf DragMouseDown
+        AddHandler Me.MouseMove, AddressOf DragMouseMove
+        AddHandler Me.MouseUp, AddressOf DragMouseUp
+
+        lblTitulo.Text = titulo
+        lblTitulo.Font = New Font("Segoe UI", 14, FontStyle.Bold)
+        lblTitulo.ForeColor = System.Drawing.Color.White
+        lblTitulo.Location = New System.Drawing.Point(30, 20)
+        lblTitulo.Size = New Size(360, 30)
+
+        lblDescripcion.Text = descripcion
+        lblDescripcion.Font = New Font("Segoe UI", 10)
+        lblDescripcion.ForeColor = System.Drawing.Color.LightGray
+        lblDescripcion.Location = New System.Drawing.Point(30, 60)
+        lblDescripcion.Size = New Size(360, 200)
+
+        btnBack.Text = "Regresar a Home"
+        btnBack.Font = New Font("Segoe UI", 10, FontStyle.Bold)
+        btnBack.Size = New Size(150, 40)
+        btnBack.Location = New System.Drawing.Point(50, 300)
+        btnBack.BackColor = System.Drawing.ColorTranslator.FromHtml("#444")
+        btnBack.ForeColor = System.Drawing.Color.White
+        btnBack.FlatStyle = FlatStyle.Flat
+        btnBack.FlatAppearance.BorderSize = 0
+        btnBack.Region = New Region(CreateRoundedRectanglePath(New Rectangle(0, 0, btnBack.Width, btnBack.Height), 15))
+        AddHandler btnBack.Click, Sub() Me.Close()
+
+        btnIniciar.Text = "Iniciar"
+        btnIniciar.Font = New Font("Segoe UI", 10, FontStyle.Bold)
+        btnIniciar.Size = New Size(150, 40)
+        btnIniciar.Location = New System.Drawing.Point(220, 300)
+        btnIniciar.BackColor = System.Drawing.ColorTranslator.FromHtml("#007bff")
+        btnIniciar.ForeColor = System.Drawing.Color.White
+        btnIniciar.FlatStyle = FlatStyle.Flat
+        btnIniciar.FlatAppearance.BorderSize = 0
+        btnIniciar.Region = New Region(CreateRoundedRectanglePath(New Rectangle(0, 0, btnIniciar.Width, btnIniciar.Height), 15))
+        AddHandler btnIniciar.Click, AddressOf Ejecutar
+
+        Me.Controls.AddRange({lblTitulo, lblDescripcion, btnBack, btnIniciar})
+        procesoNombre = titulo
+        iniciarAccion = accionIniciar
+    End Sub
+
+    Private Sub Ejecutar(sender As Object, e As EventArgs)
+        Me.Close()
+        iniciarAccion.Invoke(procesoNombre)
+    End Sub
+
+    Private Function CreateRoundedRectanglePath(rect As Rectangle, radius As Integer) As GraphicsPath
+        Dim path As New GraphicsPath()
+        path.StartFigure()
+        path.AddArc(rect.X, rect.Y, radius, radius, 180, 90)
+        path.AddArc(rect.Right - radius, rect.Y, radius, radius, 270, 90)
+        path.AddArc(rect.Right - radius, rect.Bottom - radius, radius, radius, 0, 90)
+        path.AddArc(rect.X, rect.Bottom - radius, radius, radius, 90, 90)
+        path.CloseFigure()
+        Return path
+    End Function
+
+    Private Sub DragMouseDown(sender As Object, e As MouseEventArgs)
+        If e.Button = MouseButtons.Left Then
+            isDragging = True
+            dragCursor = Cursor.Position
+            dragForm = Me.Location
+        End If
+    End Sub
+
+    Private Sub DragMouseMove(sender As Object, e As MouseEventArgs)
+        If isDragging Then
+            Me.Location = New DrawingPoint(
+                dragForm.X + (Cursor.Position.X - dragCursor.X),
+                dragForm.Y + (Cursor.Position.Y - dragCursor.Y))
+        End If
+    End Sub
+
+    Private Sub DragMouseUp(sender As Object, e As MouseEventArgs)
+        isDragging = False
+    End Sub
+End Class
+
+
+Sub Main()
+    Dim formulario As New CotasProcessForm(ThisApplication, ThisDoc.Document)
+    formulario.ShowDialog()
+End Sub
